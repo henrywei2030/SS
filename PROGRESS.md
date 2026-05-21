@@ -5,7 +5,29 @@
 
 ---
 
-## 2026-05-21（周四，公司 Mac Mini）— W1 + W2 + UI 集中交付
+## 2026-05-21（周四，公司 Mac Mini · 晚 19:44 收工）— 协作工作流跑通
+
+**完成**
+- ✅ **TODO.md / PROGRESS.md 三件套到齐**：从 Downloads 占位版重写为 160 + 74 行实际版，反映完整 W1-W2 工作
+- ✅ **Project 知识库上传包就绪**：4 份文件（CLAUDE.md / TODO.md / PROGRESS.md / README.md）已整理到 `/Users/jk/Downloads/SS-project-knowledge/`，附 `_README_先看我.md` 上传说明 + 换设备 checklist
+- ✅ **GitHub 同步完成 5 次 commit**：first → README → CLAUDE.md → W2 大 commit → TODO/PROGRESS 文档体系
+- ✅ **CLAUDE.md 协作协议首次完整跑通"收工"流程**（含 git diff review + 中文 commit message + push 后提醒）
+
+**进行中**
+- 🚧 等待用户在 claude.ai → SS Project 知识库重传 4 份文件（生效双端协同）
+
+**问题 / 待决策**
+- ❓ Mac Studio（家）尚未验证 `git pull` + `pnpm dev` 完整跑通
+- ❓ 是否要把 Downloads 上传包做成脚本，下次"收工"时自动重新生成？
+
+**下次接着做**
+- 📌 **跨设备验证**：在 Mac Studio `git pull` 后能否正常 `corepack pnpm --filter @ss/web dev` 起来
+- 📌 **W3 启动**：搭建 Storyboard Studio 三栏布局 + AI 分镜生成
+- 📌 **填 API Key**：进 `/admin/providers` 把 Seedance / Claude 真实 key 加密入库
+
+---
+
+## 2026-05-21（周四，公司 Mac Mini · 下午）— W1 + W2 + UI 集中交付
 
 **完成**
 - ✅ **W1 基础设施全部 10 子任务交付**（monorepo / Prisma 24 表 / 三大 Adapter / Cost Ledger / Docker / 核心算法 17 测试 / API Key 加密 / i18n / 品牌定名 / DB Explorer 规划）

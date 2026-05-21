@@ -14,9 +14,10 @@
   - 分镜发布 → 触发 `EVENTS.STORYBOARD_PUBLISHED` 给 AIGC
   - Y.js + Hocuspocus 实时协作试点（仅分镜表）
 
-- [ ] **跨设备协作工作流验证**
-  - 已建：CLAUDE.md / TODO.md / PROGRESS.md 三件套
-  - 待验证：Mac Studio 端 `git pull` + 登录 claude.ai 同一 Project + 说"开工"能否顺畅接续
+- [ ] **跨设备协作工作流验证**（Mac Studio 端）
+  - ✅ 公司 Mac Mini 端三件套就绪 + 跑通"收工"流程
+  - ✅ Project 知识库上传包已生成在 `~/Downloads/SS-project-knowledge/`
+  - 待：在家 Mac Studio `git pull` + 登录同一 Project + 说"开工"验证接续
 
 ---
 
