@@ -4,3 +4,4 @@
 export * from '../storyboard/index.js';
 export * from '../generation/index.js';
 export * from '../cost/index.js';
+export * from '../script/index.js';

@@ -77,15 +77,47 @@ pnpm db:seed          # 灌入默认风格 / Provider / Prompt 模板 / admin
 ## 二、日常开发
 
 ```bash
-# 启动开发（web + workers，按需扩展）
-pnpm dev
+# 启动开发服务器（Web 应用）
+corepack pnpm --filter @ss/web dev
+# → 浏览器打开 http://localhost:3000 自动重定向到 /zh-CN/login
+# → 默认管理员: admin@starsalign.local（首次登录需要先在 db studio 改密码）
 
 # 跑测试
-pnpm test
+corepack pnpm test
 
-# Prisma Studio（可视化看数据）
-pnpm db:studio
+# Prisma Studio（仅 dev 个人调试用，W2 后台 /admin/db-explorer 完整版）
+corepack pnpm db:studio
 ```
+
+### 首次登录
+
+由于 seed 中 admin 密码哈希是占位符，首次登录需要：
+
+```bash
+# 在 Prisma Studio 里把 admin 用户的 passwordHash 改成 bcrypt 哈希
+# 或直接重置：
+corepack pnpm db:reset
+# 然后在登录页用 Signup 流程注册自己作为第一个用户
+```
+
+或临时跑 Node 设置：
+```bash
+corepack pnpm tsx -e "
+import bcrypt from 'bcryptjs';
+import { prisma } from '@ss/db';
+const hash = await bcrypt.hash('admin123', 10);
+await prisma.user.update({ where: { email: 'admin@starsalign.local' }, data: { passwordHash: hash }});
+console.log('✅ 密码已设为 admin123');
+process.exit(0);
+"
+```
+
+### 进入后台填 Provider API Key（最重要）
+
+1. 浏览器登录后访问：<http://localhost:3000/zh-CN/admin/providers>
+2. 找到 **Seedance 2.0** / **Claude Sonnet 4.5** 等，点 "设置"
+3. 粘贴你的 API Key → 保存（自动 AES-256-GCM 加密入库）
+4. 之后业务代码（剧本分析 / 视频生成）会自动用数据库里的 Key
 
 ---
 

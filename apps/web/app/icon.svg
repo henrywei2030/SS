@@ -1,0 +1,30 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ring" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5BAEF0" stop-opacity="0.4"/>
+      <stop offset="35%" stop-color="#7BC4F6" stop-opacity="0.9"/>
+      <stop offset="65%" stop-color="#E0EDF7" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#5BAEF0" stop-opacity="0.4"/>
+    </linearGradient>
+    <radialGradient id="star" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="1"/>
+      <stop offset="40%" stop-color="#E0EDF7" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#7BC4F6" stop-opacity="0.3"/>
+    </radialGradient>
+  </defs>
+  <rect width="64" height="64" rx="12" fill="#0F1B2D"/>
+  <g transform="rotate(-22 32 32)" stroke="url(#ring)" fill="none" stroke-linecap="round">
+    <ellipse cx="32" cy="32" rx="26" ry="7.5" stroke-width="0.7"/>
+    <ellipse cx="32" cy="32" rx="23" ry="6.5" stroke-width="0.8"/>
+    <ellipse cx="32" cy="32" rx="20" ry="5.5" stroke-width="0.9" opacity="0.85"/>
+    <ellipse cx="32" cy="32" rx="17" ry="4.5" stroke-width="0.7" opacity="0.6"/>
+  </g>
+  <g transform="translate(46 18)">
+    <path d="M 0 -7 L 1.4 -1.4 L 7 0 L 1.4 1.4 L 0 7 L -1.4 1.4 L -7 0 L -1.4 -1.4 Z" fill="url(#star)"/>
+    <circle cx="0" cy="0" r="1.5" fill="#FFFFFF"/>
+  </g>
+  <g transform="translate(20 44)">
+    <path d="M 0 -4 L 0.8 -0.8 L 4 0 L 0.8 0.8 L 0 4 L -0.8 0.8 L -4 0 L -0.8 -0.8 Z" fill="url(#star)"/>
+    <circle cx="0" cy="0" r="0.7" fill="#FFFFFF"/>
+  </g>
+</svg>

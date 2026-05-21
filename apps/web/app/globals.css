@@ -1,0 +1,327 @@
+@import 'tailwindcss';
+
+/* =============================================================================
+ * StarsAlign Studio · 星垣工坊 设计系统 v4 · Cursor + 双主题
+ *
+ * 新特性：
+ *   - 明亮 + 深夜双模式，通过 :root.dark 切换
+ *   - 深夜背景调亮：#121212 → #1F1F1F（Cursor 同款，柔和不刺眼）
+ *   - 后台字号系统：默认 13px，admin 区域 14px
+ *   - 所有 Logo / wordmark 在两种模式下都适配
+ * ============================================================================= */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* ============================================================================
+ * @theme — Tailwind v4 设计 token（字体 / 圆角 / accent / 模块色）
+ * 颜色 token 走 var(--*) 以支持运行时切换
+ * ============================================================================ */
+@theme {
+  /* 注意：业务代码用 bg-[hsl(var(--color-background))] 已自带 hsl()，
+   * 所以 token 内不再嵌套 hsl()，只存 "0 0% 12%" 这样的元组字符串。
+   * 运行时切换主题：覆盖 :root.dark 下的 --bg/--fg 等底层变量即可。
+   */
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-fg);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-fg);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-fg);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-fg);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-fg);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-fg);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-fg);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-mod-director: 217 91% 60%;
+  --color-mod-art: 280 65% 60%;
+  --color-mod-aigc: 180 60% 50%;
+  --color-mod-edit: 142 64% 47%;
+  --color-mod-library: 38 80% 55%;
+  --color-mod-analytics: 0 65% 55%;
+
+  --font-sans: 'Inter', 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+
+  --radius-sm: 0.25rem;
+  --radius: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+}
+
+/* ============================================================================
+ * 明亮模式（默认 :root —— 当 .dark 类未应用时）
+ * 参考 Cursor 同款柔和白底
+ * ============================================================================ */
+:root {
+  --bg: 0 0% 100%;                /* #FFFFFF */
+  --fg: 0 0% 10%;                  /* #1A1A1A 主文字 */
+  --card: 0 0% 99%;               /* #FCFCFC 卡片 */
+  --card-fg: 0 0% 10%;
+  --popover: 0 0% 100%;
+  --popover-fg: 0 0% 10%;
+
+  --primary: 0 0% 10%;             /* 主按钮：深色底 */
+  --primary-fg: 0 0% 100%;         /* 白字 */
+  --secondary: 0 0% 96%;           /* #F5F5F5 hover bg */
+  --secondary-fg: 0 0% 10%;
+  --muted: 0 0% 97%;
+  --muted-fg: 0 0% 45%;            /* #737373 次文字 */
+
+  --accent: 217 91% 55%;           /* 蓝 accent 略深以保持对比度 */
+  --accent-fg: 0 0% 100%;
+  --destructive: 0 72% 47%;
+  --destructive-fg: 0 0% 100%;
+  --success: 142 64% 39%;
+  --warning: 38 92% 47%;
+  --info: 217 91% 55%;
+
+  --border: 0 0% 90%;              /* #E5E5E5 浅边 */
+  --input: 0 0% 100%;
+  --ring: 0 0% 60%;
+
+  /* Logo 在明亮模式：使用更深的蓝、避免被白底吃掉 */
+  --logo-blue-1: 217 91% 50%;
+  --logo-blue-2: 217 91% 60%;
+  --logo-blue-3: 217 91% 75%;
+  --logo-star: 0 0% 100%;
+  --logo-bg: 220 40% 18%;          /* favicon 内圈深底，logo 浮出 */
+
+  color-scheme: light;
+}
+
+/* ============================================================================
+ * 深夜模式（:root.dark）
+ * Cursor 同款柔和暗灰 #1F1F1F（不是纯黑）
+ * ============================================================================ */
+:root.dark {
+  --bg: 0 0% 12%;                  /* #1F1F1F 主背景（柔和） */
+  --fg: 0 0% 88%;                  /* #E0E0E0 主文字 */
+  --card: 0 0% 15%;                /* #262626 卡片，略亮于 bg */
+  --card-fg: 0 0% 88%;
+  --popover: 0 0% 17%;             /* #2B2B2B 浮层最亮 */
+  --popover-fg: 0 0% 88%;
+
+  --primary: 0 0% 88%;             /* 主按钮：白底 */
+  --primary-fg: 0 0% 12%;          /* 暗字 */
+  --secondary: 0 0% 18%;           /* #2E2E2E hover bg */
+  --secondary-fg: 0 0% 88%;
+  --muted: 0 0% 16%;
+  --muted-fg: 0 0% 62%;            /* #9E9E9E */
+
+  --accent: 217 91% 62%;
+  --accent-fg: 0 0% 100%;
+  --destructive: 0 72% 51%;
+  --destructive-fg: 0 0% 98%;
+  --success: 142 64% 47%;
+  --warning: 38 92% 55%;
+  --info: 217 91% 62%;
+
+  --border: 0 0% 23%;              /* #3B3B3B 暗边 */
+  --input: 0 0% 16%;
+  --ring: 0 0% 40%;
+
+  /* Logo 在深夜模式：使用更亮的冷蓝 */
+  --logo-blue-1: 210 80% 65%;
+  --logo-blue-2: 200 90% 75%;
+  --logo-blue-3: 200 95% 92%;
+  --logo-star: 0 0% 100%;
+  --logo-bg: 220 35% 12%;
+
+  color-scheme: dark;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+html,
+body {
+  background-color: hsl(var(--bg));
+  color: hsl(var(--fg));
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.01em;
+  transition: background-color 200ms ease, color 200ms ease;
+}
+
+/* ============================================================================
+ * 后台管理 — 字号适度放大（提升可读性）
+ * 在 admin layout 根加 .admin-pane 类即生效
+ * ============================================================================ */
+.admin-pane {
+  font-size: 14px;
+}
+.admin-pane h1 { font-size: 22px; }
+.admin-pane h2 { font-size: 18px; }
+.admin-pane table { font-size: 13.5px; }
+.admin-pane .text-\[10px\] { font-size: 11px !important; }
+.admin-pane .text-\[11px\] { font-size: 12px !important; }
+.admin-pane .text-\[12px\] { font-size: 13px !important; }
+.admin-pane .text-\[12\.5px\] { font-size: 13.5px !important; }
+.admin-pane .text-\[13px\] { font-size: 14px !important; }
+.admin-pane .text-\[15px\] { font-size: 16px !important; }
+/* 输入框与按钮在 admin 区域略增高 */
+.admin-pane input,
+.admin-pane select {
+  height: 36px;
+  font-size: 14px;
+}
+.admin-pane button {
+  font-size: 13.5px;
+}
+
+/* ============================================================================
+ * 工具类
+ * ============================================================================ */
+
+/* 玻璃浮层（两种主题都适配） */
+.glass {
+  background: hsl(var(--popover) / 0.96);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid hsl(var(--border));
+}
+
+/* 卡片悬停 */
+.card-hover {
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+.card-hover:hover {
+  border-color: hsl(var(--ring));
+  background-color: hsl(var(--secondary));
+}
+
+/* 进度条 */
+.progress-bar {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--accent)) 0%,
+    hsl(var(--accent) / 0.7) 100%
+  );
+}
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-fg)); }
+
+/* 数字字形 */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+/* 入场动画 */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.animate-in-fade { animation: fade-in 200ms ease-out both; }
+
+/* 键盘按键 */
+kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.375rem;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: hsl(var(--muted-fg));
+  background: hsl(var(--secondary));
+  border: 1px solid hsl(var(--border));
+  border-bottom-width: 2px;
+  border-radius: 0.25rem;
+}
+
+/* 选中态 */
+::selection {
+  background: hsl(var(--accent) / 0.3);
+  color: hsl(var(--fg));
+}
+
+/* 聚焦环 */
+*:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px hsl(var(--bg)), 0 0 0 4px hsl(var(--accent) / 0.55);
+  border-radius: var(--radius);
+}
+
+/* 列表分割线 */
+.row-divider > * + * {
+  border-top: 1px solid hsl(var(--border));
+}
+
+/* ============================================================================
+ * Logo wordmark — 双主题自适应
+ * ============================================================================ */
+
+/* 深夜模式：银色金属渐变（亮） */
+:root.dark .wordmark-metallic {
+  background: linear-gradient(
+    180deg,
+    hsl(220 30% 96%) 0%,
+    hsl(220 25% 88%) 35%,
+    hsl(220 20% 65%) 55%,
+    hsl(220 25% 82%) 75%,
+    hsl(220 30% 92%) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 0 24px hsl(217 91% 60% / 0.15);
+}
+
+/* 明亮模式：深灰金属渐变（暗） */
+:root:not(.dark) .wordmark-metallic {
+  background: linear-gradient(
+    180deg,
+    hsl(220 15% 25%) 0%,
+    hsl(220 12% 18%) 50%,
+    hsl(220 18% 28%) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.wordmark-underline {
+  position: relative;
+}
+.wordmark-underline::after {
+  content: '';
+  position: absolute;
+  left: 20%; right: 20%; bottom: -4px;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    hsl(var(--accent) / 0.8),
+    transparent
+  );
+}
+
+/* ============================================================================
+ * 主题切换按钮：图标过渡
+ * ============================================================================ */
+.theme-toggle-icon {
+  transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1), opacity 200ms ease;
+}

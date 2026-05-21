@@ -13,11 +13,13 @@
 export * from './types.js';
 export { BaseProvider } from './base.js';
 export { SeedanceProvider } from './seedance.js';
+export { ClaudeTextProvider } from './claude.js';
 
 import { prisma } from '@ss/db';
 
 import { decryptSecret, encryptSecret, maskSecret } from '../src/crypto.js';
 import { SeedanceProvider } from './seedance.js';
+import { ClaudeTextProvider } from './claude.js';
 import type {
   IVideoProvider,
   IImageProvider,
@@ -116,9 +118,31 @@ export async function getImageProvider(id: string): Promise<IImageProvider> {
 }
 
 export async function getTextProvider(id: string): Promise<ITextProvider> {
-  // Phase 1: 未实现，留待 W2 剧本分析时接入 Anthropic / 豆包
-  void id;
-  throw new Error('Text provider not implemented yet (W2 milestone)');
+  const cfg = await loadConfig(id);
+  // 简单缓存：每个 providerId 一个实例（修改 key 后通过 cacheKey 失效）
+  const hit = textInstances.get(id);
+  if (hit && hit.cacheKey === cfg.cacheKey) return hit.instance;
+  const instance = constructTextProvider(cfg);
+  textInstances.set(id, { instance, cacheKey: cfg.cacheKey });
+  return instance;
+}
+
+const textInstances = new Map<string, { instance: ITextProvider; cacheKey: string }>();
+
+function constructTextProvider(cfg: ResolvedConfig): ITextProvider {
+  if (cfg.providerId.startsWith('claude')) {
+    return new ClaudeTextProvider({
+      apiUrl: cfg.apiUrl || 'https://api.anthropic.com/v1',
+      apiKey: cfg.apiKey,
+      defaultModel: cfg.providerId,
+      unitPriceCny: cfg.unitPriceCny,
+    });
+  }
+  if (cfg.providerId.startsWith('doubao')) {
+    // 豆包使用 OpenAI 兼容协议，复用 Claude 类的结构改造（Phase 2 完整实现）
+    throw new Error('Doubao text provider implementation deferred to Phase 2');
+  }
+  throw new Error(`No text provider class for: ${cfg.providerId}`);
 }
 
 export async function getComplianceProvider(id: string): Promise<IComplianceProvider> {

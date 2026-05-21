@@ -19,10 +19,10 @@ describe('i18n / t()', () => {
   });
 
   it('ICU 变量替换', () => {
-    expect(t('zh-CN', 'missionControl.completedShots', { completed: 13, total: 956 })).toBe(
+    expect(t('zh-CN', 'modules.missionControl.completedShots', { completed: 13, total: 956 })).toBe(
       '13 / 956 个镜头已完成视频',
     );
-    expect(t('en', 'missionControl.completedShots', { completed: 13, total: 956 })).toBe(
+    expect(t('en', 'modules.missionControl.completedShots', { completed: 13, total: 956 })).toBe(
       '13 / 956 shots completed',
     );
   });
