@@ -17,6 +17,8 @@
 - [ ] **跨设备协作工作流验证**（Mac Studio 端）
   - ✅ 公司 Mac Mini 端三件套就绪 + 跑通"收工"流程
   - ✅ Project 知识库上传包已生成在 `~/Downloads/SS-project-knowledge/`
+  - ✅ 规划文档体系 8 份就绪并 push 到 GitHub
+  - ✅ "收工"协议升级为自动模式（无需二次确认）
   - 待：在家 Mac Studio `git pull` + 登录同一 Project + 说"开工"验证接续
 
 ---
@@ -132,6 +134,9 @@
 - [x] TODO.md / PROGRESS.md 文档体系建立并集成到项目根 — 2026-05-21
 - [x] 创建 Claude Project「SS 项目 - 开发助手」 — 2026-05-21
 - [x] 配置 Custom Instructions，定义开工 / 收工协作规则 — 2026-05-21
+- [x] **规划文档体系**（docs/ 8 份共 2086 行：愿景/架构/模块/路线图/数据/ADR/指南）— 2026-05-21
+- [x] **协同三大铁律**写入 docs/README.md — 2026-05-21
+- [x] **"收工"协议升级**为自动执行模式（保留 push 失败 / merge conflict 安全门槛）— 2026-05-21
 
 #### 质量验证
 - [x] 全 7 包 TypeScript typecheck 通过 — 2026-05-21

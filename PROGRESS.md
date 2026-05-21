@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-05-21（周四，公司 Mac Mini · 晚 20:30 二次收工）— 规划体系 + 协议升级
+
+**完成**
+- ✅ **规划文档体系**：新增 `docs/` 8 份核心文档（共 2086 行）：README + 00-vision + 01-architecture + 02-modules + 03-roadmap + 04-data-model + 05-ADR + HOME-SETUP；覆盖愿景/架构/模块/路线图/数据/决策/操作指南完整闭环
+- ✅ **协同保障**：明文写入"协同三大铁律"（规划只在 docs/ 改 / 改完必 push / 收工必传 Project 知识库）；项目外不再维护规划副本
+- ✅ **CLAUDE.md "收工"协议升级**：从"等用户确认提交"→ "自动执行三连"；扫描范围扩展到所有 docs/ 文件；保留 push 失败 / merge conflict 时的安全门槛
+- ✅ **GitHub 同步**：commit `e4e17b7` 已 push（规划文档体系）
+
+**进行中**
+- 🚧 等待用户在 claude.ai → SS Project 知识库重传 4-7 份文件（含 docs/）
+
+**问题 / 待决策**
+- ❓ Mac Studio（家）尚未验证 `git pull` + `pnpm dev` 完整跑通
+
+**下次接着做**
+- 📌 Mac Studio 跨设备验证（`git pull` + 跑 `pnpm dev` + 试 `/admin/providers` 填 API Key）
+- 📌 **W3 启动**：搭建 Storyboard Studio 三栏布局
+- 📌 验证新版"收工"协议是否顺畅
+
+---
+
 ## 2026-05-21（周四，公司 Mac Mini · 晚 19:44 收工）— 协作工作流跑通
 
 **完成**

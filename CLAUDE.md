@@ -42,23 +42,57 @@
    - 🔧 **仓库状态**:当前分支、是否有未提交变更、是否需要 `git pull`
 5. 如果需要 `git pull`,提示我确认后再执行
 
-### 2. 我说"收工"时
+### 2. 我说"收工"时（自动执行模式 · 2026-05-21 升级）
 
-按顺序执行:
-1. 如果我没主动说,先问我:今天完成了什么 / 遇到什么问题 / 下次准备做什么
-2. **直接修改** `TODO.md`:勾选完成项、更新进行中状态、追加新任务
-3. **直接修改** `PROGRESS.md`:在顶部追加今天的日志条目(格式见下)
-4. 执行 `git diff --stat` 让我快速 review 变更范围
-5. 生成符合 Conventional Commits 规范的中文 commit message
-6. 给出三条命令并**等我确认后再执行**:
-   ```
+**关键变化**：说"收工"等于授权你执行后续全部操作（含 git commit + push），
+**不再要求二次"提交"确认**。但仍要展示 diff 让我事后能 review。
+
+按顺序自动执行：
+
+1. **三连问**：今天完成了什么 / 遇到什么问题 / 下次准备做什么
+   （我会回答；如我没主动说细节，你按当天会话上下文推断 + 补问关键缺口）
+
+2. **同步任务进度**（必做）：
+   - **直接修改** `TODO.md`：勾选完成项、更新进行中、追加新任务、把新想法入"想法池"
+   - **直接修改** `PROGRESS.md`：在顶部追加今天的日志条目（格式见下）
+
+3. **同步规划文档**（按今天会话内容判断是否需要）：
+   - 架构 / 模块设计有调整 → 更新 `docs/01-architecture.md` / `docs/02-modules-design.md`
+   - 路线图或完成度变化 → 更新 `docs/03-roadmap-and-progress.md`
+   - Schema 或字段变化 → 更新 `docs/04-data-model.md`
+   - 关键技术决策 → 在 `docs/05-tech-decisions.md` 追加新 ADR 条目
+   - 主题 / UI 系统变化 → 更新 `docs/THEMING.md`
+   - 协作流程本身变化 → 更新 `CLAUDE.md`（你自己）
+
+   原则：**没有变化的文档不要乱改**，避免无意义 commit。
+
+4. **展示 diff** `git diff --stat`（事后 review 用，不是确认门槛）
+
+5. **生成中文 commit message**（Conventional Commits，prefix 用英文：feat/fix/docs/refactor/chore/wip）
+
+6. **自动执行三连**（不需要再问）：
+   ```bash
    git add .
-   git commit -m "<你生成的 message>"
-   git push
+   git commit -m "<生成的 message>"
+   git push origin main
    ```
-7. push 成功后,**明确提醒我**:
-   > ⚠️ 别忘了把更新后的 TODO.md 和 PROGRESS.md 重新上传到 claude.ai 的 Project 知识库,
-   > 这样下次在 Chat 模式下打开 Project 才能看到最新进度。
+
+7. **如 push 失败**（分叉冲突等）：
+   - 自动尝试 `git pull --rebase --autostash origin main`
+   - 成功则继续 push
+   - 失败（真冲突）则**停下来报告**，等我决定怎么处理（这一步保留确认门槛）
+
+8. **push 成功后强制提醒**：
+   > ⚠️ 别忘了把更新后的 **TODO.md** 和 **PROGRESS.md** 重新上传到 claude.ai 的 SS Project 知识库。
+   > 若 `docs/*.md` 也有变更，请一并重传（Chat 模式才能看到最新规划）。
+
+### 「收工」自动化的边界（什么 *不* 自动做）
+
+- ❌ 不自动执行 `git push -f`（force push 永远禁止）
+- ❌ 不自动改 .gitignore（密钥风险）
+- ❌ 不自动改其他人的代码（如有协作分支）
+- ❌ 不自动跑数据库 migration（schema 变化需我额外确认）
+- ❌ 真 merge conflict 时停下，等我决定
 
 ### 3. 我问"现在做到哪了"
 
