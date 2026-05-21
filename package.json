@@ -1,0 +1,37 @@
+{
+  "name": "starsalign-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "StarsAlign Studio · 星垣工坊 — AI 短剧生产平台",
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20.18.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "clean": "turbo run clean && rm -rf node_modules .turbo",
+    "format": "prettier --write \"**/*.{ts,tsx,md,json}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,md,json}\"",
+    "db:generate": "pnpm --filter @ss/db generate",
+    "db:migrate": "pnpm --filter @ss/db migrate:dev",
+    "db:migrate:deploy": "pnpm --filter @ss/db migrate:deploy",
+    "db:studio": "pnpm --filter @ss/db studio",
+    "db:seed": "pnpm --filter @ss/db seed",
+    "db:reset": "pnpm --filter @ss/db reset",
+    "infra:up": "docker compose -f infra/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infra/docker-compose.yml down",
+    "infra:logs": "docker compose -f infra/docker-compose.yml logs -f"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.27.9",
+    "@types/node": "^22.7.4",
+    "prettier": "^3.3.3",
+    "turbo": "^2.1.3",
+    "typescript": "^5.6.3"
+  }
+}

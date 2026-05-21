@@ -1,0 +1,893 @@
+// =============================================================================
+// StarsAlign Studio · 星合工坊
+// Prisma Schema — Phase 1 完整数据模型
+//
+// 设计原则:
+//   1. 所有跨集复用对象（资产/媒体/Prompt/Style）都有版本化
+//   2. Canvas / 3D / LoRA / 多语言 / 插件全部预留字段，不增加 Phase 1 工作量
+//   3. Cost Ledger 与 GenerationAttempt 完整记录便于后期 ROI/抽卡率分析
+//   4. Soft-delete 通过 deletedAt 实现，配合回收站 UI
+// =============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearchPostgres", "relationJoins"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// § 1. 身份与权限
+// =============================================================================
+
+model User {
+  id           String          @id @default(cuid())
+  email        String          @unique
+  username     String          @unique
+  displayName  String
+  avatarUrl    String?
+  passwordHash String
+  locale       String          @default("zh-CN") // 多语言预留
+  timezone     String          @default("Asia/Shanghai")
+  status       UserStatus      @default(ACTIVE)
+  isAdmin      Boolean         @default(false) // 全局管理员（后台访问）
+  lastLoginAt  DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  deletedAt    DateTime?
+
+  // 关系
+  ownedProjects     Project[]           @relation("ProjectOwner")
+  memberships       ProjectMember[]
+  assignments       EpisodeAssignment[]
+  generations       GenerationAttempt[] @relation("AttemptCreatedBy")
+  costEntries       CostLedgerEntry[]
+  opLogs            OperationLog[]
+  invitationsSent   Invitation[]        @relation("InvitationInviter")
+
+  @@index([deletedAt])
+  @@map("users")
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING
+}
+
+// =============================================================================
+// § 2. 项目与团队
+// =============================================================================
+
+model Project {
+  id          String      @id @default(cuid())
+  name        String
+  description String?     @db.Text
+  type        ProjectType
+  aspect      String      // "9:16" | "16:9" | "1:1"
+  styleId     String?     // → StyleProfile.id
+  budgetCny   Decimal?    @db.Decimal(12, 2)
+  startDate   DateTime?   @db.Date
+  daysCount   Int?        // 总天数（如"第 34 天"）
+
+  // 默认 Provider 偏好（运行时可由后台覆盖）
+  defaultVideoProviderId String? // 'seedance-2.0'
+  defaultImageProviderId String? // 'nano-banana-pro'
+  defaultLlmModel        String? // 'claude-sonnet-4-5'
+
+  ownerId String
+  owner   User   @relation("ProjectOwner", fields: [ownerId], references: [id])
+
+  members  ProjectMember[]
+  episodes Episode[]
+  assets   Asset[]
+  scripts  Script[]
+  media    MediaItem[]
+  costs    CostLedgerEntry[]
+  opLogs   OperationLog[]
+  invites  Invitation[]
+  style    StyleProfile?     @relation(fields: [styleId], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([ownerId])
+  @@index([deletedAt])
+  @@index([type])
+  @@map("projects")
+}
+
+enum ProjectType {
+  AI_REAL    // AI 真人短剧
+  ANIM_3D    // 3D 国漫
+  ANIM_2D    // 2D 动漫
+  POSTER     // 海报 / 宣传
+  CUSTOM     // 自定义
+}
+
+model ProjectMember {
+  projectId String
+  userId    String
+  role      MemberRole
+  modules   String[]   // ['director','art','aigc','edit','library','analytics']
+  joinedAt  DateTime   @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, userId])
+  @@index([userId])
+  @@map("project_members")
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  LEADER
+  MEMBER
+  VIEWER
+}
+
+model Invitation {
+  id          String           @id @default(cuid())
+  projectId   String
+  email       String
+  role        MemberRole       @default(MEMBER)
+  modules     String[]
+  inviterId   String
+  status      InvitationStatus @default(PENDING)
+  token       String           @unique
+  expiresAt   DateTime
+  respondedAt DateTime?
+  createdAt   DateTime         @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  inviter User    @relation("InvitationInviter", fields: [inviterId], references: [id])
+
+  @@index([projectId])
+  @@index([email])
+  @@map("invitations")
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  CANCELLED
+}
+
+// =============================================================================
+// § 3. 剧本与剧本分析
+// =============================================================================
+
+model Script {
+  id        String       @id @default(cuid())
+  projectId String
+  episodeId String?      @unique // null = 整部剧本；非 null = 单集
+  title     String?
+  content   String       @db.Text // 原始剧本全文
+  contentHash String     // SHA-256 去重
+  language  String       @default("zh-CN")
+  source    ScriptSource @default(UPLOAD)
+  version   Int          @default(1)
+
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  episode   Episode?  @relation(fields: [episodeId], references: [id])
+  analyses  ScriptAnalysis[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([projectId])
+  @@map("scripts")
+}
+
+enum ScriptSource {
+  UPLOAD
+  AI_GENERATED
+  IMPORTED
+}
+
+model ScriptAnalysis {
+  id        String   @id @default(cuid())
+  scriptId  String
+  episodeId String?
+  modelId   String   // 'claude-sonnet-4-5' etc.
+
+  // 8 维评分
+  hookScore       Float?
+  suspenseScore   Float?
+  twistScore      Float?
+  climaxScore     Float?
+  conflictScore   Float?
+  dialogueScore   Float?
+  paceScore       Float?
+  urgencyScore    Float?
+  overallScore    Float?
+
+  // 整集诊断
+  summary         String? @db.Text
+  highlights      Json    // [{ severity, type, text }]
+  issues          Json    // [{ severity, scene, type, suggestion }]
+
+  // 剧情曲线（情绪强度 / 节奏 / 钩子 / 爽点）
+  curveJson       Json    // [{ time, emotion, beat, badges[] }]
+
+  // 制作曲线（用于 AIGC 优先级派发）
+  productionPlan  Json    // [{ sceneIdx, priority: 'S'|'A'|'B'|'C', durationS }]
+
+  costCny         Decimal @db.Decimal(10, 4)
+  durationMs      Int     @default(0)
+
+  script   Script  @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  createdBy String
+
+  @@index([scriptId])
+  @@index([episodeId])
+  @@map("script_analyses")
+}
+
+// =============================================================================
+// § 4. 集与镜头
+// =============================================================================
+
+model Episode {
+  id        String        @id @default(cuid())
+  projectId String
+  number    Int           // 第几集（1-based）
+  title     String?
+  status    EpisodeStatus @default(NOT_STARTED)
+
+  // 发布机制：分镜发布后 publishedAt 戳记 + 版本快照
+  publishedAt      DateTime?
+  publishedVersion Int       @default(0)
+
+  project     Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  shots       Shot[]
+  script      Script?
+  assignments EpisodeAssignment[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@unique([projectId, number])
+  @@index([projectId])
+  @@index([status])
+  @@map("episodes")
+}
+
+enum EpisodeStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  ARCHIVED
+}
+
+model EpisodeAssignment {
+  id        String     @id @default(cuid())
+  episodeId String
+  userId    String
+  role      AssignRole
+
+  episode Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  assignedAt DateTime @default(now())
+
+  @@unique([episodeId, userId, role])
+  @@index([userId])
+  @@map("episode_assignments")
+}
+
+enum AssignRole {
+  OWNER     // 主负责人
+  COLLAB    // 协作者
+  REVIEWER  // 审核人
+}
+
+model Shot {
+  id          String     @id @default(cuid())
+  episodeId   String
+  number      String     // "1-8" / "9-18" / "1-8a"（合并后）
+  framing     String?    // 景别（特写/中景/全景...）
+  angle       String?    // 角度（平视/俯视/仰视 + 度数）
+  content     String     @db.Text     // 镜头内容描述
+  prompt      String     @db.Text     // 视频提示词（含 @ 资产）
+  promptCompiled String? @db.Text     // 编译后真实下发到模型的 prompt（snapshot）
+  durationS   Float      @default(5)  // 时长（秒）
+
+  // 制作价值
+  priority    Priority?  // S / A / B / C
+  isMerged    Boolean    @default(false) // 是否由"向下合并"产生
+  mergedFrom  String[]   // 原始镜号集合
+
+  // 位置（Linear 用 idx，Canvas Phase 3 用 x/y）
+  positionIdx Int
+  positionX   Float?
+  positionY   Float?
+
+  status      ShotStatus @default(DRAFT)
+
+  // 历史快照（用于 Diff 与回滚）
+  versionHash String?
+
+  episode  Episode             @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  assets   ShotAssetRef[]
+  attempts GenerationAttempt[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@unique([episodeId, positionIdx])
+  @@index([episodeId])
+  @@index([status])
+  @@index([priority])
+  @@map("shots")
+}
+
+enum ShotStatus {
+  DRAFT
+  PUBLISHED       // 导演已发布给 AIGC
+  QUEUED          // 等待生成
+  GENERATING
+  GENERATED       // 至少一个 candidate
+  ADOPTED         // 已采纳
+  IN_EDIT         // 进入剪辑
+  FINAL
+  FAILED
+  BUDGET_BLOCKED
+}
+
+enum Priority {
+  S   // 顶级（爽点/反转）
+  A
+  B
+  C   // 过渡
+}
+
+model ShotAssetRef {
+  id      String      @id @default(cuid())
+  shotId  String
+  assetId String
+  refKind AssetRefKind @default(VISIBLE) // VISIBLE / MENTIONED / VOICE_ONLY
+
+  shot  Shot  @relation(fields: [shotId], references: [id], onDelete: Cascade)
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([shotId, assetId, refKind])
+  @@index([assetId])
+  @@map("shot_asset_refs")
+}
+
+enum AssetRefKind {
+  VISIBLE      // 画面中出现，需调用资产
+  MENTIONED    // 仅台词提及，不需调用
+  VOICE_ONLY   // 仅声音出现
+}
+
+// =============================================================================
+// § 5. 数字资产（人物 / 场景 / 道具）
+// =============================================================================
+
+model Asset {
+  id          String       @id @default(cuid())
+  projectId   String
+  type        AssetType
+  name        String
+  alias       String[]     // 别名（用于自动 @ 匹配）
+  description String?      @db.Text
+  prompt      String       @db.Text  // 提示词
+  promptStep  Json?        // 资产拆解多步链中间结果
+
+  // 角色身份（人物用）
+  characterRole String?    // '主演-男主演' / '主演-女主演' / '配角-反派' ...
+  tags          String[]   // ['悔恨','坚定','重情义']
+
+  // 提示词风格继承
+  styleId     String?      // → StyleProfile.id；null=随项目
+
+  // 媒体绑定
+  mainMediaId   String?    // 主形象图
+  threeViewIds  String[]   // 三视图 MediaItem ids
+  panorama360Id String?    // 360° 全景图（场景用）
+  refImageIds   String[]   // 参考图
+
+  // Phase 2 预留
+  loraIds       String[]   @default([])
+  voiceMediaId  String?    // 配音 MediaItem id
+
+  // Phase 3 预留 - 3D 一致性
+  model3dUrl    String?
+  gaussianUrl   String?
+
+  // 合规（人物专用）
+  complianceId       String?         // 火山引擎返回的合规代码
+  complianceStatus   ComplianceStatus @default(NOT_REQUIRED)
+  complianceCheckedAt DateTime?
+
+  status      AssetStatus  @default(DRAFT)
+
+  project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  style     StyleProfile?    @relation(fields: [styleId], references: [id])
+  versions  AssetVersion[]
+  bindings  ShotAssetRef[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([projectId, type])
+  @@index([projectId, name])
+  @@index([deletedAt])
+  @@map("assets")
+}
+
+enum AssetType {
+  CHARACTER
+  SCENE
+  PROP
+  STYLE_REFERENCE // 风格参考（Phase 2 LoRA）
+}
+
+enum AssetStatus {
+  DRAFT       // 草稿
+  CANDIDATE   // 多候选生成中
+  CONFIRMED   // 已确认入资产库
+  RETIRED     // 已退役
+}
+
+enum ComplianceStatus {
+  NOT_REQUIRED
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+model AssetVersion {
+  id          String   @id @default(cuid())
+  assetId     String
+  version     Int
+  prompt      String   @db.Text
+  mediaItemIds String[] // 这个版本生成的所有图
+  generatedBy String   // userId
+  cost        Decimal  @db.Decimal(10, 4)
+  notes       String?
+
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([assetId, version])
+  @@index([assetId])
+  @@map("asset_versions")
+}
+
+// =============================================================================
+// § 6. 媒体资产中台
+// =============================================================================
+
+model MediaItem {
+  id          String          @id @default(cuid())
+  projectId   String?         // null = 公共库
+  scope       MediaScope      @default(PROJECT)
+  kind        MediaKind
+  filename    String
+  mimeType    String
+  sizeBytes   Int
+  storageKey  String          // → StorageAdapter 解析
+  cdnUrl      String?         // CDN URL（Phase 2）
+
+  // 元信息（kind 决定 Schema）
+  meta        Json            // image: {w,h,format}; video: {w,h,duration,fps,codec}; audio: {duration,bpm,sampleRate,waveformPeaks}
+
+  // AI 自动标签 / 嵌入向量（Phase 2 用 pgvector）
+  tags        String[]        @default([])
+  aiLabels    Json?           // CLIP/CLAP 输出
+  embeddingId String?         // Phase 2 预留
+
+  // 版权
+  copyright   CopyrightStatus @default(UNKNOWN)
+  copyrightSource String?     // 'aigc' | 'upload' | 'netease' | ...
+
+  // 来源追溯
+  source      MediaSource     @default(UPLOAD)
+  sourceRef   String?         // GenerationAttempt.id / Asset.id / external url
+
+  // 软删除 + 收藏 + 多版本
+  isFavorited Boolean         @default(false)
+  parentId    String?         // 衍生关系（降噪/混音版本）
+
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent    MediaItem? @relation("MediaVersion", fields: [parentId], references: [id])
+  variants  MediaItem[] @relation("MediaVersion")
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([projectId, kind])
+  @@index([scope, kind])
+  @@index([deletedAt])
+  @@map("media_items")
+}
+
+enum MediaScope {
+  PUBLIC
+  PROJECT
+  PERSONAL
+}
+
+enum MediaKind {
+  IMAGE
+  VIDEO
+  AUDIO
+  THREE_D    // Phase 3
+  OTHER
+}
+
+enum CopyrightStatus {
+  UNKNOWN
+  SELF_OWNED
+  LICENSED
+  RESTRICTED
+  FORBIDDEN
+}
+
+enum MediaSource {
+  UPLOAD
+  AIGC
+  IMPORTED
+  EXTERNAL
+}
+
+// =============================================================================
+// § 7. AIGC 生成尝试与抽卡
+// =============================================================================
+
+model GenerationAttempt {
+  id            String          @id @default(cuid())
+  shotId        String?         // 可能 null（资产生成、剧本分析）
+  assetId       String?
+  projectId     String
+  episodeId     String?
+
+  // 调用信息
+  providerId    String          // 'seedance-2.0' / 'nano-banana-pro' / ...
+  modelId       String
+  action        GenerationAction // VIDEO / IMAGE / TEXT / AUDIO
+  inputJson     Json            // 编译后 prompt + refAssets snapshot
+  outputMediaId String?         // 主输出 MediaItem
+  outputMediaIds String[]       // 多候选输出（如多张图）
+  errorMsg      String?
+
+  // 计费
+  inputUnits    Float           @default(0) // tokens / pixels / seconds
+  outputUnits   Float           @default(0)
+  unitPriceCny  Decimal         @db.Decimal(10, 6)
+  costCny       Decimal         @db.Decimal(10, 4)
+
+  // 时间与状态
+  status        AttemptStatus   @default(QUEUED)
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  durationMs    Int?
+
+  // 采纳标记（"废片中的可用片段"）
+  adopted       Boolean         @default(false)
+  adoptedAt     DateTime?
+  adoptedBy     String?
+
+  // 关联抽卡（一次重抽群组）
+  groupId       String?         // UUID 把同 shot 多次抽卡归组
+
+  createdAt DateTime @default(now())
+  createdBy String
+
+  user      User              @relation("AttemptCreatedBy", fields: [createdBy], references: [id])
+  shot      Shot?             @relation(fields: [shotId], references: [id], onDelete: Cascade)
+  costEntry CostLedgerEntry?
+
+  @@index([projectId])
+  @@index([shotId])
+  @@index([providerId, status])
+  @@index([createdBy, createdAt])
+  @@map("generation_attempts")
+}
+
+enum GenerationAction {
+  VIDEO
+  IMAGE
+  TEXT
+  AUDIO
+  COMPLIANCE
+  ANALYSIS
+}
+
+enum AttemptStatus {
+  QUEUED
+  RUNNING
+  SUCCESS
+  FAILED
+  TIMEOUT
+  CANCELLED
+  BUDGET_BLOCKED
+}
+
+// =============================================================================
+// § 8. 成本账本（Cost Ledger）
+// =============================================================================
+
+model CostLedgerEntry {
+  id           String       @id @default(cuid())
+  userId       String
+  projectId    String?
+  episodeId    String?
+  shotId       String?
+  assetId      String?
+  attemptId    String?      @unique
+
+  providerId   String
+  modelId      String
+  action       String       // 'video.generate' | 'image.generate' | 'text.analyze' | ...
+
+  inputUnits   Float
+  outputUnits  Float
+  unitPriceCny Decimal      @db.Decimal(10, 6)
+  costCny      Decimal      @db.Decimal(12, 4)
+
+  // 成功与否影响 ROI 计算
+  success      Boolean
+
+  // Phase 2 计费维度预留
+  billingCycle String?      // '2026-05' 月度归集
+  plan         String?      // 'subscription' | 'pay-as-you-go'
+
+  user      User               @relation(fields: [userId], references: [id])
+  project   Project?           @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  attempt   GenerationAttempt? @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId, createdAt])
+  @@index([userId, createdAt])
+  @@index([providerId, modelId, createdAt])
+  @@index([billingCycle])
+  @@map("cost_ledger_entries")
+}
+
+// =============================================================================
+// § 9. 操作日志（审计与回收站）
+// =============================================================================
+
+model OperationLog {
+  id         String   @id @default(cuid())
+  actorId    String
+  projectId  String?
+  action     String   // 'project.create' / 'shot.update' / 'asset.delete' / ...
+  targetType String   // 'project' / 'shot' / 'asset' / 'media' / ...
+  targetId   String
+  beforeJson Json?
+  afterJson  Json?
+  ip         String?
+  userAgent  String?
+
+  user    User     @relation(fields: [actorId], references: [id])
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([targetType, targetId])
+  @@map("operation_logs")
+}
+
+// =============================================================================
+// § 10. 提示词模板 / 风格 / 预设
+// =============================================================================
+
+model PromptTemplate {
+  id          String   @id @default(cuid())
+  category    PromptCategory
+  slug        String   // 'asset_step_base' / 'asset_step1_core' / 'asset_step_merge' / 'storyboard_main' / 'panorama_360' / ...
+  name        String
+  description String?
+  content     String   @db.Text
+  varsJson    Json     // 占位符元信息（类型/默认值/必填）
+  modelHint   String?  // 推荐模型
+  versionTag  String   @default("v1")
+  isActive    Boolean  @default(true)
+  versions    PromptTemplateVersion[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([slug, versionTag])
+  @@index([category, isActive])
+  @@map("prompt_templates")
+}
+
+model PromptTemplateVersion {
+  id         String   @id @default(cuid())
+  templateId String
+  versionTag String
+  content    String   @db.Text
+  varsJson   Json
+  changeLog  String?
+  createdAt  DateTime @default(now())
+  createdBy  String
+
+  template PromptTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, versionTag])
+  @@map("prompt_template_versions")
+}
+
+enum PromptCategory {
+  ASSET_BREAKDOWN     // 资产拆解
+  IMAGE_GENERATION    // 图像生成
+  SHOT_GENERATION     // 镜头生图
+  SCRIPT_STORYBOARD   // 剧本分镜
+  PANORAMA_360        // 360 全景
+  PROMPT_FRAGMENT     // 复用片段
+  PROMPT_PRESET       // 预设组合（景别/机位/运镜/光线等）
+}
+
+model StyleProfile {
+  id              String       @id @default(cuid())
+  name            String       // 'AI 真人' / '3D 国漫' / '2D 动漫'
+  slug            String       @unique // 'ai_real' / 'anim_3d' / 'anim_2d'
+  kind            StyleKind
+  characterPrompt String       @db.Text
+  scenePrompt     String       @db.Text
+  propPrompt      String       @db.Text
+  forbiddenWords  String[]
+  isBuiltIn       Boolean      @default(false)
+
+  // Phase 2 预留：Style Vector
+  embeddingId     String?
+
+  projects        Project[]
+  assets          Asset[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("style_profiles")
+}
+
+enum StyleKind {
+  AI_REAL
+  ANIM_3D
+  ANIM_2D
+  CUSTOM
+}
+
+// =============================================================================
+// § 11. Provider 配置（API + 单价 + 并发）
+// =============================================================================
+
+model ProviderConfig {
+  id            String       @id @default(cuid())
+  providerId    String       @unique // 'seedance-2.0' / 'nano-banana-pro' / ...
+  displayName   String
+  kind          ProviderKind
+  apiUrl        String?
+  isActive      Boolean      @default(true)
+
+  // ---------- API Key 存储 ----------
+  // 优先从 DB 读取（apiKeyEnc 经 AES-256-GCM 加密，解密用 APP_MASTER_KEY）
+  // 若 DB 为空则 fallback 到环境变量 apiKeyRef
+  apiKeyEnc        String?      // base64(iv|tag|ciphertext)
+  apiKeyMasked     String?      // '••••XYZ7' — UI 显示用，不含明文
+  apiKeyUpdatedAt  DateTime?
+  apiKeyUpdatedBy  String?      // userId
+  apiKeyRef        String?      // 环境变量名（fallback / 私有部署应急通道）
+
+  // 计费规则
+  unitPriceCny  Decimal      @db.Decimal(10, 6)
+  unitName      String       // 'second' | 'image' | 'ktoken' | 'request'
+
+  // 并发与限流
+  maxConcurrent Int          @default(5)
+  rateLimitRpm  Int          @default(60)
+
+  // 默认参数（max_duration, default_quality 等）
+  defaultParams Json?
+
+  // 健康度（Phase 2 自动 failover）
+  healthScore   Float        @default(1.0)
+  lastErrorAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("provider_configs")
+}
+
+// =============================================================================
+// § 14. 系统设置（全局 KV 表）
+// =============================================================================
+
+/**
+ * 系统级 KV 配置
+ * 用法示例:
+ *   - 默认 UI 语言: { key: 'system.locale.default', value: 'zh-CN' }
+ *   - 默认水印文字: { key: 'system.watermark.text', value: '星垣工坊' }
+ *   - 默认抽卡上限: { key: 'system.gacha.max_attempts', value: 5 }
+ * 敏感字段用 isSecret 标记，UI 展示时脱敏；存储时与 APP_MASTER_KEY 加密。
+ */
+model SystemSetting {
+  id           String   @id @default(cuid())
+  key          String   @unique
+  value        String   @db.Text
+  category     String   @default("general") // 'general' | 'security' | 'branding' | 'feature_flag'
+  description  String?
+  isSecret     Boolean  @default(false)
+  updatedBy    String?
+  updatedAt    DateTime @updatedAt
+  createdAt    DateTime @default(now())
+
+  @@index([category])
+  @@map("system_settings")
+}
+
+enum ProviderKind {
+  VIDEO
+  IMAGE
+  TEXT
+  AUDIO
+  COMPLIANCE
+  EMBEDDING
+}
+
+// =============================================================================
+// § 12. 通知与评论（Phase 2 评论锚定预留）
+// =============================================================================
+
+model Notification {
+  id       String   @id @default(cuid())
+  userId   String
+  type     String   // 'invite' | 'mention' | 'budget_warn' | 'compliance_alert'
+  title    String
+  body     String?
+  payload  Json?
+  isRead   Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead, createdAt])
+  @@map("notifications")
+}
+
+// =============================================================================
+// § 13. 工作报告快照（Phase 1 可由查询动态算；本表用于历史归档）
+// =============================================================================
+
+model WorkReportSnapshot {
+  id              String   @id @default(cuid())
+  projectId       String?
+  periodStart     DateTime
+  periodEnd       DateTime
+  gachaRatio      Float    // 项目总抽卡率 (生成总时长 / 目标时长)
+  targetSeconds   Float
+  generatedSeconds Float
+  perUserJson     Json     // [{userId, role, video, image, audio, ops, gacha, output_target}]
+  topGachaShots   Json     // [{shotId, shotNumber, targetS, generatedS, count, ratio}]
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId, periodEnd])
+  @@map("work_report_snapshots")
+}

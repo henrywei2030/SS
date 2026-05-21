@@ -1,0 +1,173 @@
+{
+  "workbench": {
+    "director": "导演",
+    "art": "美术",
+    "aigc": "AIGC",
+    "edit": "剪辑",
+    "library": "素材库",
+    "analytics": "数据监控"
+  },
+  "missionControl": {
+    "title": "项目首页",
+    "newProject": "新建项目",
+    "cloneProject": "克隆项目",
+    "totalProgress": "项目总进度",
+    "completedShots": "{completed} / {total} 个镜头已完成视频",
+    "totalEpisodes": "总集数",
+    "totalShots": "总分镜",
+    "totalAssets": "总资产",
+    "withReference": "有参考图",
+    "team": "团队",
+    "memberCount": "{n} 人"
+  },
+  "storyCompass": {
+    "title": "剧本工作区",
+    "scriptAnalysis": "剧本分析",
+    "wholeEpisodeDiagnosis": "整集诊断",
+    "highlights": "亮点",
+    "issues": "需优先修复",
+    "emotionCurve": "情绪曲线",
+    "productionCurve": "制作曲线",
+    "dimensions": {
+      "hook": "钩子力度",
+      "suspense": "悬念保持",
+      "twist": "反转力度",
+      "climax": "爆点密度",
+      "conflict": "冲突集中",
+      "dialogue": "台词锐度",
+      "pace": "节奏紧凑",
+      "urgency": "急停保持"
+    }
+  },
+  "storyboardStudio": {
+    "title": "分镜工坊",
+    "shotNumber": "镜号",
+    "framing": "景别",
+    "angle": "角度",
+    "shotContent": "镜头内容",
+    "videoPrompt": "提示词（含台词/OS）",
+    "mergeDown": "向下合并",
+    "splitShot": "拆分镜头",
+    "batchGenerate": "批量生成",
+    "publishStoryboard": "发布分镜"
+  },
+  "assetForge": {
+    "title": "美术工作台",
+    "characters": "人物",
+    "scenes": "场景",
+    "props": "道具",
+    "newCharacter": "新建人物",
+    "newScene": "新建场景",
+    "newProp": "新建道具",
+    "generateAsset": "生成资产",
+    "threeView": "三视图",
+    "panorama360": "360° 全景",
+    "complianceCheck": "合规检查",
+    "complianceId": "合规 ID",
+    "voiceUpload": "上传配音",
+    "confirmAsset": "确认入库",
+    "characterRoles": {
+      "leadMale": "主演-男主演",
+      "leadFemale": "主演-女主演",
+      "antagonist": "主演-反派",
+      "supporting": "配角",
+      "guest": "特约演员",
+      "system": "系统/旁白"
+    }
+  },
+  "generationEngine": {
+    "title": "AIGC 抽卡引擎",
+    "linkedAssets": "资产关联",
+    "originalScript": "原始剧本",
+    "videoPrompt": "视频提示词",
+    "videoPreview": "视频预览",
+    "history": "历史记录",
+    "autoMatch": "自动匹配",
+    "uploadMaterial": "上传素材",
+    "generateVideo": "生成视频",
+    "cost": "成本",
+    "gachaRatio": "抽卡率",
+    "estimatedCost": "预估成本：¥{amount}"
+  },
+  "editSuite": {
+    "title": "剪辑工作台",
+    "comingSoon": "即将上线",
+    "materialManage": "素材整理",
+    "timeline": "时间线",
+    "exportDeliver": "导出交付"
+  },
+  "mediaVault": {
+    "title": "素材库",
+    "publicLibrary": "公共库",
+    "myMaterials": "我的素材",
+    "favorites": "收藏夹",
+    "allMaterials": "全部素材",
+    "uploadMaterial": "上传素材",
+    "multiSelect": "多选",
+    "aiBatchAnalyze": "AI 批量分析"
+  },
+  "insightCockpit": {
+    "title": "数据监控",
+    "dataOverview": "数据总览",
+    "platformCost": "平台总费用",
+    "imageCost": "图片费用",
+    "videoCost": "视频费用",
+    "seedanceCost": "Seedance 费用",
+    "apiUsage": "API 用量",
+    "modelDistribution": "模型使用分布",
+    "trendChart": "近 30 天趋势",
+    "projectCostTop5": "项目费用 Top5",
+    "topGachaShots": "抽卡率最高的镜头"
+  },
+  "collabHub": {
+    "title": "团队协作",
+    "memberManage": "成员管理",
+    "episodeAssign": "集数分配",
+    "episodeOverview": "集数总览",
+    "workReport": "工作报告",
+    "operationLog": "操作日志",
+    "recycleBin": "回收站",
+    "inviteApproval": "邀请审批",
+    "memberRoles": {
+      "owner": "拥有者",
+      "admin": "管理员",
+      "leader": "组长",
+      "member": "成员",
+      "viewer": "访客"
+    },
+    "assignRoles": {
+      "owner": "主负责人",
+      "collab": "协作者",
+      "reviewer": "审核人"
+    }
+  },
+  "admin": {
+    "title": "后台管理",
+    "dashboard": "数据驾驶舱",
+    "members": "成员管理",
+    "operationLogs": "操作日志",
+    "workReports": "工作报告",
+    "apiUsage": "API 用量",
+    "monitorCenter": "监控中心",
+    "providerConfig": "AI Provider 配置",
+    "promptTemplates": "提示词模板",
+    "presetTemplates": "预设模板",
+    "styleProfiles": "风格管理",
+    "mediaLibrary": "素材库管理",
+    "systemSettings": "系统设置",
+    "dbExplorer": "数据库浏览器",
+    "providerKey": {
+      "title": "API Key 管理",
+      "subtitle": "所有 AI 模型 API Key 在此统一配置，加密存储到数据库",
+      "currentValue": "当前值",
+      "masked": "（脱敏）",
+      "notSet": "未配置",
+      "setKey": "设置 Key",
+      "clearKey": "清除 Key",
+      "testConnection": "测试连接",
+      "fromEnv": "（来自环境变量）",
+      "fromDb": "（数据库已配置）",
+      "lastUpdated": "{time} 由 {user} 更新"
+    }
+  }
+}

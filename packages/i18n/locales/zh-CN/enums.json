@@ -1,0 +1,83 @@
+{
+  "projectType": {
+    "AI_REAL": "AI 真人",
+    "ANIM_3D": "3D 国漫",
+    "ANIM_2D": "2D 动漫",
+    "POSTER": "海报",
+    "CUSTOM": "自定义"
+  },
+  "shotStatus": {
+    "DRAFT": "草稿",
+    "PUBLISHED": "已发布",
+    "QUEUED": "队列中",
+    "GENERATING": "生成中",
+    "GENERATED": "已生成",
+    "ADOPTED": "已采纳",
+    "IN_EDIT": "剪辑中",
+    "FINAL": "最终成片",
+    "FAILED": "失败",
+    "BUDGET_BLOCKED": "预算阻塞"
+  },
+  "priority": {
+    "S": "S 级（爽点/反转）",
+    "A": "A 级（高潮）",
+    "B": "B 级（推进）",
+    "C": "C 级（过渡）"
+  },
+  "assetType": {
+    "CHARACTER": "人物",
+    "SCENE": "场景",
+    "PROP": "道具",
+    "STYLE_REFERENCE": "风格参考"
+  },
+  "assetStatus": {
+    "DRAFT": "草稿",
+    "CANDIDATE": "候选中",
+    "CONFIRMED": "已确认",
+    "RETIRED": "已退役"
+  },
+  "complianceStatus": {
+    "NOT_REQUIRED": "无需合规",
+    "PENDING": "审核中",
+    "APPROVED": "已通过",
+    "REJECTED": "已拒绝",
+    "EXPIRED": "已过期"
+  },
+  "attemptStatus": {
+    "QUEUED": "排队中",
+    "RUNNING": "运行中",
+    "SUCCESS": "成功",
+    "FAILED": "失败",
+    "TIMEOUT": "超时",
+    "CANCELLED": "已取消",
+    "BUDGET_BLOCKED": "预算阻塞"
+  },
+  "providerKind": {
+    "VIDEO": "视频",
+    "IMAGE": "图片",
+    "TEXT": "文本/LLM",
+    "AUDIO": "音频",
+    "COMPLIANCE": "合规",
+    "EMBEDDING": "向量"
+  },
+  "mediaKind": {
+    "IMAGE": "图片",
+    "VIDEO": "视频",
+    "AUDIO": "音频",
+    "THREE_D": "3D",
+    "OTHER": "其他"
+  },
+  "copyright": {
+    "UNKNOWN": "未知",
+    "SELF_OWNED": "自有",
+    "LICENSED": "已授权",
+    "RESTRICTED": "受限",
+    "FORBIDDEN": "禁用"
+  },
+  "styleKind": {
+    "AI_REAL": "AI 真人",
+    "ANIM_3D": "3D 国漫",
+    "ANIM_2D": "2D 动漫",
+    "CUSTOM": "自定义"
+  }
+}

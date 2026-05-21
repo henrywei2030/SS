@@ -1,0 +1,83 @@
+{
+  "projectType": {
+    "AI_REAL": "AI Live-action",
+    "ANIM_3D": "3D Animation",
+    "ANIM_2D": "2D Animation",
+    "POSTER": "Poster",
+    "CUSTOM": "Custom"
+  },
+  "shotStatus": {
+    "DRAFT": "Draft",
+    "PUBLISHED": "Published",
+    "QUEUED": "Queued",
+    "GENERATING": "Generating",
+    "GENERATED": "Generated",
+    "ADOPTED": "Adopted",
+    "IN_EDIT": "In edit",
+    "FINAL": "Final",
+    "FAILED": "Failed",
+    "BUDGET_BLOCKED": "Budget blocked"
+  },
+  "priority": {
+    "S": "S - Peak (twist/payoff)",
+    "A": "A - Climax",
+    "B": "B - Progression",
+    "C": "C - Transition"
+  },
+  "assetType": {
+    "CHARACTER": "Character",
+    "SCENE": "Scene",
+    "PROP": "Prop",
+    "STYLE_REFERENCE": "Style reference"
+  },
+  "assetStatus": {
+    "DRAFT": "Draft",
+    "CANDIDATE": "Candidate",
+    "CONFIRMED": "Confirmed",
+    "RETIRED": "Retired"
+  },
+  "complianceStatus": {
+    "NOT_REQUIRED": "Not required",
+    "PENDING": "Pending",
+    "APPROVED": "Approved",
+    "REJECTED": "Rejected",
+    "EXPIRED": "Expired"
+  },
+  "attemptStatus": {
+    "QUEUED": "Queued",
+    "RUNNING": "Running",
+    "SUCCESS": "Success",
+    "FAILED": "Failed",
+    "TIMEOUT": "Timeout",
+    "CANCELLED": "Cancelled",
+    "BUDGET_BLOCKED": "Budget blocked"
+  },
+  "providerKind": {
+    "VIDEO": "Video",
+    "IMAGE": "Image",
+    "TEXT": "Text / LLM",
+    "AUDIO": "Audio",
+    "COMPLIANCE": "Compliance",
+    "EMBEDDING": "Embedding"
+  },
+  "mediaKind": {
+    "IMAGE": "Image",
+    "VIDEO": "Video",
+    "AUDIO": "Audio",
+    "THREE_D": "3D",
+    "OTHER": "Other"
+  },
+  "copyright": {
+    "UNKNOWN": "Unknown",
+    "SELF_OWNED": "Self-owned",
+    "LICENSED": "Licensed",
+    "RESTRICTED": "Restricted",
+    "FORBIDDEN": "Forbidden"
+  },
+  "styleKind": {
+    "AI_REAL": "AI Live-action",
+    "ANIM_3D": "3D Animation",
+    "ANIM_2D": "2D Animation",
+    "CUSTOM": "Custom"
+  }
+}

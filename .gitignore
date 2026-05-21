@@ -1,0 +1,66 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build outputs
+dist
+build
+.next
+out
+.turbo
+
+# Tauri
+**/src-tauri/target
+**/src-tauri/Cargo.lock
+
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+.idea
+*.swp
+*.swo
+.DS_Store
+
+# Test
+coverage
+*.lcov
+.nyc_output
+
+# OS
+Thumbs.db
+desktop.ini
+
+# Prisma
+packages/db/prisma/dev.db
+packages/db/prisma/dev.db-journal
+
+# Local data
+.local
+local-data
+storage-data
+minio-data
+postgres-data
+redis-data
+
+# Cache
+.cache
+.eslintcache
+.prettiercache
+
+# Lock files (keep pnpm only)
+package-lock.json
+yarn.lock

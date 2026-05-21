@@ -1,0 +1,81 @@
+{
+  "app": {
+    "name": "StarsAlign Studio",
+    "name_en": "StarsAlign Studio",
+    "tagline": "Where stars form walls; where dramas converge.",
+    "version": "v{version}"
+  },
+  "actions": {
+    "create": "Create",
+    "save": "Save",
+    "saveAll": "Save All",
+    "delete": "Delete",
+    "edit": "Edit",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "publish": "Publish",
+    "unpublish": "Unpublish",
+    "submit": "Submit",
+    "search": "Search",
+    "filter": "Filter",
+    "sort": "Sort",
+    "refresh": "Refresh",
+    "import": "Import",
+    "export": "Export",
+    "upload": "Upload",
+    "download": "Download",
+    "copy": "Copy",
+    "duplicate": "Duplicate",
+    "retry": "Retry",
+    "reroll": "Re-roll",
+    "adopt": "Adopt",
+    "reject": "Reject",
+    "back": "Back",
+    "next": "Next",
+    "prev": "Previous",
+    "more": "More",
+    "settings": "Settings",
+    "logout": "Log out",
+    "switchLang": "Switch language"
+  },
+  "common": {
+    "loading": "Loading…",
+    "saving": "Saving…",
+    "generating": "Generating…",
+    "empty": "No data",
+    "error": "Error",
+    "success": "Success",
+    "warning": "Warning",
+    "info": "Info",
+    "yes": "Yes",
+    "no": "No",
+    "all": "All",
+    "none": "None",
+    "auto": "Auto",
+    "manual": "Manual",
+    "draft": "Draft",
+    "published": "Published",
+    "completed": "Completed",
+    "inProgress": "In progress",
+    "notStarted": "Not started"
+  },
+  "time": {
+    "now": "Just now",
+    "minuteAgo": "{n, plural, =1 {1 min ago} other {# min ago}}",
+    "hourAgo": "{n, plural, =1 {1 hour ago} other {# hours ago}}",
+    "dayAgo": "{n, plural, =1 {yesterday} other {# days ago}}",
+    "duration": {
+      "seconds": "{n}s",
+      "minutes": "{n} min",
+      "hours": "{n}h"
+    }
+  },
+  "validation": {
+    "required": "Required",
+    "tooShort": "At least {min} characters",
+    "tooLong": "Max {max} characters",
+    "invalidEmail": "Invalid email",
+    "invalidUrl": "Invalid URL",
+    "passwordTooWeak": "Password must be at least 8 characters"
+  }
+}

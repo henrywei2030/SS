@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "."
+  },
+  "include": [
+    "src/**/*",
+    "storyboard/**/*",
+    "generation/**/*",
+    "cost/**/*",
+    "asset/**/*",
+    "analytics/**/*"
+  ]
+}

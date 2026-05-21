@@ -1,0 +1,32 @@
+{
+  "name": "@ss/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./storyboard": "./storyboard/index.ts",
+    "./generation": "./generation/index.ts",
+    "./cost": "./cost/index.ts",
+    "./asset": "./asset/index.ts",
+    "./analytics": "./analytics/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "vitest run --config=/dev/null storyboard generation"
+  },
+  "dependencies": {
+    "@ss/adapters": "workspace:*",
+    "@ss/db": "workspace:*",
+    "@ss/shared": "workspace:*",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.2"
+  }
+}

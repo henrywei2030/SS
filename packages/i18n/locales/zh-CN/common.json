@@ -1,0 +1,81 @@
+{
+  "app": {
+    "name": "星垣工坊",
+    "name_en": "StarsAlign Studio",
+    "tagline": "群星垒垣，万剧汇聚",
+    "version": "v{version}"
+  },
+  "actions": {
+    "create": "创建",
+    "save": "保存",
+    "saveAll": "全部保存",
+    "delete": "删除",
+    "edit": "编辑",
+    "cancel": "取消",
+    "confirm": "确认",
+    "publish": "发布",
+    "unpublish": "撤回发布",
+    "submit": "提交",
+    "search": "搜索",
+    "filter": "筛选",
+    "sort": "排序",
+    "refresh": "刷新",
+    "import": "导入",
+    "export": "导出",
+    "upload": "上传",
+    "download": "下载",
+    "copy": "复制",
+    "duplicate": "克隆",
+    "retry": "重试",
+    "reroll": "重抽",
+    "adopt": "采纳",
+    "reject": "废弃",
+    "back": "返回",
+    "next": "下一步",
+    "prev": "上一步",
+    "more": "更多",
+    "settings": "设置",
+    "logout": "退出登录",
+    "switchLang": "切换语言"
+  },
+  "common": {
+    "loading": "加载中…",
+    "saving": "保存中…",
+    "generating": "生成中…",
+    "empty": "暂无数据",
+    "error": "出错了",
+    "success": "成功",
+    "warning": "警告",
+    "info": "提示",
+    "yes": "是",
+    "no": "否",
+    "all": "全部",
+    "none": "无",
+    "auto": "自动",
+    "manual": "手动",
+    "draft": "草稿",
+    "published": "已发布",
+    "completed": "已完成",
+    "inProgress": "进行中",
+    "notStarted": "未开始"
+  },
+  "time": {
+    "now": "刚刚",
+    "minuteAgo": "{n, plural, =1 {1 分钟前} other {# 分钟前}}",
+    "hourAgo": "{n, plural, =1 {1 小时前} other {# 小时前}}",
+    "dayAgo": "{n, plural, =1 {昨天} other {# 天前}}",
+    "duration": {
+      "seconds": "{n} 秒",
+      "minutes": "{n} 分",
+      "hours": "{n} 小时"
+    }
+  },
+  "validation": {
+    "required": "必填",
+    "tooShort": "至少 {min} 个字符",
+    "tooLong": "不超过 {max} 个字符",
+    "invalidEmail": "邮箱格式不正确",
+    "invalidUrl": "网址格式不正确",
+    "passwordTooWeak": "密码至少 8 位"
+  }
+}

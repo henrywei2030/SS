@@ -1,0 +1,173 @@
+{
+  "workbench": {
+    "director": "Director",
+    "art": "Art",
+    "aigc": "AIGC",
+    "edit": "Editing",
+    "library": "Library",
+    "analytics": "Analytics"
+  },
+  "missionControl": {
+    "title": "Mission Control",
+    "newProject": "New project",
+    "cloneProject": "Clone project",
+    "totalProgress": "Overall progress",
+    "completedShots": "{completed} / {total} shots completed",
+    "totalEpisodes": "Total episodes",
+    "totalShots": "Total shots",
+    "totalAssets": "Total assets",
+    "withReference": "With reference",
+    "team": "Team",
+    "memberCount": "{n, plural, =1 {1 member} other {# members}}"
+  },
+  "storyCompass": {
+    "title": "Story Compass",
+    "scriptAnalysis": "Script analysis",
+    "wholeEpisodeDiagnosis": "Episode diagnosis",
+    "highlights": "Highlights",
+    "issues": "Priority fixes",
+    "emotionCurve": "Emotion curve",
+    "productionCurve": "Production curve",
+    "dimensions": {
+      "hook": "Hook strength",
+      "suspense": "Suspense",
+      "twist": "Twist impact",
+      "climax": "Climax density",
+      "conflict": "Conflict focus",
+      "dialogue": "Dialogue sharpness",
+      "pace": "Pacing",
+      "urgency": "Urgency hold"
+    }
+  },
+  "storyboardStudio": {
+    "title": "Storyboard Studio",
+    "shotNumber": "Shot #",
+    "framing": "Framing",
+    "angle": "Angle",
+    "shotContent": "Shot content",
+    "videoPrompt": "Video prompt (incl. dialogue/OS)",
+    "mergeDown": "Merge down",
+    "splitShot": "Split shot",
+    "batchGenerate": "Batch generate",
+    "publishStoryboard": "Publish storyboard"
+  },
+  "assetForge": {
+    "title": "Asset Forge",
+    "characters": "Characters",
+    "scenes": "Scenes",
+    "props": "Props",
+    "newCharacter": "New character",
+    "newScene": "New scene",
+    "newProp": "New prop",
+    "generateAsset": "Generate asset",
+    "threeView": "Three views",
+    "panorama360": "360° panorama",
+    "complianceCheck": "Compliance check",
+    "complianceId": "Compliance ID",
+    "voiceUpload": "Upload voice",
+    "confirmAsset": "Confirm",
+    "characterRoles": {
+      "leadMale": "Lead - Male",
+      "leadFemale": "Lead - Female",
+      "antagonist": "Lead - Antagonist",
+      "supporting": "Supporting",
+      "guest": "Guest",
+      "system": "System / Narration"
+    }
+  },
+  "generationEngine": {
+    "title": "Generation Engine",
+    "linkedAssets": "Linked assets",
+    "originalScript": "Original script",
+    "videoPrompt": "Video prompt",
+    "videoPreview": "Video preview",
+    "history": "History",
+    "autoMatch": "Auto-match",
+    "uploadMaterial": "Upload material",
+    "generateVideo": "Generate video",
+    "cost": "Cost",
+    "gachaRatio": "Gacha ratio",
+    "estimatedCost": "Estimated cost: ¥{amount}"
+  },
+  "editSuite": {
+    "title": "Edit Suite",
+    "comingSoon": "Coming soon",
+    "materialManage": "Material",
+    "timeline": "Timeline",
+    "exportDeliver": "Export & deliver"
+  },
+  "mediaVault": {
+    "title": "Media Vault",
+    "publicLibrary": "Public library",
+    "myMaterials": "My materials",
+    "favorites": "Favorites",
+    "allMaterials": "All materials",
+    "uploadMaterial": "Upload material",
+    "multiSelect": "Multi-select",
+    "aiBatchAnalyze": "AI batch analyze"
+  },
+  "insightCockpit": {
+    "title": "Insight Cockpit",
+    "dataOverview": "Data overview",
+    "platformCost": "Platform total cost",
+    "imageCost": "Image cost",
+    "videoCost": "Video cost",
+    "seedanceCost": "Seedance cost",
+    "apiUsage": "API usage",
+    "modelDistribution": "Model usage distribution",
+    "trendChart": "30-day trend",
+    "projectCostTop5": "Top 5 projects by cost",
+    "topGachaShots": "Highest gacha ratio shots"
+  },
+  "collabHub": {
+    "title": "Collab Hub",
+    "memberManage": "Members",
+    "episodeAssign": "Episode assignment",
+    "episodeOverview": "Episode overview",
+    "workReport": "Work report",
+    "operationLog": "Operation log",
+    "recycleBin": "Recycle bin",
+    "inviteApproval": "Invitation approval",
+    "memberRoles": {
+      "owner": "Owner",
+      "admin": "Admin",
+      "leader": "Leader",
+      "member": "Member",
+      "viewer": "Viewer"
+    },
+    "assignRoles": {
+      "owner": "Primary owner",
+      "collab": "Collaborator",
+      "reviewer": "Reviewer"
+    }
+  },
+  "admin": {
+    "title": "Admin",
+    "dashboard": "Dashboard",
+    "members": "Members",
+    "operationLogs": "Operation logs",
+    "workReports": "Work reports",
+    "apiUsage": "API usage",
+    "monitorCenter": "Monitor center",
+    "providerConfig": "AI Providers",
+    "promptTemplates": "Prompt templates",
+    "presetTemplates": "Preset templates",
+    "styleProfiles": "Style profiles",
+    "mediaLibrary": "Media library",
+    "systemSettings": "System settings",
+    "dbExplorer": "Database explorer",
+    "providerKey": {
+      "title": "API Key management",
+      "subtitle": "All AI model API keys configured here, encrypted at rest in the database",
+      "currentValue": "Current value",
+      "masked": "(masked)",
+      "notSet": "Not configured",
+      "setKey": "Set key",
+      "clearKey": "Clear key",
+      "testConnection": "Test connection",
+      "fromEnv": "(from environment variable)",
+      "fromDb": "(database configured)",
+      "lastUpdated": "Updated {time} by {user}"
+    }
+  }
+}
