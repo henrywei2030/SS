@@ -464,10 +464,29 @@ export const assetRouter = router({
         }
       }
 
+      // 若改了 prompt 或任何槽位字段,联动重算 maturity
+      const slotFieldNames = Object.values(SLOT_FIELD);
+      const touchesPromptOrSlot =
+        input.patch.prompt !== undefined ||
+        Object.keys(input.patch).some((k) => slotFieldNames.includes(k));
+
       const after = await ctx.prisma.asset.update({
         where: { id: input.assetId },
         data: input.patch,
       });
+
+      if (touchesPromptOrSlot) {
+        const newMaturity = computeMaturity(
+          after as unknown as Parameters<typeof computeMaturity>[0],
+        );
+        if (newMaturity !== after.maturity) {
+          await ctx.prisma.asset.update({
+            where: { id: after.id },
+            data: { maturity: newMaturity },
+          });
+          after.maturity = newMaturity;
+        }
+      }
 
       // 文本字段改动入训练集
       for (const [field, newVal] of Object.entries(input.patch)) {
@@ -487,15 +506,22 @@ export const assetRouter = router({
       return after;
     }),
 
-  /** 软删 */
+  /** 软删 — 联动软删该 asset 所有 AssetUsageBinding(防 audit 永远报悬空) */
   delete: protectedProcedure
     .input(z.object({ assetId: z.string().cuid() }))
     .mutation(async ({ ctx, input }) => {
       const asset = await loadAssetWithAccess(ctx, input.assetId);
-      await ctx.prisma.asset.update({
-        where: { id: input.assetId },
-        data: { deletedAt: new Date() },
-      });
+      const now = new Date();
+      await ctx.prisma.$transaction([
+        ctx.prisma.asset.update({
+          where: { id: input.assetId },
+          data: { deletedAt: now },
+        }),
+        ctx.prisma.assetUsageBinding.updateMany({
+          where: { assetId: input.assetId, deletedAt: null },
+          data: { deletedAt: now },
+        }),
+      ]);
       await logOperation(ctx, 'asset.delete', 'asset', input.assetId, asset, null);
       return { ok: true };
     }),
@@ -762,37 +788,48 @@ export const assetRouter = router({
       }
       const finishedAt = new Date();
 
-      // 每张图建 MediaItem + 一条 GenerationAttempt 汇总
-      const mediaIds: string[] = [];
-      for (let i = 0; i < imageResult.imageUrls.length; i++) {
-        const url = imageResult.imageUrls[i]!;
-        const media = await ctx.prisma.mediaItem.create({
-          data: {
-            projectId: asset.projectId,
-            scope: 'PROJECT',
-            kind: 'IMAGE',
-            filename: `${asset.name}-${input.slot}-${startedAt.getTime()}-${i}.png`,
-            mimeType: 'image/png',
-            sizeBytes: 0,
-            storageKey: url, // mock 阶段直接存外部 URL;真接入后 = MinIO key
-            cdnUrl: url,
-            meta: {
-              slot: input.slot,
-              prompt: compiled.positive,
-              negative: compiled.negative,
-              width: imageResult.width,
-              height: imageResult.height,
-              providerId,
-              modelId: input.modelId ?? providerId,
+      // 每张图建 MediaItem(并发 Promise.all 避免 N 次串行 round-trip)
+      // sanitize filename — asset.name 可能含中文/空格/标点,转 ASCII-safe key
+      const safeName = asset.name
+        .replace(/[^a-zA-Z0-9_-]+/g, '_')
+        .slice(0, 40);
+      const medias = await Promise.all(
+        imageResult.imageUrls.map((url, i) =>
+          ctx.prisma.mediaItem.create({
+            data: {
+              projectId: asset.projectId,
+              scope: 'PROJECT',
+              kind: 'IMAGE',
+              filename: `${safeName}-${input.slot}-${startedAt.getTime()}-${i}.png`,
+              mimeType: 'image/png',
+              // mock 阶段无真实文件,按 width*height*0.5 估占用(避免 Phase 2 统计全 0)
+              sizeBytes:
+                imageResult.width && imageResult.height
+                  ? Math.round(imageResult.width * imageResult.height * 0.5)
+                  : 0,
+              // 用 placeholder:// 前缀让真接入时一眼能扫出迁移目标
+              storageKey: url.startsWith('http')
+                ? `placeholder://external?u=${encodeURIComponent(url)}`
+                : url,
+              cdnUrl: url,
+              meta: {
+                slot: input.slot,
+                prompt: compiled.positive,
+                negative: compiled.negative,
+                width: imageResult.width,
+                height: imageResult.height,
+                providerId,
+                modelId: input.modelId ?? providerId,
+              },
+              aspectRatio,
+              viewKind: input.slot,
+              source: 'AIGC',
+              sourceRef: asset.id,
             },
-            aspectRatio,
-            viewKind: input.slot,
-            source: 'AIGC',
-            sourceRef: asset.id,
-          },
-        });
-        mediaIds.push(media.id);
-      }
+          }),
+        ),
+      );
+      const mediaIds = medias.map((m) => m.id);
 
       const attempt = await ctx.prisma.generationAttempt.create({
         data: {
@@ -901,9 +938,15 @@ export const assetRouter = router({
 
       return attempts.map((a) => ({
         attempt: a,
+        // 每张 media 单独标 isConfirmed,让前端 Card 级别准确显示(不再整批标 confirmed)
         media: a.outputMediaIds
-          .map((id) => mediaMap.get(id))
+          .map((id) => {
+            const m = mediaMap.get(id);
+            if (!m) return null;
+            return { ...m, isConfirmed: confirmedMediaIds.has(m.id) };
+          })
           .filter((m): m is NonNullable<typeof m> => !!m),
+        // 保留 attempt 级 isConfirmed(向前兼容)— 表示"本次生成有任意一张被确认"
         isConfirmed: a.outputMediaIds.some((id) => confirmedMediaIds.has(id)),
       }));
     }),
@@ -920,7 +963,24 @@ export const assetRouter = router({
     .mutation(async ({ ctx, input }) => {
       const asset = await loadAssetWithAccess(ctx, input.assetId);
 
-      // 验证 mediaItem 存在 + 属于本项目
+      // reference / detail 不是合法的确认槽位(仅用于生成参考,不写到资产槽位)
+      if (input.slot === 'reference' || input.slot === 'detail') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `slot '${input.slot}' 不能确认到资产槽位 — 仅作为生成参考`,
+        });
+      }
+
+      // 锁定资产禁止改槽位(配合 update 的锁定守卫)
+      if (asset.lockedAt) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '资产已锁定,先解锁才能改槽位图',
+        });
+      }
+
+      // 验证 mediaItem 属于本项目 + 必须源自本资产的 GenerationAttempt
+      // 防"把 A 资产的图设到 B 资产槽位"数据混淆
       const media = await ctx.prisma.mediaItem.findFirst({
         where: {
           id: input.mediaItemId,
@@ -932,6 +992,14 @@ export const assetRouter = router({
         throw new TRPCError({
           code: 'NOT_FOUND',
           message: 'MediaItem 不存在或不属于本项目',
+        });
+      }
+      // MediaItem.sourceRef 在 generateImage 时存的是 asset.id
+      // 允许 source != AIGC 的图(用户上传未来支持时)绕过此检查
+      if (media.source === 'AIGC' && media.sourceRef && media.sourceRef !== asset.id) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'MediaItem 来自其他资产的生成 — 跨资产挪用会破坏一致性,请重新为本资产生成',
         });
       }
 
@@ -990,6 +1058,12 @@ export const assetRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const asset = await loadAssetWithAccess(ctx, input.assetId);
+      if (asset.lockedAt) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '资产已锁定,先解锁才能清除槽位图',
+        });
+      }
       const fieldName = SLOT_FIELD[input.slot];
       const projected = {
         ...asset,
@@ -1086,16 +1160,21 @@ export const assetRouter = router({
         },
       });
 
-      const binding = existing
-        ? await ctx.prisma.assetUsageBinding.update({
-            where: { id: existing.id },
-            data: {
-              required: input.required,
-              note: input.note,
-              deletedAt: null, // 若被软删过,重新激活
-            },
-          })
-        : await ctx.prisma.assetUsageBinding.create({
+      // 并发兜底:即使 findFirst 没查到,两个并发请求都走 create 分支也会撞 unique。
+      // 抓 P2002 → 回退 update 走完。
+      let binding;
+      if (existing) {
+        binding = await ctx.prisma.assetUsageBinding.update({
+          where: { id: existing.id },
+          data: {
+            required: input.required,
+            note: input.note,
+            deletedAt: null,
+          },
+        });
+      } else {
+        try {
+          binding = await ctx.prisma.assetUsageBinding.create({
             data: {
               assetId: input.assetId,
               projectId: asset.projectId,
@@ -1107,6 +1186,28 @@ export const assetRouter = router({
               note: input.note,
             },
           });
+        } catch (e) {
+          // P2002 — 并发产生,重读后 update
+          const dup = await ctx.prisma.assetUsageBinding.findFirst({
+            where: {
+              assetId: input.assetId,
+              episodeId: input.episodeId,
+              sceneId: input.sceneId ?? null,
+              shotId: input.shotId ?? null,
+              usageType: input.usageType,
+            },
+          });
+          if (!dup) throw e;
+          binding = await ctx.prisma.assetUsageBinding.update({
+            where: { id: dup.id },
+            data: {
+              required: input.required,
+              note: input.note,
+              deletedAt: null,
+            },
+          });
+        }
+      }
       await logOperation(
         ctx,
         existing ? 'asset.binding.update' : 'asset.binding.create',
@@ -1280,12 +1381,14 @@ export const assetRouter = router({
     .query(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId, ctx.user.id);
 
-      // (a) 收集全项目所有 scene 中的 character + place
-      const scenes = await ctx.prisma.scene.findMany({
-        where: { episodeId: { not: undefined }, deletedAt: null },
-        include: { episode: { select: { id: true, number: true, projectId: true } } },
+      // (a) 只查本项目下的 scene(经 episode.projectId 过滤,DB 层完成,避免拉全表 + 跨租户信息泄漏)
+      const projectScenes = await ctx.prisma.scene.findMany({
+        where: {
+          episode: { projectId: input.projectId },
+          deletedAt: null,
+        },
+        include: { episode: { select: { id: true, number: true } } },
       });
-      const projectScenes = scenes.filter((s) => s.episode.projectId === input.projectId);
 
       const allMentionedChars = new Set<string>();
       const allMentionedScenes = new Map<string, { episodeNumber: number; sceneNumber: string }>();

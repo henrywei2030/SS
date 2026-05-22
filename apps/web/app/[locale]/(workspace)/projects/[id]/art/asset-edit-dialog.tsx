@@ -826,7 +826,7 @@ function GenerationPanel({
                   attemptId={c.attempt.id}
                   mediaId={media.id}
                   url={media.cdnUrl ?? media.storageKey}
-                  isConfirmed={c.isConfirmed}
+                  isConfirmed={media.isConfirmed}
                   aspectRatio={media.aspectRatio ?? '1:1'}
                   onOpenInfo={() => setInfoOpen({ attempt: c.attempt, media })}
                   onConfirm={() =>
