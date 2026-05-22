@@ -5,6 +5,53 @@
 
 ---
 
+## 2026-05-23(周六,mac-studio · 七次收工)— 跨设备协作工作流升级 + Win 笔记本接入方案
+
+**完成**
+- ✅ **多设备协作 SOP 升级**(CLAUDE.md):
+  - 双端 → 多端,新增「设备登记表」(mac-mini / mac-studio / win-laptop)+ 跨设备数据矩阵
+  - 按用户决策**统一为「开工/收工」两态**,删除原"换设备"独立协议(简化心智 — 离开当前设备必 commit + push)
+  - 强化破坏性命令清单(rm / force push / 改 .gitignore / 改 git config / 跑 migration 仍需点头)
+- ✅ **跨平台工具链落地**:
+  - [scripts/init-env.mjs](scripts/init-env.mjs) — 一键生成 `.env.local` + `JWT_SECRET` / `APP_MASTER_KEY`(替代 BSD `sed`,Node `crypto.randomBytes` 三平台通用,幂等)
+  - [scripts/preflight.mjs](scripts/preflight.mjs) — 30 秒开工自检(node ≥20.18 / pnpm ≥9 / Docker / .env / node_modules / git 工作区 / git 远程同步)
+  - `package.json` 加 `pnpm setup:env` + `pnpm preflight`
+  - 修了 preflight 的 Docker 检测 bug(stdio:ignore 时 run helper 触发 null.trim)
+- ✅ **Win 笔记本完整接入方案** — 新建 [docs/SETUP-WINDOWS.md](docs/SETUP-WINDOWS.md):
+  - PowerShell 7 + Docker Desktop 原生路径(WSL2 作为附录 A 可选)
+  - 11 步首次拉起(按用户决策:API Key 留到系统构建完成后录入,首次拉起精简)
+  - Win 专属常见问题(corepack / 长路径 / OneDrive 同步 / Defender / GBK 编码 9 项)
+  - 出差携带 checklist(改:删 API Key 同步项,加 GitHub 账户对齐项)
+  - **附录 B 新增:GitHub 账户对齐**(`git config --global user.name/email` + `gh auth login` 三步)
+- ✅ **文档收口**:
+  - [docs/HOME-SETUP.md](docs/HOME-SETUP.md) 加跨设备 banner + 删 BSD `sed` 命令换成跨平台脚本 + 删 API Key 录入步骤
+  - [QUICKSTART.md](QUICKSTART.md) 顶部加平台分流导航 + 用脚本替换 `sed`
+  - [TODO.md](TODO.md) 跨设备验证升级为多端,勾完 mac-studio 验证 2 项 + 留 Win 待办 + 加 GitHub 对齐待办
+- ✅ **GitHub 账户对齐诊断**:
+  - 现状:全局 `~/.gitconfig` 文件不存在,`git config --global user.name/email` 全空
+  - 但历史 commit author 一直是 `henrywei2030 <henrywei1624@gmail.com>` — 说明之前一直靠 Claude Code 临时注入,身份未持久化
+  - `osxkeychain` helper 已就位但 `security find-internet-password -s github.com` 查不到(可能在专用 keychain item)
+  - `gh` CLI 未登录
+  - 本次 commit 用 `git -c user.name=... -c user.email=...` 临时身份完成(遵守"不擅自改 git config"硬规则)
+  - 一键固化命令已准备给用户(见本次会话末)
+- ✅ **脚本现场验证**:`pnpm setup:env`(密钥幂等保留)+ `pnpm preflight`(7/7 项检查全绿,git 未提交变更仅 warning)
+
+**进行中**
+- 🚧 W5.1 UI 骨架(4 列布局产品形态待决策)— 主线挂起,等出差回来或在 Win 上启动
+- 🚧 Win 笔记本现场首次拉起验证 — 明天出差到达后做
+
+**问题 / 待决策**
+- ❓ GitHub 账户身份是否要永久固化到 `~/.gitconfig`?(我无法擅自改 git config,需要用户手动跑命令或显式授权一次)
+- ❓ W5.1 产品形态(主交互节奏)
+
+**下次接着做**
+- 📌 (出差路上)在 Win 笔记本按 [docs/SETUP-WINDOWS.md](docs/SETUP-WINDOWS.md) 11 步首次拉起
+- 📌 Win 上跑 `pnpm preflight` 应全绿 + GitHub 账户对齐(附录 B)
+- 📌 在 Win 上说 `开工,在 win-laptop` 验证接续 SOP 是否丝滑
+- 📌 待 Win 验证完,回归 W5.1 主线
+
+---
+
 ## 2026-05-22(周五,公司 Mac Mini · 六次收工)— W5.0 视频生成数据底座
 
 **完成**

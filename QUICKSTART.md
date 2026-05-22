@@ -2,6 +2,19 @@
 
 > 假设：你刚 `git clone` 了仓库，机器已装 Docker + Node 20+ + pnpm 9。
 
+## 平台分流
+
+| 你的设备 | 推荐文档 |
+|---|---|
+| macOS(首次拉起完整流程) | [docs/HOME-SETUP.md](docs/HOME-SETUP.md) |
+| Windows(出差/备机完整流程) | [docs/SETUP-WINDOWS.md](docs/SETUP-WINDOWS.md) |
+| 跨设备协作规则 + 设备登记 | [CLAUDE.md](CLAUDE.md) |
+| 三平台通用速记 | 本文件(下方) |
+
+**跨平台脚本**(macOS / Linux / Windows 三平台一致):
+- `pnpm setup:env` — 自动生成 `.env.local` + `JWT_SECRET` / `APP_MASTER_KEY` 两个密钥
+- `pnpm preflight` — 30 秒环境自检(Node / pnpm / Docker / git / `.env.local`)
+
 ---
 
 ## 一、首次环境准备
@@ -27,22 +40,25 @@ rustc --version
 ```
 
 ### 3. 配置环境变量
+
+**三平台一键搞定**(macOS / Linux / Windows 通用):
 ```bash
-cp .env.example .env.local
+node scripts/init-env.mjs
+# 装完依赖后也可以用:
+# pnpm setup:env
 ```
 
-`.env.local` 里 **必填** 的只有两项：
+脚本会自动完成:
+1. 从 `.env.example` 复制 `.env.local`(若不存在)
+2. 用 Node 自带 `crypto.randomBytes` 生成 `JWT_SECRET` + `APP_MASTER_KEY`(各 64 字符 hex)
+3. 已有有效值的密钥**不会覆盖**(幂等)
 
-| 变量 | 说明 | 生成命令 |
-|---|---|---|
-| `JWT_SECRET` | 登录 token 签名密钥 | `openssl rand -hex 32` |
-| `APP_MASTER_KEY` | 加密数据库里 API Key 的主密钥 | `openssl rand -hex 32` |
+`.env.local` 里 **必填** 的只有这两项,其它都有合理默认值:
 
-可以一次性自动生成并写入：
-```bash
-sed -i '' "s|^JWT_SECRET=.*|JWT_SECRET=$(openssl rand -hex 32)|" .env.local
-sed -i '' "s|^APP_MASTER_KEY=.*|APP_MASTER_KEY=$(openssl rand -hex 32)|" .env.local
-```
+| 变量 | 说明 |
+|---|---|
+| `JWT_SECRET` | 登录 token 签名密钥 |
+| `APP_MASTER_KEY` | 加密数据库里 API Key 的主密钥(一旦设置不要更换) |
 
 ⚠️ **关于 AI Provider API Key（Seedance / 豆包 / Nano Banana 等）**：
 **不要写进 .env.local**！登录后到 `/admin/providers` 后台填，加密存数据库。

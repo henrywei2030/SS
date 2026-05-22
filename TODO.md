@@ -1,7 +1,7 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新：2026-05-22(深夜·六收工)
-> 仓库：https://github.com/henrywei2030/SS
+> 最后更新:2026-05-23(七收工 · 跨设备协作工作流升级 + Win 接入)
+> 仓库:https://github.com/henrywei2030/SS
 
 ---
 
@@ -12,8 +12,11 @@
 - [ ] **W5.2+** — Seedance 抽卡 router + 自动 @ 资产匹配(W1.6 auto-match 已就绪)
 - [ ] **W5.3** — BullMQ video-gen worker + 实时进度推送(SSE)+ providerJobId 轮询
 
-- [ ] **跨设备协作工作流验证**(Mac Studio 端)
-  - 待：在家 Mac Studio `git pull` + 登录同一 Project + 说"开工"验证接续
+- [ ] **跨设备协作工作流验证**(多端)
+  - [x] 家里 Mac Studio `git pull` + 登录同一 Project + 说 `开工,在 mac-studio` 验证接续 — 2026-05-23
+  - [x] 跨平台脚本验证:`mac-studio` 上 `pnpm setup:env`(幂等) + `pnpm preflight`(7 项全绿) — 2026-05-23
+  - [ ] 出差 Win 笔记本照 [docs/SETUP-WINDOWS.md](docs/SETUP-WINDOWS.md) 首次拉起 → `开工,在 win-laptop` 验证接续 — 2026-05-24 起
+  - [ ] GitHub 账户对齐(`user.name` / `user.email` 全局固化)+ `gh auth login` 一次性登录
 
 - [ ] **手动业务验证 W3 + W4**(任一设备)
   - 配 Claude API Key → 跑剧本上传 + generateForEpisode + asset.breakdown

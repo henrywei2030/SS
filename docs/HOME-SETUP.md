@@ -1,6 +1,14 @@
-# 在家 Mac Studio 接续开发 · 完整流程
+# 在家 Mac Studio 接续开发 · macOS 完整流程
 
 > 适用：① 首次在新 Mac 拉取 SS 项目 ② 每日开工前的环境准备
+>
+> 💻 **其他设备文档**:
+> - Windows 笔记本(出差 / 备机)→ [SETUP-WINDOWS.md](SETUP-WINDOWS.md)
+> - 跨设备协作规则 + 设备登记表 → [../CLAUDE.md](../CLAUDE.md)
+>
+> ⚡ **跨平台脚本**(macOS / Win 共用):
+> - `pnpm setup:env` — 自动生成 .env.local + 密钥(替代 BSD `sed` 命令)
+> - `pnpm preflight` — 30 秒环境自检
 
 ---
 
@@ -14,11 +22,9 @@
 cd ~/Project   # 或你喜欢的位置
 git clone https://github.com/henrywei2030/SS.git starsalign-studio
 cd starsalign-studio
-cp .env.example .env.local
 
-# 自动生成两个安全密钥
-sed -i '' "s|^JWT_SECRET=.*|JWT_SECRET=$(openssl rand -hex 32)|" .env.local
-sed -i '' "s|^APP_MASTER_KEY=.*|APP_MASTER_KEY=$(openssl rand -hex 32)|" .env.local
+# 跨平台一键: 复制 .env.example + 生成 JWT/APP key
+node scripts/init-env.mjs
 
 corepack enable
 pnpm infra:up
@@ -26,6 +32,7 @@ corepack pnpm install
 corepack pnpm db:generate
 corepack pnpm db:migrate     # 输入 migration 名时直接回车跳过
 corepack pnpm db:seed
+corepack pnpm preflight      # 自检一遍全绿才往下走
 
 # 设 admin 密码
 PATH="$PATH:$PWD/packages/db/node_modules/.bin" \
@@ -100,23 +107,24 @@ cd starsalign-studio
 
 ### 第三步：本地 `.env.local`
 
+**跨平台一键脚本**(macOS / Linux / Windows 通用):
 ```bash
-cp .env.example .env.local
+node scripts/init-env.mjs
+# 或装完依赖后:
+# pnpm setup:env
 ```
 
-⚠️ **必填这两个**（用 openssl 一键生成）：
-
-```bash
-sed -i '' "s|^JWT_SECRET=.*|JWT_SECRET=$(openssl rand -hex 32)|" .env.local
-sed -i '' "s|^APP_MASTER_KEY=.*|APP_MASTER_KEY=$(openssl rand -hex 32)|" .env.local
-```
+脚本自动完成:
+1. 从 `.env.example` 复制一份 `.env.local`(若不存在)
+2. 用 Node 的 `crypto.randomBytes` 生成 `JWT_SECRET` + `APP_MASTER_KEY`(各 64 字符 hex)
+3. 已有有效值的密钥**不会覆盖**(幂等)
 
 验证（应输出各 64 字符）：
 ```bash
 grep -E "^(JWT_SECRET|APP_MASTER_KEY)=" .env.local | sed 's/=.*/=...(64 chars)/'
 ```
 
-**这两个密钥跟公司 Mac 不一样没事** —— 两台机器各跑各的本地数据库。
+**这两个密钥跟其他设备不一样没事** —— 各设备各跑各的本地数据库,见 [CLAUDE.md → 跨设备数据矩阵](../CLAUDE.md)。
 
 ### 第四步：启动本地基础设施
 
@@ -171,17 +179,13 @@ corepack pnpm --filter @ss/web dev
 
 🎉 看到 Mission Control 即成功。
 
-### 第八步：填 API Key（最关键的一步！）
+### 第八步：API Key 暂不录入(等系统构建完成)
 
-家里 Mac 的本地数据库是空的，**API Key 需要重新填**：
+Phase 1 阶段 Provider API Key **暂不需要**在每台设备录入。理由:
+- 业务链路全部 Mock 跑通(MockImageProvider / 占位符 storageKey)
+- 后台 `/admin/providers` 还在迭代,等系统构建完成(W7+)再统一录入一次
 
-1. 登录后 → 右上角头像 → 后台管理
-2. 进 `/zh-CN/admin/providers`
-3. 找到 `Seedance 2.0` / `Claude Sonnet 4.5` → 点"设置"
-4. 把公司 Mac 上的同款 API Key 复制过来填入
-5. 保存
-
-这些 Key 会用家里 Mac 的 APP_MASTER_KEY 加密存储，安全无虞。
+到时候按 [CLAUDE.md → 跨设备数据矩阵](../CLAUDE.md) 提示,每台设备登入后台填一次即可。
 
 ---
 
