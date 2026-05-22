@@ -656,10 +656,18 @@ function GenerationPanel({
     slot: selectedSlot,
   });
 
+  const [infoOpen, setInfoOpen] = React.useState<
+    | {
+        attempt: NonNullable<typeof candidates>[number]['attempt'];
+        media: NonNullable<typeof candidates>[number]['media'][number];
+      }
+    | null
+  >(null);
+
   const generateMut = trpc.asset.generateImage.useMutation({
     onSuccess: (res) => {
       toast.success(
-        `生成完成 · ${res.candidates.length} 张候选${res.mock ? '(占位 · W4-MM.6 接入真生成)' : ''}`,
+        `生成完成 · ${res.candidates.length} 张候选 · 成本 ¥${res.cost.toFixed(4)}`,
       );
       void refetchCandidates();
       onChanged();
@@ -811,16 +819,16 @@ function GenerationPanel({
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-3">
-            {candidates.map((c) => {
-              const media = c.media[0];
-              if (!media) return null;
-              return (
+            {candidates.flatMap((c) =>
+              c.media.map((media) => (
                 <CandidateCard
-                  key={c.attempt.id}
+                  key={`${c.attempt.id}-${media.id}`}
                   attemptId={c.attempt.id}
                   mediaId={media.id}
+                  url={media.cdnUrl ?? media.storageKey}
                   isConfirmed={c.isConfirmed}
                   aspectRatio={media.aspectRatio ?? '1:1'}
+                  onOpenInfo={() => setInfoOpen({ attempt: c.attempt, media })}
                   onConfirm={() =>
                     confirmMut.mutate({
                       assetId: asset.id,
@@ -830,25 +838,52 @@ function GenerationPanel({
                   }
                   onReject={() => rejectMut.mutate({ attemptId: c.attempt.id })}
                 />
-              );
-            })}
+              )),
+            )}
           </div>
         )}
       </div>
+
+      {infoOpen && (
+        <CandidateInfoDialog
+          attempt={infoOpen.attempt}
+          media={infoOpen.media}
+          onClose={() => setInfoOpen(null)}
+          onSameStyle={() => {
+            const input = infoOpen.attempt.inputJson as Record<string, unknown>;
+            generateMut.mutate({
+              assetId: asset.id,
+              slot: selectedSlot,
+              count: 1,
+              aspectRatio: (input.aspectRatio as string) ?? aspectRatio,
+              extraInstruction: '(同款重新生成)',
+            });
+            setInfoOpen(null);
+          }}
+          onReject={() => {
+            rejectMut.mutate({ attemptId: infoOpen.attempt.id });
+            setInfoOpen(null);
+          }}
+        />
+      )}
     </div>
   );
 }
 
 function CandidateCard({
+  url,
   isConfirmed,
   aspectRatio,
+  onOpenInfo,
   onConfirm,
   onReject,
 }: {
   attemptId: string;
   mediaId: string;
+  url: string | null;
   isConfirmed: boolean;
   aspectRatio: string;
+  onOpenInfo: () => void;
   onConfirm: () => void;
   onReject: () => void;
 }): React.ReactElement {
@@ -870,12 +905,18 @@ function CandidateCard({
       )}
     >
       <div
+        onClick={onOpenInfo}
         className={cn(
-          'flex items-center justify-center bg-[hsl(var(--color-secondary)/0.3)]',
+          'relative flex cursor-pointer items-center justify-center bg-[hsl(var(--color-secondary)/0.3)]',
           aspectClass,
         )}
       >
-        <ImageIcon className="size-8 text-[hsl(var(--color-muted-foreground)/0.4)]" />
+        {url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={url} alt="" className="absolute inset-0 size-full object-cover" />
+        ) : (
+          <ImageIcon className="size-8 text-[hsl(var(--color-muted-foreground)/0.4)]" />
+        )}
         <span className="absolute left-1.5 top-1.5 rounded bg-black/60 px-1.5 py-0.5 font-mono text-[9px] text-white">
           {aspectRatio}
         </span>
@@ -955,7 +996,7 @@ function ConfirmedSlotsPanel({
               </div>
               <div
                 className={cn(
-                  'flex items-center justify-center overflow-hidden rounded border bg-[hsl(var(--color-secondary)/0.3)]',
+                  'relative flex items-center justify-center overflow-hidden rounded border bg-[hsl(var(--color-secondary)/0.3)]',
                   s.aspectClass,
                   mediaId
                     ? 'border-[hsl(var(--color-accent)/0.5)]'
@@ -963,10 +1004,20 @@ function ConfirmedSlotsPanel({
                 )}
               >
                 {mediaId ? (
-                  <div className="flex flex-col items-center gap-1 text-[10px] text-[hsl(var(--color-muted-foreground))]">
-                    <CheckCircle2 className="size-5 text-[hsl(var(--color-accent))]" />
-                    已确认
-                  </div>
+                  (() => {
+                    const media = (asset as { mediaMap?: Record<string, { cdnUrl?: string | null; storageKey: string }> })
+                      .mediaMap?.[mediaId];
+                    const url = media?.cdnUrl ?? media?.storageKey;
+                    return url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={url} alt={s.label} className="absolute inset-0 size-full object-cover" />
+                    ) : (
+                      <div className="flex flex-col items-center gap-1 text-[10px] text-[hsl(var(--color-muted-foreground))]">
+                        <CheckCircle2 className="size-5 text-[hsl(var(--color-accent))]" />
+                        已确认
+                      </div>
+                    );
+                  })()
                 ) : (
                   <span className="text-[10px] text-[hsl(var(--color-muted-foreground))]">未确认</span>
                 )}
@@ -975,6 +1026,183 @@ function ConfirmedSlotsPanel({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 候选图 metadata 弹窗
+// ---------------------------------------------------------------------------
+
+function CandidateInfoDialog({
+  attempt,
+  media,
+  onClose,
+  onSameStyle,
+  onReject,
+}: {
+  attempt: {
+    id: string;
+    providerId: string;
+    modelId: string;
+    inputJson: unknown;
+    costCny: { toString: () => string } | string | number;
+    durationMs: number | null;
+    createdAt: Date;
+    candidateForSlot: string | null;
+  };
+  media: { id: string; storageKey: string; cdnUrl: string | null; aspectRatio: string | null };
+  onClose: () => void;
+  onSameStyle: () => void;
+  onReject: () => void;
+}): React.ReactElement {
+  const input = (attempt.inputJson ?? {}) as {
+    prompt?: string;
+    negative?: string;
+    aspectRatio?: string;
+    sizePx?: string;
+    count?: number;
+    parts?: {
+      stylePart?: string;
+      descriptionPart?: string;
+      promptPart?: string;
+      slotPart?: string;
+      extraPart?: string;
+    };
+  };
+  const url = media.cdnUrl ?? media.storageKey;
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="grid max-h-[90vh] w-full max-w-3xl grid-cols-[1fr_320px] overflow-hidden rounded-lg border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* 大图预览 */}
+        <div className="flex items-center justify-center bg-black/40 p-3">
+          {url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={url} alt="" className="max-h-[85vh] max-w-full object-contain" />
+          ) : (
+            <ImageIcon className="size-12 opacity-40" />
+          )}
+        </div>
+
+        {/* 信息区 */}
+        <div className="flex flex-col overflow-y-auto border-l border-[hsl(var(--color-border))]">
+          <div className="flex items-center justify-between border-b border-[hsl(var(--color-border))] px-4 py-3">
+            <h3 className="text-sm font-semibold">生成详情</h3>
+            <button
+              onClick={onClose}
+              className="rounded p-1 text-[hsl(var(--color-muted-foreground))] hover:bg-[hsl(var(--color-secondary)/0.5)]"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+
+          <div className="flex-1 space-y-3 p-4 text-xs">
+            <KV label="模型" value={attempt.modelId} mono />
+            <KV label="Provider" value={attempt.providerId} mono />
+            <KV label="比例" value={input.aspectRatio ?? media.aspectRatio ?? '—'} mono />
+            <KV label="尺寸" value={input.sizePx ?? '—'} mono />
+            <KV label="槽位" value={attempt.candidateForSlot ?? '—'} mono />
+            <KV
+              label="生成时间"
+              value={new Date(attempt.createdAt).toLocaleString('zh-CN')}
+            />
+            <KV
+              label="耗时"
+              value={attempt.durationMs ? `${attempt.durationMs} ms` : '—'}
+            />
+            <KV label="成本" value={`¥${String(attempt.costCny)}`} />
+
+            <div className="grid gap-1 border-t border-[hsl(var(--color-border)/0.5)] pt-2">
+              <Label className="text-[10px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
+                完整提示词
+              </Label>
+              <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap rounded bg-[hsl(var(--color-secondary)/0.4)] p-2 font-mono text-[10px] leading-relaxed">
+                {input.prompt ?? '—'}
+              </pre>
+            </div>
+
+            {input.negative && (
+              <div className="grid gap-1">
+                <Label className="text-[10px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
+                  负面提示词
+                </Label>
+                <pre className="rounded bg-[hsl(var(--color-secondary)/0.4)] p-2 font-mono text-[10px] leading-relaxed">
+                  {input.negative}
+                </pre>
+              </div>
+            )}
+
+            {input.parts && (
+              <details className="text-[10px]">
+                <summary className="cursor-pointer text-[hsl(var(--color-muted-foreground))]">
+                  prompt 拼接组成
+                </summary>
+                <div className="mt-1 space-y-1 rounded bg-[hsl(var(--color-secondary)/0.3)] p-2">
+                  {input.parts.stylePart && (
+                    <div>
+                      <span className="text-[hsl(var(--color-muted-foreground))]">[风格]</span>{' '}
+                      {input.parts.stylePart}
+                    </div>
+                  )}
+                  {input.parts.descriptionPart && (
+                    <div>
+                      <span className="text-[hsl(var(--color-muted-foreground))]">[描述]</span>{' '}
+                      {input.parts.descriptionPart}
+                    </div>
+                  )}
+                  {input.parts.promptPart && (
+                    <div>
+                      <span className="text-[hsl(var(--color-muted-foreground))]">[资产]</span>{' '}
+                      {input.parts.promptPart}
+                    </div>
+                  )}
+                  {input.parts.slotPart && (
+                    <div>
+                      <span className="text-[hsl(var(--color-muted-foreground))]">[槽位]</span>{' '}
+                      {input.parts.slotPart}
+                    </div>
+                  )}
+                  {input.parts.extraPart && (
+                    <div>
+                      <span className="text-[hsl(var(--color-muted-foreground))]">[额外]</span>{' '}
+                      {input.parts.extraPart}
+                    </div>
+                  )}
+                </div>
+              </details>
+            )}
+          </div>
+
+          <div className="flex gap-2 border-t border-[hsl(var(--color-border))] p-3">
+            <Button onClick={onSameStyle} size="sm" variant="outline" className="flex-1 gap-1.5">
+              <Sparkles className="size-3.5" />
+              同款再生成
+            </Button>
+            <Button onClick={onReject} size="sm" variant="destructive" className="gap-1.5">
+              <Trash2 className="size-3.5" />
+              删除
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function KV({ label, value, mono }: { label: string; value: string; mono?: boolean }): React.ReactElement {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="text-[10px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
+        {label}
+      </span>
+      <span className={cn('text-[11px]', mono && 'font-mono')}>{value}</span>
     </div>
   );
 }

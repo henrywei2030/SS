@@ -36,10 +36,12 @@ type AssetBrief = {
 
 interface Props {
   asset: AssetBrief;
+  /** 主形象 URL — 由父组件从 mediaMap 查好传入,避免 N+1 */
+  heroUrl?: string | null;
   onClick: () => void;
 }
 
-export function AssetCard({ asset, onClick }: Props): React.ReactElement {
+export function AssetCard({ asset, heroUrl, onClick }: Props): React.ReactElement {
   // 出场绑定按集 group
   const { data: bindings } = trpc.asset.listBindings.useQuery({ assetId: asset.id });
 
@@ -94,8 +96,14 @@ export function AssetCard({ asset, onClick }: Props): React.ReactElement {
           aspectClass,
         )}
       >
-        {heroMediaId ? (
-          // W4-MM.6 实装 ImageProvider 后这里渲染真实图片 URL
+        {heroUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={heroUrl}
+            alt={asset.name}
+            className="absolute inset-0 size-full object-cover"
+          />
+        ) : heroMediaId ? (
           <div className="flex flex-col items-center gap-1 text-[10px] text-[hsl(var(--color-muted-foreground))]">
             <ImageIcon className="size-6 opacity-50" />
             主形象已生成

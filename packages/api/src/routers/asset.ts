@@ -19,6 +19,7 @@ import {
   compileAssetPrompt,
   type GenerationSlot,
 } from '@ss/core/asset';
+import { getImageProvider } from '@ss/adapters/provider';
 
 import { router, protectedProcedure } from '../trpc.js';
 import type { Context } from '../context.js';
@@ -237,7 +238,7 @@ function computeMaturity(asset: {
 // ---------------------------------------------------------------------------
 
 export const assetRouter = router({
-  /** 列出资产 — 按 type 过滤 */
+  /** 列出资产 — 按 type 过滤,附 MediaItem URL map(避免前端 N+1 查) */
   list: protectedProcedure
     .input(
       z.object({
@@ -248,7 +249,7 @@ export const assetRouter = router({
     )
     .query(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId, ctx.user.id);
-      return ctx.prisma.asset.findMany({
+      const assets = await ctx.prisma.asset.findMany({
         where: {
           projectId: input.projectId,
           ...(input.type && { type: input.type }),
@@ -256,13 +257,78 @@ export const assetRouter = router({
         },
         orderBy: [{ type: 'asc' }, { name: 'asc' }],
       });
+
+      // 收集所有 mediaId 一次 batch 查
+      const mediaIds = new Set<string>();
+      for (const a of assets) {
+        for (const id of [
+          a.portraitMediaId,
+          a.threeViewMediaId,
+          a.sceneMainMediaId,
+          a.sceneFrontMediaId,
+          a.sceneLeftMediaId,
+          a.sceneRightMediaId,
+          a.sceneBackMediaId,
+          a.panoramaMediaId,
+          a.mainMediaId,
+        ]) {
+          if (id) mediaIds.add(id);
+        }
+      }
+      const medias =
+        mediaIds.size > 0
+          ? await ctx.prisma.mediaItem.findMany({
+              where: { id: { in: Array.from(mediaIds) } },
+              select: {
+                id: true,
+                storageKey: true,
+                cdnUrl: true,
+                aspectRatio: true,
+                viewKind: true,
+              },
+            })
+          : [];
+      const mediaMap: Record<string, (typeof medias)[number]> = {};
+      for (const m of medias) mediaMap[m.id] = m;
+
+      return { assets, mediaMap };
     }),
 
-  /** 详情(含媒体引用 ID,前端再单独取 MediaItem) */
+  /** 详情(含所有 slot 关联的 MediaItem,前端可直接渲染图片) */
   get: protectedProcedure
     .input(z.object({ assetId: z.string().cuid() }))
     .query(async ({ ctx, input }) => {
-      return loadAssetWithAccess(ctx, input.assetId);
+      const asset = await loadAssetWithAccess(ctx, input.assetId);
+
+      const slotIds = [
+        asset.portraitMediaId,
+        asset.threeViewMediaId,
+        asset.sceneMainMediaId,
+        asset.sceneFrontMediaId,
+        asset.sceneLeftMediaId,
+        asset.sceneRightMediaId,
+        asset.sceneBackMediaId,
+        asset.panoramaMediaId,
+        asset.mainMediaId,
+      ].filter((id): id is string => !!id);
+
+      const medias =
+        slotIds.length > 0
+          ? await ctx.prisma.mediaItem.findMany({
+              where: { id: { in: slotIds } },
+              select: {
+                id: true,
+                storageKey: true,
+                cdnUrl: true,
+                aspectRatio: true,
+                viewKind: true,
+              },
+            })
+          : [];
+      const mediaMap: Record<string, (typeof medias)[number]> = {};
+      for (const m of medias) mediaMap[m.id] = m;
+
+      return Object.assign(asset, { mediaMap });
     }),
 
   /** 单个手动创建 */
@@ -663,23 +729,61 @@ export const assetRouter = router({
               ? '2:1'
               : '1:1');
 
-      // 创建 N 张占位 MediaItem + 一条 GenerationAttempt
-      const candidates: Array<{ mediaId: string; attemptId: string }> = [];
-      for (let i = 0; i < input.count; i++) {
+      // 调 ImageProvider(W4-MM.6 真接入,当前 MockImageProvider 走 picsum.photos)
+      const startedAt = new Date();
+      let imageResult;
+      try {
+        const provider = await getImageProvider(providerId);
+        imageResult = await provider.generate(
+          {
+            prompt: compiled.positive,
+            count: input.count,
+            aspectRatio,
+            mode: input.slot === 'three_view' ? 'three_view' : input.slot === 'panorama' ? 'panorama_360' : 'standard',
+            model: input.modelId,
+          },
+          {
+            userId: ctx.user.id,
+            projectId: asset.projectId,
+            assetId: asset.id,
+          },
+        );
+      } catch (e) {
+        await logOperation(ctx, 'asset.generateImage.failed', 'asset', asset.id, null, {
+          error: e instanceof Error ? e.message : String(e),
+          providerId,
+          slot: input.slot,
+          projectId: asset.projectId,
+        });
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: `图像生成失败: ${e instanceof Error ? e.message : String(e)}`,
+        });
+      }
+      const finishedAt = new Date();
+
+      // 每张图建 MediaItem + 一条 GenerationAttempt 汇总
+      const mediaIds: string[] = [];
+      for (let i = 0; i < imageResult.imageUrls.length; i++) {
+        const url = imageResult.imageUrls[i]!;
         const media = await ctx.prisma.mediaItem.create({
           data: {
             projectId: asset.projectId,
             scope: 'PROJECT',
             kind: 'IMAGE',
-            filename: `${asset.name}-${input.slot}-${Date.now()}-${i}.placeholder.png`,
+            filename: `${asset.name}-${input.slot}-${startedAt.getTime()}-${i}.png`,
             mimeType: 'image/png',
             sizeBytes: 0,
-            storageKey: `placeholder://w4mm/${asset.id}/${input.slot}/${Date.now()}/${i}`,
+            storageKey: url, // mock 阶段直接存外部 URL;真接入后 = MinIO key
+            cdnUrl: url,
             meta: {
-              placeholder: true,
               slot: input.slot,
               prompt: compiled.positive,
               negative: compiled.negative,
+              width: imageResult.width,
+              height: imageResult.height,
+              providerId,
+              modelId: input.modelId ?? providerId,
             },
             aspectRatio,
             viewKind: input.slot,
@@ -687,52 +791,61 @@ export const assetRouter = router({
             sourceRef: asset.id,
           },
         });
-        const attempt = await ctx.prisma.generationAttempt.create({
-          data: {
-            projectId: asset.projectId,
-            assetId: asset.id,
-            providerId,
-            modelId: providerId,
-            action: 'IMAGE',
-            candidateForSlot: input.slot,
-            inputJson: {
-              prompt: compiled.positive,
-              negative: compiled.negative,
-              aspectRatio,
-              sizePx: input.sizePx,
-              parts: compiled.parts,
-              mock: true,
-              note: 'W4-MM mock:真实 ImageProvider 实装见 W4-MM.6',
-            },
-            outputMediaId: media.id,
-            outputMediaIds: [media.id],
-            inputUnits: 0,
-            outputUnits: 1,
-            unitPriceCny: '0',
-            costCny: '0',
-            status: 'SUCCESS',
-            startedAt: new Date(),
-            finishedAt: new Date(),
-            createdBy: ctx.user.id,
-          },
-        });
-        candidates.push({ mediaId: media.id, attemptId: attempt.id });
+        mediaIds.push(media.id);
       }
 
-      await logOperation(ctx, 'asset.generateImage.mock', 'asset', asset.id, null, {
+      const attempt = await ctx.prisma.generationAttempt.create({
+        data: {
+          projectId: asset.projectId,
+          assetId: asset.id,
+          providerId,
+          modelId: input.modelId ?? providerId,
+          action: 'IMAGE',
+          candidateForSlot: input.slot,
+          inputJson: {
+            prompt: compiled.positive,
+            negative: compiled.negative,
+            aspectRatio,
+            sizePx: input.sizePx,
+            count: input.count,
+            parts: compiled.parts,
+            providerRawHint: 'see GenerationAttempt for full input',
+          },
+          outputMediaId: mediaIds[0],
+          outputMediaIds: mediaIds,
+          inputUnits: 0,
+          outputUnits: imageResult.imageUrls.length,
+          unitPriceCny: '0',
+          costCny: imageResult.costCny.toFixed(4),
+          status: 'SUCCESS',
+          startedAt,
+          finishedAt,
+          durationMs: finishedAt.getTime() - startedAt.getTime(),
+          createdBy: ctx.user.id,
+        },
+      });
+
+      await logOperation(ctx, 'asset.generateImage', 'asset', asset.id, null, {
         slot: input.slot,
-        count: input.count,
+        count: imageResult.imageUrls.length,
         providerId,
         aspectRatio,
+        cost: imageResult.costCny,
         projectId: asset.projectId,
       });
+
+      // 为 UI 方便,返回 candidates 数组(每张图对应一个伪 attempt — 实际 1 个 attempt 多图)
+      const candidates = mediaIds.map((mediaId) => ({
+        mediaId,
+        attemptId: attempt.id,
+      }));
 
       return {
         candidates,
         providerId,
         aspectRatio,
         compiledPrompt: compiled,
-        mock: true,
+        cost: imageResult.costCny,
       };
     }),
 
@@ -1067,6 +1180,191 @@ export const assetRouter = router({
         else map.set(key, { archetypeKey: r.archetypeKey!, type: r.type, count: 1 });
       }
       return Array.from(map.values()).filter((v) => v.count > 1);
+    }),
+
+  // -------- 缺口检测(W4-MM.8) --------
+
+  /**
+   * 检测某集的资产缺口 — 用于"按集补充"
+   *
+   * 比对:
+   *   - Scene.characters 字段(剧本拆出来的本场角色名)
+   *   - Scene.place 字段(场景地点)
+   *   vs
+   *   - 已建 Asset(同 projectId + 同 name 或 alias 命中)
+   *
+   * 返回:
+   *   - existingCount: 已有资产数
+   *   - missingCharacters: 剧本提到但未建的角色名列表
+   *   - missingScenes: 剧本提到但未建的场景列表
+   *   - sceneCount: 本集场数(供前端显示进度)
+   */
+  detectGaps: protectedProcedure
+    .input(z.object({ episodeId: z.string().cuid() }))
+    .query(async ({ ctx, input }) => {
+      if (!ctx.user) throw new TRPCError({ code: 'UNAUTHORIZED' });
+      const ep = await ctx.prisma.episode.findFirst({
+        where: { id: input.episodeId, deletedAt: null },
+      });
+      if (!ep) throw new TRPCError({ code: 'NOT_FOUND', message: '集不存在' });
+      await assertProjectAccess(ctx, ep.projectId, ctx.user.id);
+
+      const scenes = await ctx.prisma.scene.findMany({
+        where: { episodeId: ep.id, deletedAt: null },
+        orderBy: { positionIdx: 'asc' },
+      });
+
+      // 收集本集所有 character / place
+      const mentionedCharacters = new Set<string>();
+      const mentionedScenes = new Map<string, { number: string; place: string }>();
+      for (const sc of scenes) {
+        for (const c of sc.characters) {
+          const trimmed = c.trim();
+          if (trimmed) mentionedCharacters.add(trimmed);
+        }
+        if (sc.place && sc.place.trim()) {
+          mentionedScenes.set(sc.place.trim(), { number: sc.number, place: sc.place });
+        }
+      }
+
+      // 取本项目已有资产(含 alias 匹配)
+      const projectAssets = await ctx.prisma.asset.findMany({
+        where: { projectId: ep.projectId, deletedAt: null },
+        select: { id: true, type: true, name: true, alias: true, archetypeKey: true },
+      });
+
+      // 构建已有名字集合(name + alias + archetypeKey 都算命中)
+      const knownNames = new Set<string>();
+      for (const a of projectAssets) {
+        knownNames.add(a.name.trim());
+        if (a.archetypeKey) knownNames.add(a.archetypeKey.trim());
+        for (const al of a.alias) knownNames.add(al.trim());
+      }
+
+      const missingCharacters = Array.from(mentionedCharacters).filter(
+        (c) => !knownNames.has(c),
+      );
+      const missingScenes = Array.from(mentionedScenes.entries())
+        .filter(([place]) => !knownNames.has(place))
+        .map(([place, info]) => ({ name: place, sceneNumber: info.number }));
+
+      // 本集已绑定的资产数
+      const existingBindings = await ctx.prisma.assetUsageBinding.count({
+        where: { episodeId: ep.id, deletedAt: null },
+      });
+
+      return {
+        episodeId: ep.id,
+        episodeNumber: ep.number,
+        episodeTitle: ep.title,
+        sceneCount: scenes.length,
+        existingBindingCount: existingBindings,
+        mentionedCharactersCount: mentionedCharacters.size,
+        mentionedScenesCount: mentionedScenes.size,
+        missingCharacters,
+        missingScenes,
+      };
+    }),
+
+  // -------- 资产-剧集 二次匹配审计(W4-MM.9) --------
+
+  /**
+   * 审计本项目的资产-剧集关联完整性,返回三类问题清单
+   *
+   * (a) noAssetForMentioned:剧本提到但没建资产(全项目维度)
+   * (b) noBindingAssets:资产建了但 0 个 binding(可能是被遗忘了)
+   * (c) danglingBindings:binding 指向已 soft-deleted 的 scene/shot/asset(数据脏)
+   */
+  auditProject: protectedProcedure
+    .input(z.object({ projectId: z.string().cuid() }))
+    .query(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId, ctx.user.id);
+
+      // (a) 收集全项目所有 scene 中的 character + place
+      const scenes = await ctx.prisma.scene.findMany({
+        where: { episodeId: { not: undefined }, deletedAt: null },
+        include: { episode: { select: { id: true, number: true, projectId: true } } },
+      });
+      const projectScenes = scenes.filter((s) => s.episode.projectId === input.projectId);
+
+      const allMentionedChars = new Set<string>();
+      const allMentionedScenes = new Map<string, { episodeNumber: number; sceneNumber: string }>();
+      for (const sc of projectScenes) {
+        for (const c of sc.characters) {
+          if (c.trim()) allMentionedChars.add(c.trim());
+        }
+        if (sc.place?.trim()) {
+          allMentionedScenes.set(sc.place.trim(), {
+            episodeNumber: sc.episode.number,
+            sceneNumber: sc.number,
+          });
+        }
+      }
+
+      const allAssets = await ctx.prisma.asset.findMany({
+        where: { projectId: input.projectId, deletedAt: null },
+        include: { usageBindings: { where: { deletedAt: null } } },
+      });
+      const knownNames = new Set<string>();
+      for (const a of allAssets) {
+        knownNames.add(a.name.trim());
+        if (a.archetypeKey) knownNames.add(a.archetypeKey.trim());
+        for (const al of a.alias) knownNames.add(al.trim());
+      }
+      const noAssetForMentioned = {
+        characters: Array.from(allMentionedChars).filter((c) => !knownNames.has(c)),
+        scenes: Array.from(allMentionedScenes.entries())
+          .filter(([place]) => !knownNames.has(place))
+          .map(([place, info]) => ({ name: place, ...info })),
+      };
+
+      // (b) 资产 0 binding
+      const noBindingAssets = allAssets
+        .filter((a) => a.usageBindings.length === 0)
+        .map((a) => ({
+          id: a.id,
+          name: a.name,
+          type: a.type,
+          archetypeKey: a.archetypeKey,
+        }));
+
+      // (c) 悬空 binding — 指向已 soft-deleted 的 scene/shot/asset
+      const allBindings = await ctx.prisma.assetUsageBinding.findMany({
+        where: { projectId: input.projectId, deletedAt: null },
+        include: {
+          asset: { select: { id: true, name: true, deletedAt: true } },
+          scene: { select: { id: true, number: true, deletedAt: true } },
+          shot: { select: { id: true, number: true, deletedAt: true } },
+        },
+      });
+      const danglingBindings = allBindings
+        .filter(
+          (b) =>
+            (b.asset && b.asset.deletedAt) ||
+            (b.scene && b.scene.deletedAt) ||
+            (b.shot && b.shot.deletedAt),
+        )
+        .map((b) => ({
+          id: b.id,
+          assetName: b.asset?.name ?? '(已删)',
+          reason: b.asset?.deletedAt
+            ? 'asset 已软删'
+            : b.scene?.deletedAt
+              ? 'scene 已软删'
+              : 'shot 已软删',
+        }));
+
+      return {
+        noAssetForMentioned,
+        noBindingAssets,
+        danglingBindings,
+        summary: {
+          missingCharCount: noAssetForMentioned.characters.length,
+          missingSceneCount: noAssetForMentioned.scenes.length,
+          unboundCount: noBindingAssets.length,
+          danglingCount: danglingBindings.length,
+        },
+      };
     }),
 
   // -------- 锁定 / 解锁 --------

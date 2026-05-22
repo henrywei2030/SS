@@ -1,6 +1,7 @@
 'use client';
 import * as React from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import {
   User,
   Mountain,
@@ -9,6 +10,8 @@ import {
   Plus,
   Sparkles,
   Loader2,
+  ListChecks,
+  Activity,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -20,6 +23,7 @@ import { cn } from '@/lib/utils';
 import { AssetCard } from './asset-card';
 import { AssetEditDialog } from './asset-edit-dialog';
 import { BreakdownDialog } from './breakdown-dialog';
+import { GapDetectionDialog } from './gap-detection-dialog';
 
 type AssetType = 'CHARACTER' | 'SCENE' | 'PROP' | 'STYLE_REFERENCE';
 
@@ -36,7 +40,7 @@ interface Props {
   initialType: AssetType;
 }
 
-export function ArtWorkspace({ projectId, initialType }: Props): React.ReactElement {
+export function ArtWorkspace({ projectId, locale, initialType }: Props): React.ReactElement {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -49,11 +53,14 @@ export function ArtWorkspace({ projectId, initialType }: Props): React.ReactElem
   const [editingAssetId, setEditingAssetId] = React.useState<string | null>(null);
   const [creating, setCreating] = React.useState(false);
   const [breakdownOpen, setBreakdownOpen] = React.useState(false);
+  const [gapOpen, setGapOpen] = React.useState(false);
 
-  const { data: assets, isLoading, refetch } = trpc.asset.list.useQuery({
+  const { data, isLoading, refetch } = trpc.asset.list.useQuery({
     projectId,
     type: currentType,
   });
+  const assets = data?.assets;
+  const mediaMap = data?.mediaMap ?? {};
 
   const selectType = (t: AssetType): void => {
     const params = new URLSearchParams(window.location.search);
@@ -61,28 +68,57 @@ export function ArtWorkspace({ projectId, initialType }: Props): React.ReactElem
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   };
 
-  // 人物按 characterRole 分组(主演 / 配角 / 群演)
+  // 人物 — 优先按 archetypeKey 分组(同人物多变体),再按 characterRole 大类
+  // 场景/道具/风格 — 平铺
   const grouped = React.useMemo(() => {
     if (!assets) return [];
     if (currentType !== 'CHARACTER') {
-      return [{ label: '', items: assets }];
+      return [{ label: '', items: assets, isArchetype: false }];
     }
-    const buckets: Record<string, typeof assets> = {
-      '主演': [],
-      '配角': [],
-      '群演': [],
-      '未分类': [],
-    };
+
+    // 1. 找出 archetypeKey 多变体的(同 key 有 >= 2 个 asset),组成 archetype 分组
+    const archetypeBuckets = new Map<string, typeof assets>();
+    const singletons: typeof assets = [];
     for (const a of assets) {
+      const key = a.archetypeKey?.trim();
+      if (key) {
+        const bucket = archetypeBuckets.get(key) ?? [];
+        bucket.push(a);
+        archetypeBuckets.set(key, bucket);
+      } else {
+        singletons.push(a);
+      }
+    }
+    const archetypeGroups: Array<{ label: string; items: typeof assets; isArchetype: boolean }> = [];
+    const singletonExtras: typeof assets = [];
+    for (const [key, items] of archetypeBuckets.entries()) {
+      if (items.length >= 2) {
+        archetypeGroups.push({ label: `${key} · ${items.length} 变体`, items, isArchetype: true });
+      } else {
+        singletonExtras.push(...items);
+      }
+    }
+
+    // 2. 单变体(含 archetypeKey 只有 1 个的 + 没填 archetypeKey 的)按 characterRole 大类
+    const allSingletons = [...singletons, ...singletonExtras];
+    const buckets: Record<string, typeof assets> = {
+      主演: [],
+      配角: [],
+      群演: [],
+      未分类: [],
+    };
+    for (const a of allSingletons) {
       const role = a.characterRole ?? '';
       if (role.startsWith('主演')) buckets['主演']!.push(a);
       else if (role.startsWith('配角')) buckets['配角']!.push(a);
       else if (role === '群演') buckets['群演']!.push(a);
       else buckets['未分类']!.push(a);
     }
-    return Object.entries(buckets)
+    const roleGroups = Object.entries(buckets)
       .filter(([, items]) => items.length > 0)
-      .map(([label, items]) => ({ label, items }));
+      .map(([label, items]) => ({ label, items, isArchetype: false }));
+
+    return [...archetypeGroups, ...roleGroups];
   }, [assets, currentType]);
 
   return (
@@ -117,6 +153,27 @@ export function ArtWorkspace({ projectId, initialType }: Props): React.ReactElem
           })}
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            asChild
+            size="sm"
+            variant="ghost"
+            className="gap-1.5 text-xs"
+            title="资产-剧集 二次匹配审计"
+          >
+            <Link href={`/${locale}/projects/${projectId}/art/audit`}>
+              <Activity className="size-3.5" />
+              审计
+            </Link>
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="gap-1.5"
+            onClick={() => setGapOpen(true)}
+          >
+            <ListChecks className="size-3.5" />
+            按集补充
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -155,13 +212,25 @@ export function ArtWorkspace({ projectId, initialType }: Props): React.ReactElem
                   </h3>
                 )}
                 <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-                  {g.items.map((a) => (
-                    <AssetCard
-                      key={a.id}
-                      asset={a}
-                      onClick={() => setEditingAssetId(a.id)}
-                    />
-                  ))}
+                  {g.items.map((a) => {
+                    const heroMediaId =
+                      a.type === 'CHARACTER'
+                        ? a.portraitMediaId
+                        : a.type === 'SCENE'
+                          ? a.sceneMainMediaId ?? a.mainMediaId
+                          : a.mainMediaId;
+                    const heroUrl = heroMediaId
+                      ? mediaMap[heroMediaId]?.cdnUrl ?? mediaMap[heroMediaId]?.storageKey
+                      : null;
+                    return (
+                      <AssetCard
+                        key={a.id}
+                        asset={a}
+                        heroUrl={heroUrl}
+                        onClick={() => setEditingAssetId(a.id)}
+                      />
+                    );
+                  })}
                 </div>
               </div>
             ))}
@@ -199,6 +268,16 @@ export function ArtWorkspace({ projectId, initialType }: Props): React.ReactElem
             setBreakdownOpen(false);
             void refetch();
             toast.success('拆解完成,资产已入库');
+          }}
+        />
+      )}
+      {gapOpen && (
+        <GapDetectionDialog
+          projectId={projectId}
+          onClose={() => setGapOpen(false)}
+          onOpenBreakdown={() => {
+            setGapOpen(false);
+            setBreakdownOpen(true);
           }}
         />
       )}

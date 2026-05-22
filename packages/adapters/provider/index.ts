@@ -111,10 +111,22 @@ export async function getVideoProvider(id: string): Promise<IVideoProvider> {
   return instance;
 }
 
+import { MockImageProvider } from './mock-image.js';
+export { MockImageProvider } from './mock-image.js';
+
 export async function getImageProvider(id: string): Promise<IImageProvider> {
-  // Phase 1: 未实现，留待 W4 美术资产时接入豆包/Nano Banana/GPT-Image
-  void id;
-  throw new Error('Image provider not implemented yet (W4 milestone)');
+  // W4-MM.6 临时实现:全部用 MockImageProvider (picsum.photos 占位)
+  // 真接入 NanoBanana / GPT Image / 豆包图像 时改这里的 switch
+  const cfg = await loadConfig(id).catch(() => null);
+  const unitPriceCny = cfg?.unitPriceCny ?? 0;
+
+  const hit = cache.image.get(id);
+  const cacheKey = `${id}-mock-${cfg?.cacheKey ?? 'noconfig'}`;
+  if (hit && hit.cacheKey === cacheKey) return hit.instance;
+
+  const instance = new MockImageProvider({ providerId: id, unitPriceCny });
+  cache.image.set(id, { instance, cacheKey });
+  return instance;
 }
 
 export async function getTextProvider(id: string): Promise<ITextProvider> {
