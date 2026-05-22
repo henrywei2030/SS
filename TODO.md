@@ -1,29 +1,34 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新：2026-05-22
+> 最后更新：2026-05-22(深夜·四收工)
 > 仓库：https://github.com/henrywei2030/SS
 
 ---
 
 ## 🚧 进行中
 
-- [ ] **W4.5 · 图像生成接入**（资产主形象/三视图/全景）
-  - NanoBanana / GPT Image provider 真实调用
-  - MediaItem 入库 + Asset.mainMediaId / threeViewIds / panorama360Id 关联
-  - GenerationAttempt 记录 + Cost Ledger 走流水
+- [ ] **W5 启动准备** — AIGC 抽卡引擎
+  - 分镜级 4 列布局(资产关联 / 原始剧本 / 视频提示词 / 视频预览)
+  - 自动 @ 资产匹配(W1.6 auto-match 算法已就绪)
+  - Seedance 抽卡 + 历史记录 + 重抽
+  - BullMQ video-gen worker + 实时进度推送
 
-- [ ] **W4.6 · 火山合规接入**（人物合规检查）
-  - ComplianceProvider 接入火山引擎人脸 ID
-  - Asset.complianceId 自动填入 + 后续 video 生成时复用
-
-- [ ] **跨设备协作工作流验证**（Mac Studio 端）
+- [ ] **跨设备协作工作流验证**(Mac Studio 端)
   - 待：在家 Mac Studio `git pull` + 登录同一 Project + 说"开工"验证接续
 
-- [ ] **手动业务验证 W3 + W4**（任一设备）
+- [ ] **手动业务验证 W3 + W4**(任一设备)
   - 配 Claude API Key → 跑剧本上传 + generateForEpisode + asset.breakdown
   - 看 LLM 输出质量(真实剧本"陆乘 1-1")
   - 合并/拆分 + 行内编辑全套手动测试
+  - 资产生成 mock 链路完整跑通(picsum 占位图能渲染)
   - 确认发布触发 EventBus event(消费端 W5 才接)
+
+- [ ] **W4 真实 ImageProvider 接入**(从 mock 替换)
+  - NanoBanana / GPT Image / 豆包图像 实装 — Phase 2
+  - 当前 MockImageProvider 已让全链路跑通,真接入只改 getImageProvider 内的 switch
+
+- [ ] **W4 火山合规真实接入**
+  - ComplianceProvider 实装 — Phase 2(setComplianceManually 过渡中)
 
 ---
 
@@ -35,13 +40,21 @@
 - [ ] 家里 Mac Studio 准备 `.env.local`（JWT_SECRET / APP_MASTER_KEY 可重新生成）
 - [ ] `*.tsbuildinfo` 加到 `.gitignore`（避免增量编译缓存噪声被提交）
 
-### 📐 W3 followup（不阻塞下阶段）
-- [ ] **Episode.status='GENERATING' 软锁**防 generateForEpisode 重入扣费
-- [ ] **storyboardRouter 集成测试**（mergeShots/splitGroup/generate concurrent race）
-- [ ] parse.ts 边界 case 测试（"时间：xxx"误识场景）
+### 📐 W3 / W4 followup(不阻塞下阶段)
+- [ ] **Episode.status='GENERATING' 软锁**防 generateForEpisode 重入扣费(W3.1.followup)
+- [ ] **storyboardRouter / assetRouter 集成测试**(mergeShots / splitGroup / generate / confirmCandidate 并发场景)
+- [ ] parse.ts 边界 case 测试("时间:xxx"误识场景)
 - [ ] PromptEdit 加 Project / Episode / Script `@@index` 反向外键
 - [ ] 单 shot durationS > maxDurationS 时算法的明确处理
-- [ ] storyboard.generateForEpisode 并发限流（p-limit 3）+ 流式进度
+- [ ] storyboard.generateForEpisode 并发限流(p-limit 3)+ 流式进度
+- [ ] `listBindings batch` 端点 — art-workspace 100 张卡 N+1 性能
+- [ ] OperationLog action 命名规范化(asset.create / asset.binding.create / image.generate 混风)
+- [ ] a11y aria-label / focus trap / ESC 关闭(Dialog/img/icon-button)
+- [ ] 替换 20 处硬编码颜色(emerald/rose/amber)→ CSS 变量 跟主题
+- [ ] CandidateInfoDialog 大图 loading skeleton(慢网络体验)
+- [ ] CharacterRole enum 中文 → 改英文 + UI label map(i18n 友好)
+- [ ] OperationLog action 中英混用错误消息统一(用户面向中文 / 日志 code 英文)
+- [ ] DateTime locale 强制 zh-CN → 跟用户 locale
 
 ### 📐 Phase 1 已规划但暂未做的小项
 - [ ] `apps/desktop/` Tauri 包装（计划 W7，目前空目录占位）
@@ -51,14 +64,25 @@
 
 ### 🚀 开发任务（W4 - W8）
 
-#### W4 · Asset Forge（美术工作台,W4.0-4.4 已完成,W4.5-4.6 在进行中）
+#### W4 · Asset Forge(美术工作台,**完整交付** 含 W4-MM 大改 + 6 轮 audit)
 - [x] **W4.0** SystemSetting 加 7 条 W4 配置 — 2026-05-22
 - [x] **W4.1** packages/core/asset/breakdown.ts 拆解算法 + 8 单测 — 2026-05-22
-- [x] **W4.2** assetRouter 11 procedures(list/get/create/batchCreate/update/delete/breakdown/+ 占位) — 2026-05-22
+- [x] **W4.2** assetRouter 11 procedures + 同名重检测 + PromptEdit 训练 — 2026-05-22
 - [x] **W4.3** art-workspace.tsx 顶部 4 类型 tab + 卡片网格 + 分组 — 2026-05-22
-- [x] **W4.4** asset-edit-dialog + breakdown-dialog(LLM 拆解 → 预览 → 批量入库) — 2026-05-22
-- [ ] **W4.5** 图像生成接入(NanoBanana / GPT Image 真实调用) — 见上方"进行中"
-- [ ] **W4.6** 火山合规接入(ComplianceProvider 实装) — 见上方"进行中"
+- [x] **W4.4** asset-edit-dialog + breakdown-dialog 完整闭环 — 2026-05-22
+- [x] **W4-MM.0** Asset 数据建模大改:archetypeKey + 7 视角槽位 + AssetUsageBinding + maturity L0-L5 — 2026-05-22
+- [x] **W4-MM.1** packages/core/asset/compile-prompt.ts 拼接公式 + 11 单测 — 2026-05-22
+- [x] **W4-MM.2** assetRouter 大升级(20+ procedures)+ computeMaturity helper — 2026-05-22
+- [x] **W4-MM.3** 资产卡片升级 + 出场集 badge 联动 + 成熟度 chips — 2026-05-22
+- [x] **W4-MM.4** 编辑弹窗三栏重构(~1000 行)— 2026-05-22
+- [x] **W4-MM.5** 候选图 metadata 弹窗(模型/比例/提示词/同款/删除) — 2026-05-22
+- [x] **W4-MM.6** MockImageProvider 接入(picsum 占位图,真接入路径已铺) — 2026-05-22
+- [x] **W4-MM.7** archetypeKey 分组 UI(同人物多变体) — 2026-05-22
+- [x] **W4-MM.8** 按集补充 + 缺口检测 dialog — 2026-05-22
+- [x] **W4-MM.9** 资产-剧集二次匹配审计页 — 2026-05-22
+- [x] **W4 4 轮 audit + 全栈 audit + 第 6 轮 audit** — 共修 28+ 项 P0/P1 — 2026-05-22
+- [ ] 真实 ImageProvider 接入 — 见上方"进行中"
+- [ ] 火山合规 ComplianceProvider 实装 — 见上方"进行中"
 - [ ] 资产关系图谱(人物关系 / 场景空间相邻)— Phase 2
 
 #### W5 · Generation Engine + Media Vault

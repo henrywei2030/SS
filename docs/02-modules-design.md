@@ -141,10 +141,10 @@
 
 ---
 
-# 四、Asset Forge · 美术工作台 🚧 W4 70%
+# 四、Asset Forge · 美术工作台 ✅ W4 完成
 
-**状态**:W4.0-W4.4 骨架完成,W4.5 图像生成 + W4.6 火山合规 剩余
-**位置**:`apps/web/app/[locale]/(workspace)/projects/[id]/art/`(已就绪)
+**状态**:W4-MM.0-W4-MM.9 全部完成,含数据建模大改 + 6 轮 audit 修 28 项 P0/P1
+**位置**:`apps/web/app/[locale]/(workspace)/projects/[id]/art/`(已生产就绪)
 
 ### W4 子模块
 - ✅ 人物:characterRole 7 档分组(主演-男主/女主/反派 / 配角-正派/反派/中性 / 群演) + alias 自动 @ + tags

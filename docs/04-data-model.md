@@ -6,17 +6,25 @@
 
 ---
 
-## 一、表分类速览（27 张表 / 9 个领域）
+## 一、表分类速览(28 张表 / 9 个领域)
 
-> 2026-05-22 更新：W3 加 3 表 — `scenes`（剧本场号）/ `shot_groups`（合并组）/ `prompt_edits`（AI→人改训练集源）
+> 2026-05-22 (深夜) 更新:
+> - W3 加 3 表 — `scenes`(剧本场号)/ `shot_groups`(合并组)/ `prompt_edits`(AI→人改训练集源)
+> - W4 加 1 表 — `asset_usage_bindings`(三层 episode/scene/shot 出场绑定 + 10 档 UsageType,替代旧 shot_asset_refs)
+> - Asset 大改:加 archetypeKey(同人物多变体)+ 7 视角槽位字段(portrait/threeView/sceneMain/Front/Left/Right/Back/Panorama)+ maturity (L0-L5 enum) + lockedAt + voiceMediaId/voiceModelId
+> - MediaItem 加 aspectRatio + viewKind 派生字段
+> - GenerationAttempt 加 candidateForSlot + rejected/rejectedAt/rejectedBy
+> - ScriptAnalysis 加 scope (EPISODE/PROJECT) + scriptId nullable + projectId + perEpisodeStats + comparisonJson(W6 整剧批量分析预留)
+> - PromptEditTarget enum 加 ASSET(资产文本字段改动训练集)
 
 | 领域 | 表 | 用途 |
 |---|---|---|
 | § 1 身份与权限 | `users` | 用户 |
 | § 2 项目与团队 | `projects` / `project_members` / `invitations` | 项目 + 成员 + 邀请 |
-| § 3 剧本与分析 | `scripts` / `script_analyses` | 剧本上传（多版本 isCurrent + lockedAt）+ AI 分析 |
-| § 4 集与镜头 | `episodes` / `episode_assignments` / `scenes` / `shots` / `shot_groups` / `shot_asset_refs` | 集 + 分配 + **场** + 分镜（含 sceneId/groupId）+ **合并组** + 资产引用 |
-| § 4.5 训练数据 | `prompt_edits` | AI 输出 → 人改的训练样本(framing/angle/content/prompt 编辑记录) |
+| § 3 剧本与分析 | `scripts` / `script_analyses` | 剧本上传(多版本 isCurrent + lockedAt)+ AI 分析(单集 + 整剧) |
+| § 4 集与镜头 | `episodes` / `episode_assignments` / `scenes` / `shots` / `shot_groups` / `shot_asset_refs(已废)` | 集 + 分配 + **场** + 分镜(含 sceneId/groupId)+ **合并组** |
+| § 4.5 训练数据 | `prompt_edits` | AI 输出 → 人改的训练样本(targetType SHOT/SHOT_GROUP/SCENE/ASSET) |
+| § 4.6 出场绑定 | `asset_usage_bindings` | **W4 新**:Asset 三层出场绑定(episode/scene/shot + 10 档 UsageType) |
 | § 5 数字资产 | `assets` / `asset_versions` | 人物/场景/道具 + 版本历史 |
 | § 6 媒体中台 | `media_items` | 统一媒体存储（图/视/音/3D） |
 | § 7 AIGC 抽卡 | `generation_attempts` | 每次生成的完整记录 |

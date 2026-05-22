@@ -5,6 +5,45 @@
 
 ---
 
+## 2026-05-22(周五,公司 Mac Mini · 四次收工 · 深夜)— W4 完整交付 + 6 轮 audit 修复 70 项
+
+**完成**
+- ✅ **W4 大改造 + 完整收尾**(W4-MM.0 → W4-MM.9 共 10 子任务):
+  - W4-MM.0 数据建模大改:Asset 加 archetypeKey + 7 视角槽位字段(portraitMediaId/threeViewMediaId/sceneMain/Front/Left/Right/Back/PanoramaMediaId)+ maturity (L0-L5 enum) + lockedAt + 合规多 vendor 字段 + voiceMediaId+voiceModelId;新表 AssetUsageBinding(三层 episode/scene/shot + 10 档 UsageType);MediaItem 加 aspectRatio + viewKind;GenerationAttempt 加 candidateForSlot + rejected;ShotAssetRef 标 deprecated;新 migration w4_mm_asset_remodel
+  - W4-MM.1 packages/core/asset/compile-prompt.ts 风格拼接公式 + 11 单测
+  - W4-MM.2 assetRouter 大升级(20+ procedures:候选 + 出场绑定 + archetype 变体 + 锁定 + compilePrompt)
+  - W4-MM.3 资产卡片升级(出场集 group by episode + 成熟度 chips + 合规盾)
+  - W4-MM.4 编辑弹窗三栏重构(~1000 行:左信息 / 中生成预览 / 右已确认槽位)
+  - W4-MM.5 候选图 metadata 弹窗(模型/比例/提示词/同款/删除)
+  - W4-MM.6 MockImageProvider 接入(picsum 占位 + storageKey placeholder://)
+  - W4-MM.7 archetypeKey 分组 UI(同人物多变体)
+  - W4-MM.8 按集补充 + 缺口检测 dialog
+  - W4-MM.9 独立审计页 /art/audit(三类问题:无资产 / 0 绑定 / 悬空 binding)
+- ✅ **6 轮 audit + 全栈 audit**(W3/W4 已多轮,W1+W2 首次)— 共找出 **171 项问题**,修复 **70 项 P0/P1**:
+  - W4 4th audit:9 项 P0(maturity 重算 / publishEpisode 状态保护 / CSV 重组 / mergeShots 跨组孤儿)
+  - W1+W2+跨栈:12 项(admin seed 永远登不上 / project.clone 越权 / local-fs 路径穿越 / login 开放重定向 / trpc HTTP→tRPC 完整映射 / deleteShot 不清 binding / generateImage 不写 CostLedgerEntry / PromptEdit 缺 scriptId / generateForEpisode 完整 stylePrompt)
+  - 第 6 轮(2 个并行 agent + 52 项):11 项(rejectCandidate 粒度产品逻辑错 / confirmCandidate+unconfirmSlot+update+generateImage 事务化 / signup 默认关 / 密码强度 / admin prod 不回显 / local-fs Windows / shots-pane 批量 Promise.allSettled / lock onError / img lazy/onError / breakdown warning 透传)
+- ✅ **5 个 commit 一气呵成**:f3d17e4(W4 大改造)→ 83d31a9(W4 完整收尾)→ c1d8792(4th audit)→ bafb960(全栈 audit)→ e4109e5(第 6 轮 audit)
+- ✅ 质量:7 包 typecheck 全绿 / **59 单测全过**(48 core + 11 api)/ 21 SystemSetting(+1 auth.allowSignup)/ 28 张表 + 8 migrations
+
+**进行中**
+- 🚧 W5 启动准备(AIGC 抽卡引擎)
+- 🚧 跨设备 Mac Studio 验证
+- 🚧 真实剧本端到端业务验证
+
+**问题 / 待决策**
+- ❓ 真实 ImageProvider(NanoBanana / GPT Image)接入排期 — Phase 2?
+- ❓ 火山合规 ComplianceProvider 排期 — Phase 2?
+- ❓ Episode.status='GENERATING' 软锁(W3.1.followup)— 阻塞 W5 真发布?
+- ❓ a11y / i18n 抽词 / 颜色 token 化 — 集中到 W7 polish?
+
+**下次接着做**
+- 📌 启动 W5 AIGC 抽卡引擎(基于已就绪的 W3 分镜 + W4 资产)
+- 📌 或先真实业务验证(配 Claude API Key 跑 e2e)
+- 📌 W3.1.followup 软锁 + 集成测试(W5 启动前必清)
+
+---
+
 ## 2026-05-22（周五，公司 Mac Mini · 三次收工）— W4 Asset Forge 骨架交付 + W3 第三轮 audit 修
 
 **完成**
