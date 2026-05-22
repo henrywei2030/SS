@@ -39,12 +39,16 @@ export default async function DirectorHome({
             </Button>
           </CardContent>
         </Card>
-        <Card className="opacity-70">
+        <Card className="card-hover">
           <CardHeader>
-            <CardTitle>分镜管理（W3）</CardTitle>
+            <CardTitle>分镜工坊</CardTitle>
           </CardHeader>
           <CardContent>
-            <Button disabled>即将上线</Button>
+            <Button asChild>
+              <Link href={`/${locale}/projects/${id}/director/storyboard`}>
+                进入 →
+              </Link>
+            </Button>
           </CardContent>
         </Card>
       </div>

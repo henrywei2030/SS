@@ -109,23 +109,30 @@
 
 ---
 
-# 三、Storyboard Studio · 分镜工坊 📋 W3 主题
+# 三、Storyboard Studio · 分镜工坊 🚧 W3 进行中（85%）
 
-**状态**：待开发（W3 启动点）
-**位置**（计划）：`apps/web/app/[locale]/(workspace)/projects/[id]/director/storyboard/`
+**状态**：W3.0-W3.5 已完成,W3.6 行内编辑 + W3.7 polish 剩余
+**位置**：`apps/web/app/[locale]/(workspace)/projects/[id]/director/storyboard/`(已就绪)
 
 ### W3 范围
-- 三栏 Linear 布局（集列表 / 剧本 / 分镜）
-- AI 生成分镜（基于 Story Compass 价值曲线）
-- "向下合并" 按 Provider `maxDuration` 动态判断（W1.6 算法已就绪）
-- 分镜发布 → 触发 `EVENTS.STORYBOARD_PUBLISHED`
-- Y.js + Hocuspocus 实时协作（仅分镜表试点）
-- 草图低成本预览（Nano Banana Fast）
+- ✅ 三栏 Linear 布局（集列表 / 剧本 / 分镜 tab）
+- ✅ AI 生成分镜（按场调 LLM,一次性出齐 framing/angle/content/prompt 含台词 OS）
+- ✅ 合并/拆分组（向上/向下/勾选合并 + 拆分回归独立分镜）
+- ✅ 多格式剧本上传（docx / txt / md / rtf / html）+ 版本系统
+- ✅ 分镜发布 → 触发 `EVENTS.STORYBOARD_PUBLISHED`
+- 🚧 W3.6 手改入 PromptEdit 训练集（后端已就绪,前端 UI 剩余）
+- 🚧 W3.7 polish — 字号 / xlsx 导出 / 进度条
+- 📋 Y.js + Hocuspocus 实时协作(Phase 2 试点)
+- 📋 草图低成本预览(Nano Banana Fast,延后)
 
-### 关键技术储备
-- ✅ `mergeShots` 算法在 `packages/core/storyboard/merge.ts`（含 8 个单测）
-- ✅ Schema `Shot { positionIdx, positionX?, positionY?, isMerged, mergedFrom[] }`
-- ✅ Provider.maxDuration 接口已统一
+### 已落地的关键基础设施
+- ✅ `Scene` 表（剧本场号 1-1/1-2 + 时段/内外/地点/人物）
+- ✅ `ShotGroup` 表（合并组,承载组级 prompt + status,可逆 split）
+- ✅ `PromptEdit` 表（AI 输出 → 人改的训练样本,framing/angle/content/prompt 字段白名单）
+- ✅ `pg_advisory_xact_lock` 串行化 createNextVersion / mergeShots / autoMerge,防 unique race
+- ✅ `mergeShots` 算法（packages/core/storyboard/merge.ts,含 8 单测）
+- ✅ `parseScriptText` 剧本 parser（packages/core/script/parse.ts,12 单测,场号/对白/旁白/OS 识别）
+- ✅ `extractScriptText` 多格式提取（utils/script-extract.ts,11 单测含 RTF 嵌套 + HTML 绕过攻击防御）
 
 ### Phase 2/3 升级点
 - 🔮 Canvas 视图（Linear ⇄ Canvas 同源切换）— Phase 3 Wireless Canvas

@@ -6,14 +6,17 @@
 
 ---
 
-## 一、表分类速览（24 张表 / 9 个领域）
+## 一、表分类速览（27 张表 / 9 个领域）
+
+> 2026-05-22 更新：W3 加 3 表 — `scenes`（剧本场号）/ `shot_groups`（合并组）/ `prompt_edits`（AI→人改训练集源）
 
 | 领域 | 表 | 用途 |
 |---|---|---|
 | § 1 身份与权限 | `users` | 用户 |
 | § 2 项目与团队 | `projects` / `project_members` / `invitations` | 项目 + 成员 + 邀请 |
-| § 3 剧本与分析 | `scripts` / `script_analyses` | 剧本上传 + AI 分析 |
-| § 4 集与镜头 | `episodes` / `episode_assignments` / `shots` / `shot_asset_refs` | 集 + 分配 + 分镜 + 资产引用 |
+| § 3 剧本与分析 | `scripts` / `script_analyses` | 剧本上传（多版本 isCurrent + lockedAt）+ AI 分析 |
+| § 4 集与镜头 | `episodes` / `episode_assignments` / `scenes` / `shots` / `shot_groups` / `shot_asset_refs` | 集 + 分配 + **场** + 分镜（含 sceneId/groupId）+ **合并组** + 资产引用 |
+| § 4.5 训练数据 | `prompt_edits` | AI 输出 → 人改的训练样本(framing/angle/content/prompt 编辑记录) |
 | § 5 数字资产 | `assets` / `asset_versions` | 人物/场景/道具 + 版本历史 |
 | § 6 媒体中台 | `media_items` | 统一媒体存储（图/视/音/3D） |
 | § 7 AIGC 抽卡 | `generation_attempts` | 每次生成的完整记录 |

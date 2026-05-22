@@ -83,6 +83,13 @@ export function mergeShots(
   for (const shot of sorted) {
     const shotAssets = new Set(shot.refAssetIds ?? []);
 
+    // 单 shot 自己就超长 — 算法只能让它独立成组并发出告警，由调用方决定是否拆镜
+    if (shot.durationS > maxD) {
+      console.warn(
+        `[mergeShots] shot ${shot.number} duration ${shot.durationS}s exceeds maxDurationS ${maxD}s — isolated as oversized group`,
+      );
+    }
+
     // 触发 flush 的条件
     const isolatedS = opts.isolateSPriority && shot.priority === 'S';
     const tooLong = currentDuration + shot.durationS > maxD;

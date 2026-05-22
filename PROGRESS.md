@@ -5,6 +5,36 @@
 
 ---
 
+## 2026-05-22（周五，公司 Mac Mini · 收工）— W3 分镜工坊大块交付（W3.0 → W3.5）
+
+**完成**
+- ✅ **W3.0 数据底座**：Prisma schema 加 3 表（Scene / ShotGroup / PromptEdit）+ Shot.sceneId/groupId + 3 个新 migration；SystemSetting 加 7 条 W3 配置；剧本 parser（packages/core/script/parse.ts）+ 12 单测；LLM 分镜生成器（packages/core/storyboard/generate.ts）
+- ✅ **W3.1 storyboardRouter**：11 个 procedures（listEpisodes 含聚合 / mergeShots / splitGroup / generateForEpisode / publishEpisode 等）挂到 root router
+- ✅ **W3.2 剧本版本子系统**：Script.isCurrent + lockedAt + @@unique([episodeId, version])；scriptRouter 重写 createNextVersion 事务模型（pg_advisory_xact_lock）+ 新增 listVersions / setCurrentVersion / lockVersion / getById
+- ✅ **W3.2.ext 多格式上传**：scriptRouter.uploadFile 通用化（docx / txt / md / rtf / html），新工具 utils/script-extract.ts 各自做格式去标 + 11 个单测覆盖含嵌套绕过攻击
+- ✅ **W3.3 admin 模型用途绑定**：admin.binding 后端（list / set，带 ProviderKind 校验）+ 前端 `/admin/bindings` 页面 + sidebar 入口
+- ✅ **W3.4 前端三栏布局**：apps/web/.../director/storyboard/ 完整骨架（5 组件 — workspace / sidebar / top-bar / script-pane / shots-pane）；URL ?ep=&tab= 实时同步；director 首页"分镜工坊"卡解锁
+- ✅ **W3.5 分镜表合并/拆分交互**：多选 checkbox + 顶部操作栏（向上/向下/勾选合并/删除/清空）+ 组级 [拆分] 按钮 + sticky 表头 + 切集自动清空选中
+- ✅ **两轮 code-review agent 独立审计共 54 项,关键 P0 全修**：第一轮 P0 8 项 + P1 9 项；第二轮 P0 11 项（主流程切集崩 / pg_advisory_xact_lock 防 unique race / RTF 栈式扫描 / HTML 循环到收敛防绕过 / FileReader 防内存爆 / docx zip bomb 5M 上限 / filename path traversal 防御 等）
+- ✅ **质量**：7 包 typecheck 全过 / **40 单测全过** / 27 张表 + 14 条 SystemSetting 入库
+
+**进行中**
+- 🚧 W3.6 行内编辑提示词 → 自动写 PromptEdit 训练集（后端 mutation 已就绪,前端 UI 待做）
+- 🚧 W3.7 polish — 字号 A-/A+ / xlsx 导出 / 进度条 8/61
+
+**问题 / 待决策**
+- ❓ Mac Studio 跨设备验证还没做（这一会话全在公司 Mac Mini）
+- ❓ Episode.status='GENERATING' 软锁防重入扣费（已列 followup,不阻塞）
+- ❓ storyboardRouter 集成测试（concurrent merge / split / generate race）
+
+**下次接着做**
+- 📌 **W3.6**：分镜表 prompt 编辑弹窗 / 行内编辑,触发 updateShot → PromptEdit 写训练集
+- 📌 **W3.7**：字号调节 + 导出 xlsx + 顶部进度条
+- 📌 **followup**：Episode 软锁 / 集成测试 / parse.ts 边界 case 测试
+- 📌 跨设备验证(Mac Studio `git pull` + `pnpm dev`)
+
+---
+
 ## 2026-05-21（周四，公司 Mac Mini · 晚 20:30 二次收工）— 规划体系 + 协议升级
 
 **完成**

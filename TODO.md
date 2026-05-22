@@ -1,24 +1,25 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新：2026-05-21
+> 最后更新：2026-05-22
 > 仓库：https://github.com/henrywei2030/SS
 
 ---
 
 ## 🚧 进行中
 
-- [ ] **W3 · Storyboard Studio 分镜工坊**（下一阶段开工点）
-  - 三栏 Linear 布局（集列表 / 剧本 / 分镜）
-  - AI 生成分镜（基于 W2.7 已完成的 Story Compass 价值曲线）
-  - "向下合并" 按 Provider `maxDuration` 动态判断（W1.6 算法已就绪）
-  - 分镜发布 → 触发 `EVENTS.STORYBOARD_PUBLISHED` 给 AIGC
-  - Y.js + Hocuspocus 实时协作试点（仅分镜表）
+- [ ] **W3.6 · 手改入 PromptEdit 训练集**（核心 polish 项）
+  - 分镜表行内/弹窗编辑提示词（双击进编辑态 / Esc 取消 / Enter 保存）
+  - updateShot mutation 已就绪（自动写 PromptEdit）— 前端 UI 待做
+  - 同步给组 prompt 编辑入口
+  - 显示"已记录到训练集"toast 反馈
+
+- [ ] **W3.7 · polish · 字号 / xlsx 导出 / 进度条**
+  - A- / A+ 字号调节（localStorage 持久化）
+  - 顶部进度条 8/61（已分镜/总数）
+  - 导出 xlsx（集 → sheet，组 → 行）
+  - 分集卡聚合元信息进一步美化
 
 - [ ] **跨设备协作工作流验证**（Mac Studio 端）
-  - ✅ 公司 Mac Mini 端三件套就绪 + 跑通"收工"流程
-  - ✅ Project 知识库上传包已生成在 `~/Downloads/SS-project-knowledge/`
-  - ✅ 规划文档体系 8 份就绪并 push 到 GitHub
-  - ✅ "收工"协议升级为自动模式（无需二次确认）
   - 待：在家 Mac Studio `git pull` + 登录同一 Project + 说"开工"验证接续
 
 ---
@@ -31,21 +32,21 @@
 - [ ] 家里 Mac Studio 准备 `.env.local`（JWT_SECRET / APP_MASTER_KEY 可重新生成）
 - [ ] `*.tsbuildinfo` 加到 `.gitignore`（避免增量编译缓存噪声被提交）
 
+### 📐 W3 followup（不阻塞下阶段）
+- [ ] **Episode.status='GENERATING' 软锁**防 generateForEpisode 重入扣费
+- [ ] **storyboardRouter 集成测试**（mergeShots/splitGroup/generate concurrent race）
+- [ ] parse.ts 边界 case 测试（"时间：xxx"误识场景）
+- [ ] PromptEdit 加 Project / Episode / Script `@@index` 反向外键
+- [ ] 单 shot durationS > maxDurationS 时算法的明确处理
+- [ ] storyboard.generateForEpisode 并发限流（p-limit 3）+ 流式进度
+
 ### 📐 Phase 1 已规划但暂未做的小项
 - [ ] `apps/desktop/` Tauri 包装（计划 W7，目前空目录占位）
 - [ ] `packages/workers/` BullMQ 视频生成 worker（W5 主题）
 - [ ] `packages/ui/` 跨 web/desktop 共享 UI（Phase 2）
-- [ ] OG 分享图 `apps/web/public/logo.png` 放置（用户原 logo PNG）
+- [ ] OG 分享图 `apps/web/public/logo.png` 放置
 
-### 🚀 开发任务（W3 - W8）
-
-#### W3 · Storyboard Studio（分镜工坊）
-- [ ] `apps/web/app/[locale]/(workspace)/projects/[id]/director/storyboard/` 三栏布局
-- [ ] `storyboardRouter.generate` — 调用 Claude 生成分镜
-- [ ] `storyboardRouter.publish` — 发布触发 EventBus event
-- [ ] `storyboardRouter.mergeDown` — 应用 W1.6 merge 算法
-- [ ] Y.js + Hocuspocus 集成（共享分镜表）
-- [ ] 草图低成本预览（Nano Banana Fast）
+### 🚀 开发任务（W4 - W8）
 
 #### W4 · Asset Forge（美术工作台）
 - [ ] 人物资产页（三视图 + 火山合规通道 + 角色身份分类）
@@ -83,14 +84,67 @@
 - [ ] 操作日志审计
 
 ### 📝 文档与协作
-- [ ] 跑通一次完整的"开工 → 收工"流程，确认工作流顺畅
-- [ ] README.md 增加 W1-W2 完成度徽章 + 路线图
+- [ ] README.md 增加 W1-W3 完成度徽章 + 路线图
 - [ ] CHANGELOG.md（按 commit 自动生成）
 - [ ] 视情况决定是否引入 issue 管理（GitHub Issues / Linear）
 
 ---
 
 ## ✅ 已完成
+
+### 2026-05-22 — W3 大块交付（W3.0 → W3.5）
+
+#### W3.0 · 数据底座
+- [x] **W3.0.1** Prisma schema 加 3 表（Scene / ShotGroup / PromptEdit）+ Shot 加 sceneId/groupId + 反向关系；3 个新 migration 已 apply — 2026-05-22
+- [x] **W3.0.2** SystemSetting seed 加 7 条 W3 配置（4 个 model_binding + 3 个 storyboard 业务参数）— 2026-05-22
+- [x] **W3.0.3** `packages/core/script/parse.ts` 剧本纯文本 parser（场号/时段/内外/人物/动作/对白/旁白）+ 12 个单测 — 2026-05-22
+- [x] **W3.0.4** `packages/core/storyboard/generate.ts` LLM 分镜生成器 + warning 字段 + 自动按 index 排序 — 2026-05-22
+
+#### W3.1 · storyboardRouter（11 procedures）
+- [x] listEpisodes（含聚合）/ getEpisode / listScenes / listShots（grouped）/ createShot / updateShot / deleteShot — 2026-05-22
+- [x] mergeShots（手动合并）/ splitGroup（soft-delete + 清 groupId 事务）/ updateGroup — 2026-05-22
+- [x] generateForEpisode（自动拆场→调 LLM→预合并组）/ publishEpisode（触发 EVENTS.STORYBOARD_PUBLISHED）— 2026-05-22
+- [x] 挂到 root router — 2026-05-22
+
+#### W3.1.fix · Bug 修（两轮 code-review agent 独立审计共 54 项,修了 28 项关键）
+- [x] **第一轮 P0 8 项**：mergeShots positionIdx unique race / splitGroup 缺事务 / publishEpisode 状态覆盖 / PromptEdit 写入数据集污染 / createShot|deleteShot logOperation 缺 projectId 等 — 2026-05-22
+- [x] **第一轮 P1 9 项**：parse.ts 时段/dialog 正则严格化 / merge.ts 单 shot 超长 warning / generate.ts maxShotDurationS 一致 / recordPromptEdit 失败 log 加 requestId / ShotGroup.durationS 自动重算 / PromptEdit 加 episodeId 索引 — 2026-05-22
+- [x] **第二轮 P0 11 项**：storyboard-workspace 切集主流程崩（useSearchParams 实时读）/ createNextVersion + autoMerge + mergeShots 加 pg_advisory_xact_lock 串行化防 unique race / stripRtf 栈式扫描正确处理嵌套 destructive group / stripHtml 循环到收敛防 `<scrip<script>t>` 绕过 / fileToBase64 改 FileReader.readAsDataURL 防内存爆 / filename zod path traversal 防御 / docx zip bomb 5M chars 硬上限 / ScriptPane 切集 reset selectedId / TopBar episodeNumber 自动同步左栏 — 2026-05-22
+
+#### W3.2 · 剧本版本子系统
+- [x] Schema 加 Script.isCurrent + lockedAt + @@unique([episodeId, version]) + Episode.scripts[] 反向关系 — 2026-05-22
+- [x] scriptRouter 重写 createNextVersion 事务模型（advisory lock + isCurrent 切换原子化）— 2026-05-22
+- [x] 新增 listVersions / setCurrentVersion / lockVersion / unlockVersion / getById endpoints — 2026-05-22
+
+#### W3.2.ext · 多格式剧本上传
+- [x] scriptRouter.uploadDocx → uploadFile 通用化 — 2026-05-22
+- [x] packages/api/src/utils/script-extract.ts：统一提取入口，支持 docx/txt/md/rtf/html，各自做格式去标 — 2026-05-22
+- [x] 11 个 extract 单测覆盖所有格式 + 嵌套绕过攻击 — 2026-05-22
+- [x] 前端 input accept 扩展 + 大文件 FileReader 编码 — 2026-05-22
+
+#### W3.3 · admin 模型用途绑定
+- [x] admin.binding 后端 router（list / set，带 ProviderKind 校验）— 2026-05-22
+- [x] 前端 `/admin/bindings` 页面（下拉切换 + provider 状态显示）+ sidebar 入口 — 2026-05-22
+
+#### W3.4 · 前端三栏布局 + 剧本/分镜 tab
+- [x] `apps/web/.../director/storyboard/` 完整骨架（5 组件）— 2026-05-22
+- [x] storyboard-workspace.tsx 主框架（URL `?ep=&tab=` 实时同步）— 2026-05-22
+- [x] episode-sidebar.tsx 左栏集卡（含聚合元信息：场/镜/组数）— 2026-05-22
+- [x] top-bar.tsx tab 切换 + 上传剧本 / 生成分镜 / 确认发布按钮 — 2026-05-22
+- [x] script-pane.tsx 剧本版本切换 + 内容浏览 — 2026-05-22
+- [x] shots-pane.tsx 分镜表（组级展开式展示）— 2026-05-22
+- [x] director 首页"分镜工坊"卡解锁 — 2026-05-22
+
+#### W3.5 · 分镜表合并/拆分交互
+- [x] 多选 checkbox + 选中态高亮 — 2026-05-22
+- [x] 顶部操作栏（向上合并 / 向下合并 / 勾选合并 / 删除 / 清空）— 2026-05-22
+- [x] 组级 [拆分] 按钮（soft-delete + 清 groupId）— 2026-05-22
+- [x] 切集自动清空选中 / sticky 表头 — 2026-05-22
+
+#### 质量验证
+- [x] 7 包 TypeScript typecheck 通过 — 2026-05-22
+- [x] **40 个单元测试全过**（W1.6 17 + 新 parser 12 + auto-match 9 + script-extract 11 + RTF/HTML 攻击防御 2 -3）— 2026-05-22
+- [x] 27 张数据库表 + 14 条 SystemSetting 入库 — 2026-05-22
 
 ### 2026-05-21 — 一天集中完成 W1 + W2 + UI 升级
 
@@ -138,11 +192,6 @@
 - [x] **协同三大铁律**写入 docs/README.md — 2026-05-21
 - [x] **"收工"协议升级**为自动执行模式（保留 push 失败 / merge conflict 安全门槛）— 2026-05-21
 
-#### 质量验证
-- [x] 全 7 包 TypeScript typecheck 通过 — 2026-05-21
-- [x] 34 个单元测试全过（adapters 8 + core 17 + i18n 9）— 2026-05-21
-- [x] Docker 3 容器（ss-postgres / ss-redis / ss-minio）健康运行 — 2026-05-21
-
 ---
 
 ## 💡 想法池（idea backlog，暂不排期）
@@ -156,6 +205,7 @@
 - AI 多 Agent 对抗评审（Critic + Defender + Judge）— Phase 2
 - Auto-Salvage 废片回收（从失败片段中截取可用段）— Phase 2
 - 高对比 / 色弱友好 主题（无障碍）
+- **PromptEdit 训练数据集导出工具**（fine-tune 数据管道）— W6+
 
 ---
 

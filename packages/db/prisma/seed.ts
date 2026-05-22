@@ -242,6 +242,52 @@ async function main() {
       category: 'feature_flag',
       description: '预算预警百分比（80% 黄色，100% 红色）',
     },
+
+    // ----- 模型用途绑定（让后台一处切换，所有调用统一）-----
+    {
+      key: 'binding.script.analysis.modelId',
+      value: 'claude-sonnet-4-5',
+      category: 'model_binding',
+      description: '剧本分析使用的 LLM modelId（W2.7 Story Compass）',
+    },
+    {
+      key: 'binding.storyboard.generation.modelId',
+      value: 'claude-sonnet-4-5',
+      category: 'model_binding',
+      description: '分镜生成（剧本→单镜列表）使用的 LLM modelId',
+    },
+    {
+      key: 'binding.storyboard.prompt.modelId',
+      value: 'claude-sonnet-4-5',
+      category: 'model_binding',
+      description: '分镜提示词生成（单镜→视频 prompt 含台词/OS）使用的 LLM modelId',
+    },
+    {
+      key: 'binding.script.docx.parser',
+      value: 'mammoth',
+      category: 'model_binding',
+      description: 'docx 解析引擎（mammoth | docx2md）',
+    },
+
+    // ----- 分镜业务参数 -----
+    {
+      key: 'storyboard.maxDurationS',
+      value: '15',
+      category: 'general',
+      description: '合并组单段最大时长（秒），按视频 Provider maxDuration 上限',
+    },
+    {
+      key: 'storyboard.defaultShotDurationS',
+      value: '3',
+      category: 'general',
+      description: '生成分镜时单镜默认时长（秒）',
+    },
+    {
+      key: 'storyboard.autoMergeOnGenerate',
+      value: 'true',
+      category: 'feature_flag',
+      description: '生成分镜时是否自动按 maxDurationS 预合并组',
+    },
   ];
   for (const s of systemSettings) {
     await prisma.systemSetting.upsert({

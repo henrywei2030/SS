@@ -11,7 +11,7 @@
 | **W1 基础设施**（10 子任务）| ✅ 完成 | 10/10 |
 | **W2 应用层**（7 子任务）| ✅ 完成 | 7/7 |
 | **UI 系统升级** | ✅ 完成 | 双主题 + Logo + Cursor 风格 |
-| **W3 分镜工坊** | 🚧 开工点 | 0% |
+| **W3 分镜工坊** | 🚧 后端 + 主 UI 完成 | 85%（W3.0-W3.5 ✅ / W3.6-W3.7 🚧） |
 | **W4-W8** | 📋 排期 | 0% |
 | **Phase 2** | 📋 待启动 | 数据模型与接口已预留 |
 | **Phase 3** | 🔮 远期 | Schema 字段已预留 |
@@ -26,7 +26,7 @@
 |---|---|---|---|
 | **W1** | 地基 | ✅ | Monorepo · Prisma 24 表 · 三大 Adapter · Cost Ledger · Docker · 核心算法 · API Key 加密 · i18n · 品牌 · DB 规划 |
 | **W2** | Mission Control + Story Compass | ✅ | tRPC v11 · 6 路由 · Next.js 15 · 登录 · Mission Control · /admin/providers · Claude LLM · 8 维分析 |
-| **W3** | Storyboard Studio | 🚧 | 三栏 Linear · AI 分镜 · 向下合并 · 发布机制 · Y.js 试点 |
+| **W3** | Storyboard Studio | 🚧 85% | 数据底座 + 11 procedures + 多格式上传 + 三栏 UI + 合并拆分;**W3.6 行内编辑 + W3.7 polish 剩余** |
 | **W4** | Asset Forge | 📋 | 人物（三视图+合规）/ 场景（4 视图+360）/ 道具 |
 | **W5** | Generation Engine + Media Vault | 📋 | 自动 @ 资产 · 单模型抽卡 · 历史采纳 · 素材库 |
 | **W6** | Insight Cockpit + Collab Hub | 📋 | 数据总览 · 抽卡率 Top10 · 成员/集数/工作报告 |

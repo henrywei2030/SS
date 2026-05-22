@@ -13,6 +13,7 @@ import {
   KeyRound,
   ArrowLeft,
   Activity,
+  Plug,
 } from 'lucide-react';
 
 import { requireAdminSession } from '@/lib/auth/session';
@@ -46,6 +47,11 @@ export default async function AdminLayout({
           icon: KeyRound,
           label: t('providerConfig'),
           badge: 'KEY',
+        },
+        {
+          href: `/${locale}/admin/bindings`,
+          icon: Plug,
+          label: '模型绑定',
         },
         { href: `/${locale}/admin/prompts`, icon: FileText, label: t('promptTemplates') },
         { href: `/${locale}/admin/styles`, icon: Palette, label: t('styleProfiles') },
