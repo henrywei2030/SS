@@ -5,6 +5,34 @@
 
 ---
 
+## 2026-05-22（周五，公司 Mac Mini · 三次收工）— W4 Asset Forge 骨架交付 + W3 第三轮 audit 修
+
+**完成**
+- ✅ **W3 第三轮 audit**:11 项发现,修 4 真 bug(mergeShots 跨组孤儿 / publishEpisode 重发布 / CSV 重组织 / max positionIdx 含 soft-del) + **整剧批量分析升级空间预留**(ScriptAnalysis scope/scriptId-nullable/projectId/episodeIds[]/perEpisodeStats/comparisonJson + analyzeProject 占位 + GenerationAction.BATCH_ANALYSIS enum)
+- ✅ **W4.0** SystemSetting 加 7 条 W4 配置(LLM/Image/Compliance binding + 业务参数)
+- ✅ **W4.1** packages/core/asset/breakdown.ts:LLM 输出 characters/scenes/props 严格基于原文 + 8 单测(类型分组/最大数截断/字段过滤)
+- ✅ **W4.2** assetRouter 11 procedures(list/get/create/batchCreate/update/delete/breakdown LLM/generateImage 占位/complianceCheck 占位/setComplianceManually)+ PromptEdit target=ASSET 训练集
+- ✅ **W4.3** art-workspace.tsx 顶部 4 类型 tab(URL ?type= 同步)+ 卡片网格 + 人物按主演/配角/群演自动分组 + asset-card.tsx 含合规 badge
+- ✅ **W4.4** asset-edit-dialog(create+update 双态)+ breakdown-dialog(选 episode → LLM → 预览 → 复选 → 批量入库)
+- ✅ 2 个新 migration(`script_analysis_scope` + `asset_prompt_edit_target`)
+- ✅ 7 包 typecheck 全过 / **48 单测全过**(原 40 + breakdown 8) / 28 张表 + 20 条 SystemSetting
+
+**进行中**
+- 🚧 W4.5 图像生成接入(NanoBanana 主形象/三视图 + GPT Image 全景)
+- 🚧 W4.6 火山合规 ComplianceProvider 实装
+
+**问题 / 待决策**
+- ❓ 临时新功能待用户明确需求(用户提及收工后需加新功能)
+- ❓ NanoBanana / 火山合规 真实 API endpoint + 文档需确认
+- ❓ MediaItem 存储链路(MinIO upload → CDN url)等 W4.5 接入时一并实测
+
+**下次接着做**
+- 📌 用户先讲新功能需求
+- 📌 然后回到 W4.5 / W4.6 真实接入
+- 📌 真实剧本端到端验证
+
+---
+
 ## 2026-05-22（周五，公司 Mac Mini · 二次收工）— W3 收尾(W3.6 + W3.7)
 
 **完成**

@@ -7,14 +7,23 @@
 
 ## 🚧 进行中
 
+- [ ] **W4.5 · 图像生成接入**（资产主形象/三视图/全景）
+  - NanoBanana / GPT Image provider 真实调用
+  - MediaItem 入库 + Asset.mainMediaId / threeViewIds / panorama360Id 关联
+  - GenerationAttempt 记录 + Cost Ledger 走流水
+
+- [ ] **W4.6 · 火山合规接入**（人物合规检查）
+  - ComplianceProvider 接入火山引擎人脸 ID
+  - Asset.complianceId 自动填入 + 后续 video 生成时复用
+
 - [ ] **跨设备协作工作流验证**（Mac Studio 端）
   - 待：在家 Mac Studio `git pull` + 登录同一 Project + 说"开工"验证接续
 
-- [ ] **手动业务验证 W3**（任一设备）
-  - 上传 docx 真实剧本(陆乘 1-1)→ 看 parser 识别率
-  - 配 Claude API Key → 跑 generateForEpisode → 看 LLM 输出质量
+- [ ] **手动业务验证 W3 + W4**（任一设备）
+  - 配 Claude API Key → 跑剧本上传 + generateForEpisode + asset.breakdown
+  - 看 LLM 输出质量(真实剧本"陆乘 1-1")
   - 合并/拆分 + 行内编辑全套手动测试
-  - 确认发布触发 EventBus event(消费端 W5 才会接)
+  - 确认发布触发 EventBus event(消费端 W5 才接)
 
 ---
 
@@ -42,12 +51,15 @@
 
 ### 🚀 开发任务（W4 - W8）
 
-#### W4 · Asset Forge（美术工作台）
-- [ ] 人物资产页（三视图 + 火山合规通道 + 角色身份分类）
-- [ ] 场景资产页（4 视图 + 360° 全景）
-- [ ] 道具资产页（出场绑定）
-- [ ] 资产拆解 4 步链（核心/配角/物种/群演 → merge）
-- [ ] 火山合规 ComplianceProvider 实现
+#### W4 · Asset Forge（美术工作台,W4.0-4.4 已完成,W4.5-4.6 在进行中）
+- [x] **W4.0** SystemSetting 加 7 条 W4 配置 — 2026-05-22
+- [x] **W4.1** packages/core/asset/breakdown.ts 拆解算法 + 8 单测 — 2026-05-22
+- [x] **W4.2** assetRouter 11 procedures(list/get/create/batchCreate/update/delete/breakdown/+ 占位) — 2026-05-22
+- [x] **W4.3** art-workspace.tsx 顶部 4 类型 tab + 卡片网格 + 分组 — 2026-05-22
+- [x] **W4.4** asset-edit-dialog + breakdown-dialog(LLM 拆解 → 预览 → 批量入库) — 2026-05-22
+- [ ] **W4.5** 图像生成接入(NanoBanana / GPT Image 真实调用) — 见上方"进行中"
+- [ ] **W4.6** 火山合规接入(ComplianceProvider 实装) — 见上方"进行中"
+- [ ] 资产关系图谱(人物关系 / 场景空间相邻)— Phase 2
 
 #### W5 · Generation Engine + Media Vault
 - [ ] AIGC 集卡片 + 分镜级 4 列布局

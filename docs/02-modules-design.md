@@ -141,15 +141,18 @@
 
 ---
 
-# 四、Asset Forge · 美术工作台 📋 W4 主题
+# 四、Asset Forge · 美术工作台 🚧 W4 70%
 
-**状态**：待开发
-**位置**（计划）：`apps/web/app/[locale]/(workspace)/projects/[id]/art/`
+**状态**:W4.0-W4.4 骨架完成,W4.5 图像生成 + W4.6 火山合规 剩余
+**位置**:`apps/web/app/[locale]/(workspace)/projects/[id]/art/`(已就绪)
 
 ### W4 子模块
-- **人物**：拆解 4 步链（核心/配角/物种/群演 → merge）+ 三视图 + 火山合规通道
-- **场景**：4 视图 + 360° 全景
-- **道具**：单视图 + 出场绑定
+- ✅ 人物:characterRole 7 档分组(主演-男主/女主/反派 / 配角-正派/反派/中性 / 群演) + alias 自动 @ + tags
+- ✅ 场景 / 道具 / 风格参考 类型 tab 切换
+- ✅ 资产拆解(LLM 一次性输出 characters/scenes/props 草稿,人工审阅入库)
+- ✅ 资产编辑入 PromptEdit 训练集(target=ASSET)
+- 🚧 三视图 / 全景 / 主形象图像生成(W4.5)
+- 🚧 火山合规通道(W4.6)
 
 ### 资产数据模型亮点
 - `Asset.alias[]` — 别名（用于 AIGC 自动 @ 匹配）
