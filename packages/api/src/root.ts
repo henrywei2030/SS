@@ -9,6 +9,7 @@ import { meRouter } from './routers/me.js';
 import { projectRouter } from './routers/project.js';
 import { scriptRouter } from './routers/script.js';
 import { storyboardRouter } from './routers/storyboard.js';
+import { assetRouter } from './routers/asset.js';
 import { adminRouter } from './routers/admin.js';
 import { i18nRouter } from './routers/i18n.js';
 
@@ -18,6 +19,7 @@ export const appRouter = router({
   project: projectRouter,
   script: scriptRouter,
   storyboard: storyboardRouter,
+  asset: assetRouter,
   admin: adminRouter,
   i18n: i18nRouter,
 });

@@ -288,6 +288,52 @@ async function main() {
       category: 'feature_flag',
       description: '生成分镜时是否自动按 maxDurationS 预合并组',
     },
+
+    // ----- W4 资产工坊 model 绑定 -----
+    {
+      key: 'binding.asset.breakdown.modelId',
+      value: 'claude-sonnet-4-5',
+      category: 'model_binding',
+      description: '资产拆解使用的 LLM modelId(剧本→人物/场景/道具结构化)',
+    },
+    {
+      key: 'binding.asset.image.providerId',
+      value: 'nano-banana-pro',
+      category: 'model_binding',
+      description: '资产主形象 / 三视图生成使用的 Image Provider',
+    },
+    {
+      key: 'binding.asset.panorama.providerId',
+      value: 'gpt-image-2',
+      category: 'model_binding',
+      description: '场景 360° 全景图生成使用的 Image Provider',
+    },
+    {
+      key: 'binding.asset.compliance.providerId',
+      value: 'volcengine-compliance',
+      category: 'model_binding',
+      description: '人物合规检查使用的 Compliance Provider(返回 complianceId)',
+    },
+
+    // ----- W4 资产业务参数 -----
+    {
+      key: 'asset.breakdown.maxCharacters',
+      value: '20',
+      category: 'general',
+      description: '单次拆解最多识别人物数(防 LLM 输出爆炸)',
+    },
+    {
+      key: 'asset.threeView.angles',
+      value: '正面,侧面,背面',
+      category: 'general',
+      description: '人物三视图默认角度(逗号分隔)',
+    },
+    {
+      key: 'asset.compliance.requireForVideo',
+      value: 'true',
+      category: 'feature_flag',
+      description: '视频生成前是否强制要求人物已通过合规检查',
+    },
   ];
   for (const s of systemSettings) {
     await prisma.systemSetting.upsert({
