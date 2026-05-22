@@ -170,6 +170,8 @@ model GenerationAttempt {
   finishedAt    DateTime?
   durationMs    Int?
 
+  providerJobId String?         // W5.0:异步 Provider(Seedance)create→poll 任务 ID
+
   // 采纳标记
   adopted       Boolean
   adoptedAt     DateTime?

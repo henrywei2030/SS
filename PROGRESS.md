@@ -5,6 +5,41 @@
 
 ---
 
+## 2026-05-22(周五,公司 Mac Mini · 六次收工)— W5.0 视频生成数据底座
+
+**完成**
+- ✅ **W5.0.1 SystemSetting 加 4 条 video 配置**(共 21 → 25 条):
+  - `binding.shot.video.providerId` = seedance-2.0(快速档可改 seedance-2.0-fast)
+  - `shot.video.maxDurationS` = 10 / `defaultAspectRatio` = 9:16(短剧竖屏)/ `dailyBudgetCny` = 500(预算护栏)
+- ✅ **W5.0.2 [packages/core/storyboard/video.ts](packages/core/storyboard/video.ts) compileShotVideoPrompt 拼接公式**:
+  - 8 段顺序拼接:风格 → 角色 → 场景 → 道具 → 镜头内容 → 视频描述 → 镜头语言 → 时长/宽高比
+  - aspectRatio 默认 9:16,durationS clamp [5默认, 10上限],forbiddenWords ∪ extraNegative 去重
+  - 资产 description 优先 fallback prompt,缺段不留空行
+  - **18 个 happy/缺段/clamp/合并去重 单测全过**
+- ✅ **W5.0.3 GenerationAttempt 加 providerJobId 字段**:
+  - Seedance 等异步 Provider(create→poll)的任务 ID 存档
+  - 客户端轮询 / W5.3 BullMQ worker 复用同一字段(架构提前对齐)
+  - migration `20260522082406_w5_0_video_foundation`(单字段 additive 安全)
+- ✅ **审计上下文确认**:agent 报告 GenerationAttempt + MediaItem + IVideoProvider + SeedanceProvider 都已就绪(W4 已铺路),W5.0 真正缺口很窄,这次精准补齐
+- ✅ **2 commits + push**:
+  - `5356a27` feat(w3.1.followup) Episode 软锁
+  - `72cb995` feat(w5.0) 视频生成数据底座
+- ✅ **质量**:7 包 typecheck 全绿 / **60 单测全过**(35 core + 25 api)/ 30 张表 + 10 migrations / 25 SystemSetting
+- ✅ **docs 同步**:04-data-model 加 providerJobId 字段说明,03-roadmap W5 状态从 📋 改 🚧
+
+**进行中**
+- 🚧 W5.1 UI 骨架 — 4 列布局产品形态待决策(表格式 / 详情面板 / 混合)
+
+**问题 / 待决策**
+- ❓ W5.1 产品形态(主交互节奏)需用户决策
+- ❓ W5.3 BullMQ vs 客户端轮询的执行模型 — providerJobId 字段已铺,具体由 W5.3 阶段决定
+
+**下次接着做**
+- 📌 W5.1:用户决策产品形态后开干 UI 骨架
+- 📌 或先回 Mac Studio 验证跨设备接续(`git pull` → "开工"看是否能丝滑接手)
+
+---
+
 ## 2026-05-22(周五,公司 Mac Mini · 五次收工)— W3.1.followup 软锁(Episode.status='GENERATING' 防重入)
 
 **完成**

@@ -1,18 +1,16 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新：2026-05-22(深夜·五收工)
+> 最后更新：2026-05-22(深夜·六收工)
 > 仓库：https://github.com/henrywei2030/SS
 
 ---
 
 ## 🚧 进行中
 
-- [ ] **W5.0 数据底座**(下一步) — schema 加 GenerationAttempt 视频字段 + Shot 视频 mediaItem 槽位 + SystemSetting 加 video 配置;分步骤推进
-- [ ] **W5.1+** — AIGC 抽卡引擎
-  - 分镜级 4 列布局(资产关联 / 原始剧本 / 视频提示词 / 视频预览)
-  - 自动 @ 资产匹配(W1.6 auto-match 算法已就绪)
-  - Seedance 抽卡 + 历史记录 + 重抽
-  - BullMQ video-gen worker + 实时进度推送
+- [x] **W5.0 数据底座** — SystemSetting 4 条 + compileShotVideoPrompt 拼接公式 + GenerationAttempt.providerJobId — 2026-05-22(六收工)
+- [ ] **W5.1 UI 骨架**(下一步,待定形态)— 分镜级 4 列布局(资产关联 / 原始剧本 / 视频提示词 / 视频预览);**产品形态待决策**:表格式(每镜一行 4 格)/ 详情面板(选中后展开)/ 混合
+- [ ] **W5.2+** — Seedance 抽卡 router + 自动 @ 资产匹配(W1.6 auto-match 已就绪)
+- [ ] **W5.3** — BullMQ video-gen worker + 实时进度推送(SSE)+ providerJobId 轮询
 
 - [ ] **跨设备协作工作流验证**(Mac Studio 端)
   - 待：在家 Mac Studio `git pull` + 登录同一 Project + 说"开工"验证接续
@@ -87,12 +85,14 @@
 - [ ] 资产关系图谱(人物关系 / 场景空间相邻)— Phase 2
 
 #### W5 · Generation Engine + Media Vault
-- [ ] AIGC 集卡片 + 分镜级 4 列布局
-- [ ] 自动 @ 资产匹配（复用 W1.6 auto-match 算法）
-- [ ] Seedance 抽卡 + 历史记录 + 重抽
-- [ ] BullMQ video-gen worker（异步生成）
-- [ ] 实时进度推送（WebSocket / SSE）
-- [ ] 素材库上传 / 搜索 / 收藏 / 批量
+- [x] **W5.0.1** SystemSetting 加 4 条 video 配置(provider/maxDurationS/aspectRatio/dailyBudget)— 2026-05-22
+- [x] **W5.0.2** packages/core/storyboard/video.ts compileShotVideoPrompt 8 段拼接 + 18 单测 — 2026-05-22
+- [x] **W5.0.3** GenerationAttempt 加 providerJobId 字段 + migration — 2026-05-22
+- [ ] **W5.1** 分镜级 4 列布局 UI 骨架(产品形态待决策)
+- [ ] **W5.2** 自动 @ 资产匹配(复用 W1.6 auto-match 算法)
+- [ ] **W5.3** Seedance 抽卡 router + 历史记录 + 重抽
+- [ ] **W5.4** BullMQ video-gen worker(异步生成)+ 实时进度推送(SSE)+ providerJobId 轮询
+- [ ] **W5.5** 素材库上传 / 搜索 / 收藏 / 批量
 
 #### W6 · Insight Cockpit + Collab Hub
 - [ ] 数据总览（30 天趋势 + 模型分布 + 项目费用 Top5）
