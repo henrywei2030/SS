@@ -800,6 +800,10 @@ model GenerationAttempt {
   outputMediaIds String[] // 多候选输出（如多张图）
   errorMsg       String?
 
+  // W5.0:异步 Provider(Seedance 等)create→poll 模式的任务 ID。
+  // 客户端轮询 / W5.3 BullMQ worker 用它回查 Provider 任务状态。
+  providerJobId  String?
+
   // 计费
   inputUnits   Float   @default(0) // tokens / pixels / seconds
   outputUnits  Float   @default(0)

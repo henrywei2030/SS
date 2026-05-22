@@ -369,6 +369,34 @@ async function main() {
       category: 'feature_flag',
       description: '视频生成前是否强制要求人物已通过合规检查',
     },
+
+    // ----- W5.0 视频生成 model 绑定 -----
+    {
+      key: 'binding.shot.video.providerId',
+      value: 'seedance-2.0',
+      category: 'model_binding',
+      description: '分镜视频生成默认 Provider(快速档可改 seedance-2.0-fast)',
+    },
+
+    // ----- W5.0 视频生成业务参数 -----
+    {
+      key: 'shot.video.maxDurationS',
+      value: '10',
+      category: 'general',
+      description: '单镜视频生成最大时长(秒)— 与 storyboard.maxShotDurationS 联动',
+    },
+    {
+      key: 'shot.video.defaultAspectRatio',
+      value: '9:16',
+      category: 'general',
+      description: '视频默认宽高比(短剧竖屏 9:16,横屏改 16:9)',
+    },
+    {
+      key: 'shot.video.dailyBudgetCny',
+      value: '500',
+      category: 'general',
+      description: '单项目单日视频生成预算上限(元),超限拒绝新抽卡(BUDGET_BLOCKED)',
+    },
   ];
   for (const s of systemSettings) {
     await prisma.systemSetting.upsert({
