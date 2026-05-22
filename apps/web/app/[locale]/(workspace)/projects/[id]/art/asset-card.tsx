@@ -1,7 +1,8 @@
 'use client';
 import * as React from 'react';
-import { Image as ImageIcon, Shield, ShieldAlert } from 'lucide-react';
+import { Image as ImageIcon, Shield, ShieldAlert, Lock } from 'lucide-react';
 
+import { trpc } from '@/lib/trpc/client';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
@@ -14,9 +15,23 @@ type AssetBrief = {
   description: string | null;
   characterRole: string | null;
   tags: string[];
-  mainMediaId: string | null;
-  complianceStatus: string;
+  archetypeKey: string | null;
+  importance: string | null;
+  maturity: string;
   status: string;
+  complianceStatus: string;
+  lockedAt: Date | null;
+
+  // 槽位
+  portraitMediaId: string | null;
+  threeViewMediaId: string | null;
+  sceneMainMediaId: string | null;
+  sceneFrontMediaId: string | null;
+  sceneLeftMediaId: string | null;
+  sceneRightMediaId: string | null;
+  sceneBackMediaId: string | null;
+  panoramaMediaId: string | null;
+  mainMediaId: string | null;
 };
 
 interface Props {
@@ -25,36 +40,107 @@ interface Props {
 }
 
 export function AssetCard({ asset, onClick }: Props): React.ReactElement {
+  // 出场绑定按集 group
+  const { data: bindings } = trpc.asset.listBindings.useQuery({ assetId: asset.id });
+
+  const episodeBadges = React.useMemo(() => {
+    if (!bindings) return [];
+    const byEp = new Map<number, string[]>();
+    for (const b of bindings) {
+      const epNo = b.episode.number;
+      const sceneNo = b.scene?.number ?? '';
+      const label = sceneNo || String(epNo);
+      const list = byEp.get(epNo) ?? [];
+      if (!list.includes(label)) list.push(label);
+      byEp.set(epNo, list);
+    }
+    return Array.from(byEp.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([ep, labels]) => ({
+        episode: ep,
+        label: labels[0] ?? String(ep),
+        moreCount: Math.max(0, labels.length - 1),
+      }));
+  }, [bindings]);
+
+  // 主形象 — 9:16 用 portrait,场景用 sceneMain or main,道具用 main
+  const heroMediaId =
+    asset.type === 'CHARACTER'
+      ? asset.portraitMediaId
+      : asset.type === 'SCENE'
+        ? asset.sceneMainMediaId ?? asset.mainMediaId
+        : asset.mainMediaId;
+
+  // 卡片比例 — 人物 9:16,场景/道具 16:9
+  const aspectClass = asset.type === 'CHARACTER' ? 'aspect-[9/16]' : 'aspect-[16/9]';
+
+  // 主标签 — 优先角色 > importance > type
+  const primaryBadge =
+    asset.characterRole ??
+    (asset.importance ? `${asset.importance} 级` : null);
+
   return (
     <Card
       onClick={onClick}
       className={cn(
-        'flex cursor-pointer flex-col overflow-hidden transition-all',
+        'group flex cursor-pointer flex-col overflow-hidden transition-all',
         'hover:border-[hsl(var(--color-accent))] hover:shadow-md',
       )}
     >
-      {/* 主图占位区 */}
-      <div className="relative flex aspect-square items-center justify-center bg-[hsl(var(--color-secondary)/0.4)]">
-        {asset.mainMediaId ? (
-          // W4.5 实装后这里渲染真实图片
-          <div className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
+      {/* 主图区 */}
+      <div
+        className={cn(
+          'relative flex items-center justify-center bg-[hsl(var(--color-secondary)/0.4)]',
+          aspectClass,
+        )}
+      >
+        {heroMediaId ? (
+          // W4-MM.6 实装 ImageProvider 后这里渲染真实图片 URL
+          <div className="flex flex-col items-center gap-1 text-[10px] text-[hsl(var(--color-muted-foreground))]">
+            <ImageIcon className="size-6 opacity-50" />
             主形象已生成
           </div>
         ) : (
-          <ImageIcon className="size-8 text-[hsl(var(--color-muted-foreground)/0.5)]" />
+          <ImageIcon className="size-8 text-[hsl(var(--color-muted-foreground)/0.4)]" />
         )}
-        <ComplianceBadge status={asset.complianceStatus} />
-        <StatusBadge status={asset.status} />
+
+        {/* 左上 — 角色身份 / importance */}
+        {primaryBadge && (
+          <Badge variant="default" className="absolute left-1.5 top-1.5 px-1.5 text-[10px]">
+            {primaryBadge}
+          </Badge>
+        )}
+
+        {/* 右上 — 合规 + 锁定 */}
+        <div className="absolute right-1.5 top-1.5 flex gap-1">
+          {asset.lockedAt && (
+            <div
+              title="资产已锁定"
+              className="rounded-full bg-[hsl(var(--color-accent)/0.15)] p-0.5 text-[hsl(var(--color-accent))]"
+            >
+              <Lock className="size-3" />
+            </div>
+          )}
+          <ComplianceBadge status={asset.complianceStatus} />
+        </div>
+
+        {/* 底部 — 状态标签条 */}
+        <div className="absolute inset-x-0 bottom-0 flex flex-wrap gap-1 bg-gradient-to-t from-black/70 to-transparent p-1.5">
+          <MaturityChips asset={asset} />
+        </div>
       </div>
 
       {/* 卡片底部信息 */}
-      <div className="flex flex-col gap-1 p-3">
+      <div className="flex flex-col gap-1 p-2.5">
         <div className="flex items-baseline justify-between gap-2">
-          <div className="truncate text-sm font-medium">{asset.name}</div>
-          {asset.characterRole && (
-            <Badge variant="secondary" className="shrink-0 px-1 text-[9px]">
-              {asset.characterRole}
-            </Badge>
+          <div className="truncate text-[13px] font-medium">{asset.name}</div>
+          {asset.archetypeKey && asset.archetypeKey !== asset.name && (
+            <span
+              title={`原型:${asset.archetypeKey}`}
+              className="shrink-0 text-[9px] text-[hsl(var(--color-muted-foreground))]"
+            >
+              ·{asset.archetypeKey}
+            </span>
           )}
         </div>
         {asset.alias.length > 0 && (
@@ -63,16 +149,16 @@ export function AssetCard({ asset, onClick }: Props): React.ReactElement {
           </div>
         )}
         {asset.description && (
-          <p className="line-clamp-2 text-[11px] leading-relaxed text-[hsl(var(--color-muted-foreground))]">
+          <p className="line-clamp-1 text-[10px] leading-relaxed text-[hsl(var(--color-muted-foreground))]">
             {asset.description}
           </p>
         )}
         {asset.tags.length > 0 && (
-          <div className="mt-1 flex flex-wrap gap-1">
+          <div className="mt-0.5 flex flex-wrap gap-1">
             {asset.tags.slice(0, 3).map((t) => (
               <span
                 key={t}
-                className="rounded bg-[hsl(var(--color-secondary)/0.6)] px-1.5 py-0.5 text-[9px] text-[hsl(var(--color-muted-foreground))]"
+                className="rounded bg-[hsl(var(--color-secondary)/0.6)] px-1 py-0.5 text-[9px] text-[hsl(var(--color-muted-foreground))]"
               >
                 {t}
               </span>
@@ -84,8 +170,97 @@ export function AssetCard({ asset, onClick }: Props): React.ReactElement {
             )}
           </div>
         )}
+
+        {/* 出场集联动 — group by episode */}
+        {episodeBadges.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-1 border-t border-[hsl(var(--color-border)/0.5)] pt-1.5">
+            {episodeBadges.slice(0, 6).map((ep) => (
+              <span
+                key={ep.episode}
+                className="rounded bg-[hsl(var(--color-accent)/0.12)] px-1 py-0.5 text-[9px] text-[hsl(var(--color-accent))]"
+                title={`第 ${ep.episode} 集`}
+              >
+                {ep.label}
+              </span>
+            ))}
+            {episodeBadges.length > 6 && (
+              <span className="text-[9px] text-[hsl(var(--color-muted-foreground))]">
+                +{episodeBadges.length - 6}
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 状态标签 — L0-L5 直接显示对应"形象图已完成/三视图未完成/合规通过"
+// ---------------------------------------------------------------------------
+
+function MaturityChips({ asset }: { asset: AssetBrief }): React.ReactElement {
+  const chips: Array<{ label: string; tone: 'success' | 'warn' | 'default' }> = [];
+
+  if (asset.type === 'CHARACTER') {
+    chips.push(
+      asset.portraitMediaId
+        ? { label: '形象图已完成', tone: 'success' }
+        : { label: '形象图未完成', tone: 'warn' },
+    );
+    if (asset.complianceStatus === 'APPROVED') {
+      chips.push({ label: '三视图已合规', tone: 'success' });
+    } else if (asset.threeViewMediaId) {
+      chips.push({ label: '三视图待合规', tone: 'warn' });
+    } else {
+      chips.push({ label: '三视图未完成', tone: 'warn' });
+    }
+  } else if (asset.type === 'SCENE') {
+    const hasMain = !!asset.sceneMainMediaId || !!asset.mainMediaId;
+    chips.push(
+      hasMain
+        ? { label: '主图已完成', tone: 'success' }
+        : { label: '主图未完成', tone: 'warn' },
+    );
+    const angleCount = [
+      asset.sceneFrontMediaId,
+      asset.sceneLeftMediaId,
+      asset.sceneRightMediaId,
+      asset.sceneBackMediaId,
+      asset.panoramaMediaId,
+    ].filter(Boolean).length;
+    if (angleCount > 0) {
+      chips.push({
+        label: `${angleCount}/4 多角度`,
+        tone: angleCount >= 4 ? 'success' : 'warn',
+      });
+    } else {
+      chips.push({ label: '多角度未完成', tone: 'warn' });
+    }
+  } else {
+    chips.push(
+      asset.mainMediaId
+        ? { label: '已确认', tone: 'success' }
+        : { label: '未生成', tone: 'warn' },
+    );
+  }
+
+  return (
+    <>
+      {chips.map((c, i) => (
+        <span
+          key={i}
+          className={cn(
+            'rounded px-1 py-0.5 text-[9px] font-medium',
+            c.tone === 'success' && 'bg-emerald-500/20 text-emerald-300',
+            c.tone === 'warn' && 'bg-rose-500/20 text-rose-300',
+            c.tone === 'default' && 'bg-white/20 text-white',
+          )}
+        >
+          {c.label}
+        </span>
+      ))}
+    </>
   );
 }
 
@@ -95,7 +270,7 @@ function ComplianceBadge({ status }: { status: string }): React.ReactElement | n
     return (
       <div
         title="合规已通过"
-        className="absolute right-1.5 top-1.5 rounded-full bg-[hsl(var(--color-success,142_71%_45%))/0.15] p-0.5 text-[hsl(var(--color-success,142_71%_45%))]"
+        className="rounded-full bg-emerald-500/20 p-0.5 text-emerald-300"
       >
         <Shield className="size-3" />
       </div>
@@ -104,19 +279,9 @@ function ComplianceBadge({ status }: { status: string }): React.ReactElement | n
   return (
     <div
       title={`合规: ${status}`}
-      className="absolute right-1.5 top-1.5 rounded-full bg-[hsl(var(--color-warning,40_92%_50%))/0.15] p-0.5 text-[hsl(var(--color-warning,40_92%_50%))]"
+      className="rounded-full bg-amber-500/20 p-0.5 text-amber-300"
     >
       <ShieldAlert className="size-3" />
     </div>
-  );
-}
-
-function StatusBadge({ status }: { status: string }): React.ReactElement {
-  const variant: 'secondary' | 'success' | 'default' =
-    status === 'CONFIRMED' ? 'success' : status === 'DRAFT' ? 'secondary' : 'default';
-  return (
-    <Badge variant={variant} className="absolute left-1.5 top-1.5 px-1 text-[9px]">
-      {status}
-    </Badge>
   );
 }

@@ -1,22 +1,74 @@
 'use client';
 import * as React from 'react';
-import { Loader2, Save, Sparkles, Trash2 } from 'lucide-react';
+import {
+  Loader2,
+  Sparkles,
+  Trash2,
+  X,
+  Lock,
+  Unlock,
+  Image as ImageIcon,
+  CheckCircle2,
+  Check,
+  Info,
+} from 'lucide-react';
 import { toast } from 'sonner';
+import type { inferRouterOutputs } from '@trpc/server';
+import type { AppRouter } from '@ss/api';
 
 import { trpc } from '@/lib/trpc/client';
+
+type AssetDetail = inferRouterOutputs<AppRouter>['asset']['get'];
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { cn } from '@/lib/utils';
+
+// ---------------------------------------------------------------------------
+// 类型 + 槽位定义
+// ---------------------------------------------------------------------------
 
 type AssetType = 'CHARACTER' | 'SCENE' | 'PROP' | 'STYLE_REFERENCE';
+type Slot =
+  | 'portrait'
+  | 'three_view'
+  | 'scene_main'
+  | 'scene_front'
+  | 'scene_left'
+  | 'scene_right'
+  | 'scene_back'
+  | 'panorama'
+  | 'main';
+
+const SLOTS_BY_TYPE: Record<AssetType, Array<{ slot: Slot; label: string; aspectClass: string }>> = {
+  CHARACTER: [
+    { slot: 'portrait', label: '已确认人物形象 (9:16)', aspectClass: 'aspect-[9/16]' },
+    { slot: 'three_view', label: '已确认三视图 (16:9)', aspectClass: 'aspect-[16/9]' },
+  ],
+  SCENE: [
+    { slot: 'scene_main', label: '主视角', aspectClass: 'aspect-[16/9]' },
+    { slot: 'scene_front', label: '正面视角', aspectClass: 'aspect-[16/9]' },
+    { slot: 'scene_left', label: '左侧视角', aspectClass: 'aspect-[16/9]' },
+    { slot: 'scene_right', label: '右侧视角', aspectClass: 'aspect-[16/9]' },
+    { slot: 'scene_back', label: '背面视角', aspectClass: 'aspect-[16/9]' },
+    { slot: 'panorama', label: '360° 全景', aspectClass: 'aspect-[2/1]' },
+  ],
+  PROP: [{ slot: 'main', label: '主图', aspectClass: 'aspect-square' }],
+  STYLE_REFERENCE: [{ slot: 'main', label: '风格参考图', aspectClass: 'aspect-square' }],
+};
+
+const SLOT_FIELD: Record<Slot, string> = {
+  portrait: 'portraitMediaId',
+  three_view: 'threeViewMediaId',
+  scene_main: 'sceneMainMediaId',
+  scene_front: 'sceneFrontMediaId',
+  scene_left: 'sceneLeftMediaId',
+  scene_right: 'sceneRightMediaId',
+  scene_back: 'sceneBackMediaId',
+  panorama: 'panoramaMediaId',
+  main: 'mainMediaId',
+};
 
 const CHARACTER_ROLES = [
   '主演-男主',
@@ -27,6 +79,13 @@ const CHARACTER_ROLES = [
   '配角-中性',
   '群演',
 ] as const;
+
+const RATIOS = ['9:16', '16:9', '1:1', '3:4', '4:3', '2:1'] as const;
+const SIZES = ['1K (1024)', '2K (2048)', '4K (4096)'] as const;
+
+// ---------------------------------------------------------------------------
+// 入口
+// ---------------------------------------------------------------------------
 
 interface PropsCommon {
   onClose: () => void;
@@ -52,7 +111,7 @@ export function AssetEditDialog(props: Props): React.ReactElement {
 }
 
 // ---------------------------------------------------------------------------
-// Update mode — 编辑已有资产
+// 编辑模式 — 三栏完整工作台
 // ---------------------------------------------------------------------------
 
 function UpdateMode({
@@ -64,41 +123,50 @@ function UpdateMode({
   onClose: () => void;
   onSaved: () => void;
 }): React.ReactElement {
-  const { data: asset, isLoading } = trpc.asset.get.useQuery({ assetId });
+  const utils = trpc.useUtils();
+  const { data: asset, isLoading, refetch } = trpc.asset.get.useQuery({ assetId });
 
   if (isLoading || !asset) {
     return (
-      <Dialog open onOpenChange={(o) => !o && onClose()}>
-        <DialogContent>
-          <div className="flex h-32 items-center justify-center">
-            <Loader2 className="size-5 animate-spin" />
-          </div>
-        </DialogContent>
-      </Dialog>
+      <DialogShell onClose={onClose}>
+        <div className="flex h-64 items-center justify-center">
+          <Loader2 className="size-6 animate-spin" />
+        </div>
+      </DialogShell>
     );
   }
 
+  const type = asset.type as AssetType;
+  const slots = SLOTS_BY_TYPE[type];
+
+  const handleAfterChange = (): void => {
+    void refetch();
+    void utils.asset.list.invalidate({ projectId: asset.projectId });
+  };
+
   return (
-    <EditForm
-      mode="update"
-      initial={{
-        name: asset.name,
-        alias: asset.alias,
-        description: asset.description ?? '',
-        prompt: asset.prompt,
-        characterRole: asset.characterRole,
-        tags: asset.tags,
-        type: asset.type as AssetType,
-      }}
-      assetId={assetId}
-      onClose={onClose}
-      onSaved={onSaved}
-    />
+    <DialogShell onClose={onClose}>
+      <div className="grid h-full grid-cols-[280px_1fr_300px] divide-x divide-[hsl(var(--color-border))]">
+        <InfoPanel asset={asset} onChanged={handleAfterChange} />
+        <GenerationPanel
+          asset={asset}
+          onChanged={() => {
+            handleAfterChange();
+            onSaved();
+          }}
+        />
+        <ConfirmedSlotsPanel
+          asset={asset}
+          slots={slots}
+          onChanged={handleAfterChange}
+        />
+      </div>
+    </DialogShell>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Create mode — 新建资产
+// 创建模式 — 单栏简化(填基本信息 + 创建,创建后用户可重打开走编辑模式)
 // ---------------------------------------------------------------------------
 
 function CreateMode({
@@ -112,56 +180,13 @@ function CreateMode({
   onClose: () => void;
   onSaved: () => void;
 }): React.ReactElement {
-  return (
-    <EditForm
-      mode="create"
-      initial={{
-        name: '',
-        alias: [],
-        description: '',
-        prompt: '',
-        characterRole: null,
-        tags: [],
-        type,
-      }}
-      projectId={projectId}
-      onClose={onClose}
-      onSaved={onSaved}
-    />
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 表单
-// ---------------------------------------------------------------------------
-
-interface FormData {
-  name: string;
-  alias: string[];
-  description: string;
-  prompt: string;
-  characterRole: string | null;
-  tags: string[];
-  type: AssetType;
-}
-
-function EditForm({
-  mode,
-  initial,
-  assetId,
-  projectId,
-  onClose,
-  onSaved,
-}: {
-  mode: 'create' | 'update';
-  initial: FormData;
-  assetId?: string;
-  projectId?: string;
-  onClose: () => void;
-  onSaved: () => void;
-}): React.ReactElement {
-  const [form, setForm] = React.useState<FormData>(initial);
-  const [diffNote, setDiffNote] = React.useState('');
+  const [name, setName] = React.useState('');
+  const [archetypeKey, setArchetypeKey] = React.useState('');
+  const [characterRole, setCharacterRole] = React.useState<string>('');
+  const [description, setDescription] = React.useState('');
+  const [prompt, setPrompt] = React.useState('');
+  const [tags, setTags] = React.useState('');
+  const [alias, setAlias] = React.useState('');
 
   const createMut = trpc.asset.create.useMutation({
     onSuccess: () => {
@@ -170,232 +195,890 @@ function EditForm({
     },
     onError: (e) => toast.error(e.message),
   });
-  const updateMut = trpc.asset.update.useMutation({
-    onSuccess: () => {
-      toast.success('已保存 · 改动入 PromptEdit 训练集');
-      onSaved();
-    },
-    onError: (e) => toast.error(e.message),
-  });
-  const deleteMut = trpc.asset.delete.useMutation({
-    onSuccess: () => {
-      toast.success('已删除');
-      onSaved();
-    },
-    onError: (e) => toast.error(e.message),
-  });
-
-  const pending = createMut.isPending || updateMut.isPending || deleteMut.isPending;
 
   const handleSave = (): void => {
-    if (!form.name.trim() || !form.prompt.trim()) {
-      toast.error('name 和 prompt 不能为空');
+    if (!name.trim() || !prompt.trim()) {
+      toast.error('名称和提示词必填');
       return;
     }
-    if (mode === 'create') {
-      createMut.mutate({
-        projectId: projectId!,
-        type: form.type,
-        name: form.name.trim(),
-        alias: form.alias.filter(Boolean),
-        description: form.description,
-        prompt: form.prompt,
-        ...(form.characterRole && form.type === 'CHARACTER'
-          ? { characterRole: form.characterRole as (typeof CHARACTER_ROLES)[number] }
-          : {}),
-        tags: form.tags.filter(Boolean),
-      });
-    } else {
-      // 只传发生变化的字段
-      const patch: Record<string, unknown> = {};
-      if (form.name !== initial.name) patch.name = form.name.trim();
-      if (JSON.stringify(form.alias) !== JSON.stringify(initial.alias))
-        patch.alias = form.alias.filter(Boolean);
-      if (form.description !== initial.description) patch.description = form.description;
-      if (form.prompt !== initial.prompt) patch.prompt = form.prompt;
-      if (form.characterRole !== initial.characterRole)
-        patch.characterRole = form.characterRole;
-      if (JSON.stringify(form.tags) !== JSON.stringify(initial.tags))
-        patch.tags = form.tags.filter(Boolean);
-
-      if (Object.keys(patch).length === 0) {
-        toast.info('没有改动');
-        return;
-      }
-      updateMut.mutate({
-        assetId: assetId!,
-        patch: patch as never,
-        diffNote: diffNote || undefined,
-      });
-    }
+    createMut.mutate({
+      projectId,
+      type,
+      name: name.trim(),
+      archetypeKey: archetypeKey.trim() || undefined,
+      description,
+      prompt,
+      alias: alias.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
+      tags: tags.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
+      ...(type === 'CHARACTER' && characterRole
+        ? { characterRole: characterRole as (typeof CHARACTER_ROLES)[number] }
+        : {}),
+    });
   };
 
-  const handleDelete = (): void => {
-    if (!assetId) return;
-    if (!confirm(`确认删除资产 "${form.name}"?`)) return;
-    deleteMut.mutate({ assetId });
-  };
+  const typeLabel =
+    type === 'CHARACTER' ? '人物' : type === 'SCENE' ? '场景' : type === 'PROP' ? '道具' : '风格参考';
 
   return (
-    <Dialog open onOpenChange={(o) => !o && !pending && onClose()}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>
-            {mode === 'create' ? '新建' : '编辑'}
-            {' · '}
-            {form.type === 'CHARACTER'
-              ? '人物'
-              : form.type === 'SCENE'
-                ? '场景'
-                : form.type === 'PROP'
-                  ? '道具'
-                  : '风格参考'}
-          </DialogTitle>
-          <DialogDescription>
-            {mode === 'update'
-              ? '修改 name / description / prompt 后保存,会自动写入 PromptEdit 训练集'
-              : '填好基本信息和提示词,后续可生成主形象 / 三视图'}
-          </DialogDescription>
-        </DialogHeader>
+    <DialogShell onClose={onClose}>
+      <div className="flex flex-col gap-3 p-5">
+        <h2 className="text-lg font-semibold">新建{typeLabel}资产</h2>
+        <p className="text-xs text-[hsl(var(--color-muted-foreground))]">
+          填好基本信息和提示词,创建后可在编辑弹窗中生成主形象 / 三视图 / 多角度。
+        </p>
 
-        <div className="flex flex-col gap-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-1.5">
-              <Label htmlFor="name">名称 *</Label>
-              <Input
-                id="name"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="如 陆乘 / 陆乘家破土屋"
-              />
-            </div>
-            {form.type === 'CHARACTER' && (
-              <div className="grid gap-1.5">
-                <Label htmlFor="role">角色身份</Label>
-                <select
-                  id="role"
-                  value={form.characterRole ?? ''}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      characterRole: e.target.value || null,
-                    })
-                  }
-                  className="h-9 rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 text-sm"
-                >
-                  <option value="">— 未指定 —</option>
-                  {CHARACTER_ROLES.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
-
+        <div className="grid grid-cols-2 gap-3 pt-2">
           <div className="grid gap-1.5">
-            <Label htmlFor="alias">别名(逗号分隔,自动 @ 匹配用)</Label>
+            <Label htmlFor="name">名称 *</Label>
             <Input
-              id="alias"
-              value={form.alias.join(', ')}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  alias: e.target.value
-                    .split(/[,，]/)
-                    .map((s) => s.trim())
-                    .filter(Boolean),
-                })
-              }
-              placeholder="阿乘, 哥, 乘哥"
+              id="name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={type === 'CHARACTER' ? '陆乘 - 重生初期' : '土屋 / 灵泉水玉瓶'}
             />
           </div>
-
-          <div className="grid gap-1.5">
-            <Label htmlFor="description">描述</Label>
-            <textarea
-              id="description"
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              rows={2}
-              className="rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-3 py-2 text-sm"
-              placeholder="20-25 岁男性,身材消瘦但坚毅,短发,衣着朴素"
-            />
-          </div>
-
-          <div className="grid gap-1.5">
-            <Label htmlFor="prompt">提示词 * (送图像模型用)</Label>
-            <textarea
-              id="prompt"
-              value={form.prompt}
-              onChange={(e) => setForm({ ...form, prompt: e.target.value })}
-              rows={5}
-              className="rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-3 py-2 font-mono text-[12px] leading-relaxed"
-              placeholder="20-25 岁中国男性,身材消瘦但骨骼分明,短发偏粗硬,眼神坚毅有戏,80 年代农村粗布衣裤"
-            />
-            <p className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
-              {form.prompt.length} 字 · 建议 50-150 字
-            </p>
-          </div>
-
-          <div className="grid gap-1.5">
-            <Label htmlFor="tags">标签(逗号分隔)</Label>
-            <Input
-              id="tags"
-              value={form.tags.join(', ')}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  tags: e.target.value
-                    .split(/[,，]/)
-                    .map((s) => s.trim())
-                    .filter(Boolean),
-                })
-              }
-              placeholder="坚毅, 重情义, 逆境重生"
-            />
-          </div>
-
-          {mode === 'update' && (
+          {type === 'CHARACTER' && (
             <div className="grid gap-1.5">
-              <Label htmlFor="diffNote" className="flex items-center gap-1.5">
-                <Sparkles className="size-3 text-[hsl(var(--color-accent))]" />
-                修改原因(可选,会一起入训练集)
-              </Label>
-              <Input
-                id="diffNote"
-                value={diffNote}
-                onChange={(e) => setDiffNote(e.target.value)}
-                placeholder="例:AI 拆解忽略了角色后期的服装变化,人工补充"
-              />
+              <Label htmlFor="role">角色身份</Label>
+              <select
+                id="role"
+                value={characterRole}
+                onChange={(e) => setCharacterRole(e.target.value)}
+                className="h-9 rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 text-sm"
+              >
+                <option value="">— 未指定 —</option>
+                {CHARACTER_ROLES.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
             </div>
           )}
         </div>
 
-        <DialogFooter className="flex justify-between sm:justify-between">
-          {mode === 'update' && (
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={pending}
-              className="gap-1.5"
-            >
-              <Trash2 className="size-4" />
-              删除
-            </Button>
-          )}
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={onClose} disabled={pending}>
-              取消
-            </Button>
-            <Button onClick={handleSave} disabled={pending} className="gap-1.5">
-              {pending ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-              {mode === 'create' ? '创建' : '保存'}
-            </Button>
+        {type === 'CHARACTER' && (
+          <div className="grid gap-1.5">
+            <Label htmlFor="arch" className="flex items-center gap-1.5">
+              原型 key
+              <span className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
+                (同人物不同时期共享,如"陆乘";不填则视为独立角色)
+              </span>
+            </Label>
+            <Input
+              id="arch"
+              value={archetypeKey}
+              onChange={(e) => setArchetypeKey(e.target.value)}
+              placeholder="陆乘"
+            />
           </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        )}
+
+        <div className="grid gap-1.5">
+          <Label htmlFor="alias">别名(逗号分隔)</Label>
+          <Input
+            id="alias"
+            value={alias}
+            onChange={(e) => setAlias(e.target.value)}
+            placeholder="阿乘, 哥, 乘哥"
+          />
+        </div>
+
+        <div className="grid gap-1.5">
+          <Label htmlFor="desc">描述</Label>
+          <textarea
+            id="desc"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={2}
+            className="rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-3 py-2 text-sm"
+          />
+        </div>
+
+        <div className="grid gap-1.5">
+          <Label htmlFor="prompt">提示词 *</Label>
+          <textarea
+            id="prompt"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            rows={5}
+            className="rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-3 py-2 font-mono text-[12px]"
+          />
+        </div>
+
+        <div className="grid gap-1.5">
+          <Label htmlFor="tags">标签(逗号分隔)</Label>
+          <Input
+            id="tags"
+            value={tags}
+            onChange={(e) => setTags(e.target.value)}
+            placeholder="坚毅, 重情义"
+          />
+        </div>
+
+        <div className="mt-3 flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose} disabled={createMut.isPending}>
+            取消
+          </Button>
+          <Button onClick={handleSave} disabled={createMut.isPending} className="gap-1.5">
+            {createMut.isPending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+            创建
+          </Button>
+        </div>
+      </div>
+    </DialogShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 弹窗外壳 — 大尺寸三栏
+// ---------------------------------------------------------------------------
+
+function DialogShell({
+  children,
+  onClose,
+}: {
+  children: React.ReactNode;
+  onClose: () => void;
+}): React.ReactElement {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="relative h-[90vh] w-full max-w-[1280px] overflow-hidden rounded-lg border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          onClick={onClose}
+          className="absolute right-3 top-3 z-10 rounded p-1 text-[hsl(var(--color-muted-foreground))] hover:bg-[hsl(var(--color-secondary)/0.5)] hover:text-[hsl(var(--color-foreground))]"
+          aria-label="关闭"
+        >
+          <X className="size-4" />
+        </button>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 左:信息区
+// ---------------------------------------------------------------------------
+
+function InfoPanel({
+  asset,
+  onChanged,
+}: {
+  asset: AssetDetail;
+  onChanged: () => void;
+}): React.ReactElement {
+  const [editing, setEditing] = React.useState<{
+    name: string;
+    archetypeKey: string;
+    description: string;
+    prompt: string;
+    characterRole: string;
+    tags: string;
+    alias: string;
+  }>({
+    name: asset.name,
+    archetypeKey: asset.archetypeKey ?? '',
+    description: asset.description ?? '',
+    prompt: asset.prompt,
+    characterRole: asset.characterRole ?? '',
+    tags: asset.tags.join(', '),
+    alias: asset.alias.join(', '),
+  });
+  const [diffNote, setDiffNote] = React.useState('');
+
+  const updateMut = trpc.asset.update.useMutation({
+    onSuccess: () => {
+      toast.success('已保存 · 改动入训练集');
+      onChanged();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const lockMut = trpc.asset.lockAsset.useMutation({
+    onSuccess: () => {
+      toast.success('已锁定');
+      onChanged();
+    },
+  });
+  const unlockMut = trpc.asset.unlockAsset.useMutation({
+    onSuccess: () => {
+      toast.success('已解锁');
+      onChanged();
+    },
+  });
+  const deleteMut = trpc.asset.delete.useMutation({
+    onSuccess: () => {
+      toast.success('已删除');
+      onChanged();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const isLocked = !!asset.lockedAt;
+
+  const handleSave = (): void => {
+    const patch: Record<string, unknown> = {};
+    if (editing.name !== asset.name) patch.name = editing.name;
+    if (editing.archetypeKey !== (asset.archetypeKey ?? ''))
+      patch.archetypeKey = editing.archetypeKey || null;
+    if (editing.description !== (asset.description ?? '')) patch.description = editing.description;
+    if (editing.prompt !== asset.prompt) patch.prompt = editing.prompt;
+    if (editing.characterRole !== (asset.characterRole ?? '')) {
+      patch.characterRole = editing.characterRole || null;
+    }
+    const newTags = editing.tags
+      .split(/[,，]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (JSON.stringify(newTags) !== JSON.stringify(asset.tags)) patch.tags = newTags;
+    const newAlias = editing.alias
+      .split(/[,，]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (JSON.stringify(newAlias) !== JSON.stringify(asset.alias)) patch.alias = newAlias;
+
+    if (Object.keys(patch).length === 0) {
+      toast.info('没有改动');
+      return;
+    }
+    updateMut.mutate({
+      assetId: asset.id,
+      patch: patch as never,
+      diffNote: diffNote || undefined,
+    });
+  };
+
+  const type = asset.type as AssetType;
+  const typeLabel =
+    type === 'CHARACTER' ? '人物' : type === 'SCENE' ? '场景' : type === 'PROP' ? '道具' : '风格';
+
+  return (
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="flex items-center justify-between border-b border-[hsl(var(--color-border))] px-4 py-3">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold">{typeLabel}编辑</h3>
+          {isLocked && (
+            <Badge variant="secondary" className="gap-1 px-1.5 text-[10px]">
+              <Lock className="size-2.5" />
+              已锁定
+            </Badge>
+          )}
+        </div>
+        <div className="flex gap-1">
+          {isLocked ? (
+            <button
+              onClick={() => unlockMut.mutate({ assetId: asset.id })}
+              disabled={unlockMut.isPending}
+              className="rounded p-1 text-[hsl(var(--color-muted-foreground))] hover:bg-[hsl(var(--color-secondary)/0.5)]"
+              title="解锁"
+            >
+              <Unlock className="size-3.5" />
+            </button>
+          ) : (
+            <button
+              onClick={() => lockMut.mutate({ assetId: asset.id })}
+              disabled={lockMut.isPending}
+              className="rounded p-1 text-[hsl(var(--color-muted-foreground))] hover:bg-[hsl(var(--color-secondary)/0.5)]"
+              title="锁定(防误改)"
+            >
+              <Lock className="size-3.5" />
+            </button>
+          )}
+          <button
+            onClick={() => {
+              if (confirm(`删除资产 "${asset.name}"?`)) deleteMut.mutate({ assetId: asset.id });
+            }}
+            className="rounded p-1 text-[hsl(var(--color-destructive))] hover:bg-[hsl(var(--color-destructive)/0.1)]"
+            title="删除"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 space-y-3 overflow-y-auto p-4">
+        <div className="grid gap-1">
+          <Label className="text-[10px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
+            名称
+          </Label>
+          <Input
+            value={editing.name}
+            onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+            disabled={isLocked}
+            className="h-8 text-sm"
+          />
+        </div>
+
+        {type === 'CHARACTER' && (
+          <>
+            <div className="grid gap-1">
+              <Label className="text-[10px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
+                原型 key(同人物不同时期共享)
+              </Label>
+              <Input
+                value={editing.archetypeKey}
+                onChange={(e) => setEditing({ ...editing, archetypeKey: e.target.value })}
+                placeholder="陆乘"
+                className="h-8 text-sm"
+              />
+            </div>
+
+            <div className="grid gap-1">
+              <Label className="text-[10px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
+                角色身份
+              </Label>
+              <select
+                value={editing.characterRole}
+                onChange={(e) => setEditing({ ...editing, characterRole: e.target.value })}
+                disabled={isLocked}
+                className="h-8 rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 text-sm"
+              >
+                <option value="">— 未指定 —</option>
+                {CHARACTER_ROLES.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </>
+        )}
+
+        <div className="grid gap-1">
+          <Label className="text-[10px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
+            别名(逗号分隔)
+          </Label>
+          <Input
+            value={editing.alias}
+            onChange={(e) => setEditing({ ...editing, alias: e.target.value })}
+            className="h-8 text-sm"
+          />
+        </div>
+
+        <div className="grid gap-1">
+          <Label className="text-[10px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
+            描述
+          </Label>
+          <textarea
+            value={editing.description}
+            onChange={(e) => setEditing({ ...editing, description: e.target.value })}
+            disabled={isLocked}
+            rows={2}
+            className="rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 py-1.5 text-xs"
+          />
+        </div>
+
+        <div className="grid gap-1">
+          <Label className="text-[10px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
+            提示词
+          </Label>
+          <textarea
+            value={editing.prompt}
+            onChange={(e) => setEditing({ ...editing, prompt: e.target.value })}
+            disabled={isLocked}
+            rows={6}
+            className="rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 py-1.5 font-mono text-[11px]"
+          />
+        </div>
+
+        <div className="grid gap-1">
+          <Label className="text-[10px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
+            标签(逗号分隔)
+          </Label>
+          <Input
+            value={editing.tags}
+            onChange={(e) => setEditing({ ...editing, tags: e.target.value })}
+            className="h-8 text-sm"
+          />
+        </div>
+
+        <div className="grid gap-1">
+          <Label className="text-[10px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
+            修改原因(可选,入训练集)
+          </Label>
+          <Input
+            value={diffNote}
+            onChange={(e) => setDiffNote(e.target.value)}
+            placeholder="例:补充服装变化"
+            className="h-8 text-sm"
+          />
+        </div>
+
+        {/* 出场绑定 list */}
+        <UsageBindingsList assetId={asset.id} projectId={asset.projectId} onChanged={onChanged} />
+      </div>
+
+      <div className="border-t border-[hsl(var(--color-border))] p-3">
+        <Button
+          onClick={handleSave}
+          disabled={updateMut.isPending}
+          size="sm"
+          className="w-full gap-1.5"
+        >
+          {updateMut.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+          保存
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 中:生成 + 预览 + 候选备用区
+// ---------------------------------------------------------------------------
+
+function GenerationPanel({
+  asset,
+  onChanged,
+}: {
+  asset: AssetDetail;
+  onChanged: () => void;
+}): React.ReactElement {
+  const type = asset.type as AssetType;
+  const slots = SLOTS_BY_TYPE[type];
+  const [selectedSlot, setSelectedSlot] = React.useState<Slot>(slots[0]!.slot);
+  const [modelId, setModelId] = React.useState('');
+  const [aspectRatio, setAspectRatio] = React.useState<string>(
+    selectedSlot === 'portrait' ? '9:16' : selectedSlot === 'panorama' ? '2:1' : '16:9',
+  );
+  const [sizePx, setSizePx] = React.useState<string>('2K (2048)');
+  const [extraInstruction, setExtraInstruction] = React.useState('');
+  const [count, setCount] = React.useState(1);
+
+  const { data: candidates, refetch: refetchCandidates } = trpc.asset.listCandidates.useQuery({
+    assetId: asset.id,
+    slot: selectedSlot,
+  });
+
+  const generateMut = trpc.asset.generateImage.useMutation({
+    onSuccess: (res) => {
+      toast.success(
+        `生成完成 · ${res.candidates.length} 张候选${res.mock ? '(占位 · W4-MM.6 接入真生成)' : ''}`,
+      );
+      void refetchCandidates();
+      onChanged();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const confirmMut = trpc.asset.confirmCandidate.useMutation({
+    onSuccess: () => {
+      toast.success('已确认到资产槽位');
+      void refetchCandidates();
+      onChanged();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const rejectMut = trpc.asset.rejectCandidate.useMutation({
+    onSuccess: () => {
+      toast.success('已删除候选');
+      void refetchCandidates();
+    },
+  });
+
+  React.useEffect(() => {
+    setAspectRatio(
+      selectedSlot === 'portrait'
+        ? '9:16'
+        : selectedSlot === 'panorama'
+          ? '2:1'
+          : selectedSlot === 'three_view'
+            ? '16:9'
+            : '16:9',
+    );
+  }, [selectedSlot]);
+
+  return (
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="border-b border-[hsl(var(--color-border))] px-4 py-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold">生成 + 预览</h3>
+          <div className="flex items-center gap-1.5 text-[10px] text-[hsl(var(--color-muted-foreground))]">
+            <Info className="size-3" />
+            生成的图自动写到候选池,点&quot;设为槽位&quot;才确认
+          </div>
+        </div>
+
+        {/* 槽位 tab */}
+        <div className="mt-2 flex flex-wrap gap-1">
+          {slots.map((s) => (
+            <button
+              key={s.slot}
+              onClick={() => setSelectedSlot(s.slot)}
+              className={cn(
+                'rounded px-2 py-1 text-[11px]',
+                selectedSlot === s.slot
+                  ? 'bg-[hsl(var(--color-accent)/0.15)] text-[hsl(var(--color-accent))]'
+                  : 'text-[hsl(var(--color-muted-foreground))] hover:bg-[hsl(var(--color-secondary)/0.5)]',
+              )}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        {/* 生成参数 */}
+        <div className="mt-2 grid grid-cols-4 gap-2">
+          <select
+            value={modelId}
+            onChange={(e) => setModelId(e.target.value)}
+            className="h-8 rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 text-xs"
+          >
+            <option value="">默认模型</option>
+            <option value="nano-banana-pro">Nano Banana Pro</option>
+            <option value="gpt-image-2">GPT Image 2</option>
+            <option value="seedance-2.0">Seedance 2.0</option>
+          </select>
+          <select
+            value={aspectRatio}
+            onChange={(e) => setAspectRatio(e.target.value)}
+            className="h-8 rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 text-xs"
+          >
+            {RATIOS.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
+          <select
+            value={sizePx}
+            onChange={(e) => setSizePx(e.target.value)}
+            className="h-8 rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 text-xs"
+          >
+            {SIZES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+          <select
+            value={count}
+            onChange={(e) => setCount(Number(e.target.value))}
+            className="h-8 rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 text-xs"
+          >
+            {[1, 2, 3, 4].map((c) => (
+              <option key={c} value={c}>
+                生成 {c} 张
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="mt-2 flex gap-2">
+          <Input
+            value={extraInstruction}
+            onChange={(e) => setExtraInstruction(e.target.value)}
+            placeholder="额外指令(可选,如&quot;增加雨天氛围&quot;)"
+            className="h-8 flex-1 text-xs"
+          />
+          <Button
+            onClick={() =>
+              generateMut.mutate({
+                assetId: asset.id,
+                slot: selectedSlot,
+                count,
+                modelId: modelId || undefined,
+                aspectRatio,
+                sizePx,
+                extraInstruction: extraInstruction || undefined,
+              })
+            }
+            disabled={generateMut.isPending}
+            size="sm"
+            className="gap-1.5"
+          >
+            {generateMut.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+            开始生成
+          </Button>
+        </div>
+      </div>
+
+      {/* 候选图栅格 */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {!candidates || candidates.length === 0 ? (
+          <div className="flex h-full flex-col items-center justify-center text-center">
+            <ImageIcon className="mb-3 size-12 text-[hsl(var(--color-muted-foreground)/0.4)]" />
+            <p className="text-xs text-[hsl(var(--color-muted-foreground))]">
+              本槽位还没有候选图,点上方&quot;开始生成&quot;
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            {candidates.map((c) => {
+              const media = c.media[0];
+              if (!media) return null;
+              return (
+                <CandidateCard
+                  key={c.attempt.id}
+                  attemptId={c.attempt.id}
+                  mediaId={media.id}
+                  isConfirmed={c.isConfirmed}
+                  aspectRatio={media.aspectRatio ?? '1:1'}
+                  onConfirm={() =>
+                    confirmMut.mutate({
+                      assetId: asset.id,
+                      slot: selectedSlot,
+                      mediaItemId: media.id,
+                    })
+                  }
+                  onReject={() => rejectMut.mutate({ attemptId: c.attempt.id })}
+                />
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CandidateCard({
+  isConfirmed,
+  aspectRatio,
+  onConfirm,
+  onReject,
+}: {
+  attemptId: string;
+  mediaId: string;
+  isConfirmed: boolean;
+  aspectRatio: string;
+  onConfirm: () => void;
+  onReject: () => void;
+}): React.ReactElement {
+  const aspectClass =
+    aspectRatio === '9:16'
+      ? 'aspect-[9/16]'
+      : aspectRatio === '16:9'
+        ? 'aspect-[16/9]'
+        : aspectRatio === '2:1'
+          ? 'aspect-[2/1]'
+          : 'aspect-square';
+  return (
+    <div
+      className={cn(
+        'group relative overflow-hidden rounded border',
+        isConfirmed
+          ? 'border-[hsl(var(--color-accent))]'
+          : 'border-[hsl(var(--color-border))]',
+      )}
+    >
+      <div
+        className={cn(
+          'flex items-center justify-center bg-[hsl(var(--color-secondary)/0.3)]',
+          aspectClass,
+        )}
+      >
+        <ImageIcon className="size-8 text-[hsl(var(--color-muted-foreground)/0.4)]" />
+        <span className="absolute left-1.5 top-1.5 rounded bg-black/60 px-1.5 py-0.5 font-mono text-[9px] text-white">
+          {aspectRatio}
+        </span>
+        {isConfirmed && (
+          <Badge variant="default" className="absolute right-1.5 top-1.5 gap-1 px-1.5 text-[9px]">
+            <CheckCircle2 className="size-2.5" />
+            已确认
+          </Badge>
+        )}
+      </div>
+      <div className="absolute inset-x-0 bottom-0 flex gap-1 bg-gradient-to-t from-black/80 to-transparent p-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+        <button
+          onClick={onConfirm}
+          disabled={isConfirmed}
+          className="flex-1 rounded bg-[hsl(var(--color-accent))] px-2 py-1 text-[10px] text-white disabled:opacity-40"
+        >
+          设为槽位
+        </button>
+        <button
+          onClick={onReject}
+          className="rounded bg-rose-500/80 px-2 py-1 text-[10px] text-white"
+        >
+          删除
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 右:已确认槽位
+// ---------------------------------------------------------------------------
+
+function ConfirmedSlotsPanel({
+  asset,
+  slots,
+  onChanged,
+}: {
+  asset: AssetDetail;
+  slots: Array<{ slot: Slot; label: string; aspectClass: string }>;
+  onChanged: () => void;
+}): React.ReactElement {
+  const unconfirmMut = trpc.asset.unconfirmSlot.useMutation({
+    onSuccess: () => {
+      toast.success('已清除槽位');
+      onChanged();
+    },
+  });
+
+  return (
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="border-b border-[hsl(var(--color-border))] px-4 py-3">
+        <h3 className="text-sm font-semibold">已确认槽位</h3>
+        <p className="mt-0.5 text-[10px] text-[hsl(var(--color-muted-foreground))]">
+          下游 AIGC 调用以这里为准
+        </p>
+      </div>
+
+      <div className="flex-1 space-y-3 overflow-y-auto p-3">
+        {slots.map((s) => {
+          const fieldName = SLOT_FIELD[s.slot];
+          const mediaId = (asset as unknown as Record<string, string | null>)[fieldName];
+          return (
+            <div key={s.slot}>
+              <div className="mb-1 flex items-center justify-between">
+                <Label className="text-[10px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
+                  {s.label}
+                </Label>
+                {mediaId && (
+                  <button
+                    onClick={() => unconfirmMut.mutate({ assetId: asset.id, slot: s.slot })}
+                    className="text-[9px] text-[hsl(var(--color-destructive))] hover:underline"
+                  >
+                    清除
+                  </button>
+                )}
+              </div>
+              <div
+                className={cn(
+                  'flex items-center justify-center overflow-hidden rounded border bg-[hsl(var(--color-secondary)/0.3)]',
+                  s.aspectClass,
+                  mediaId
+                    ? 'border-[hsl(var(--color-accent)/0.5)]'
+                    : 'border-dashed border-[hsl(var(--color-border))]',
+                )}
+              >
+                {mediaId ? (
+                  <div className="flex flex-col items-center gap-1 text-[10px] text-[hsl(var(--color-muted-foreground))]">
+                    <CheckCircle2 className="size-5 text-[hsl(var(--color-accent))]" />
+                    已确认
+                  </div>
+                ) : (
+                  <span className="text-[10px] text-[hsl(var(--color-muted-foreground))]">未确认</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 出场绑定 list(放在左信息区)
+// ---------------------------------------------------------------------------
+
+function UsageBindingsList({
+  assetId,
+  projectId,
+  onChanged,
+}: {
+  assetId: string;
+  projectId: string;
+  onChanged: () => void;
+}): React.ReactElement {
+  const { data: bindings, refetch } = trpc.asset.listBindings.useQuery({ assetId });
+  const { data: episodes } = trpc.storyboard.listEpisodes.useQuery({ projectId });
+
+  const [adding, setAdding] = React.useState(false);
+  const [newEp, setNewEp] = React.useState('');
+
+  const bindMut = trpc.asset.bindUsage.useMutation({
+    onSuccess: () => {
+      toast.success('已绑定');
+      setAdding(false);
+      setNewEp('');
+      void refetch();
+      onChanged();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const unbindMut = trpc.asset.unbindUsage.useMutation({
+    onSuccess: () => {
+      void refetch();
+      onChanged();
+    },
+  });
+
+  return (
+    <div className="grid gap-1.5 border-t border-[hsl(var(--color-border)/0.5)] pt-2">
+      <div className="flex items-center justify-between">
+        <Label className="text-[10px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
+          出场管理 ({bindings?.length ?? 0} 集)
+        </Label>
+        <button
+          onClick={() => setAdding((v) => !v)}
+          className="text-[10px] text-[hsl(var(--color-accent))] hover:underline"
+        >
+          {adding ? '取消' : '+ 添加'}
+        </button>
+      </div>
+
+      {adding && (
+        <div className="flex gap-1">
+          <select
+            value={newEp}
+            onChange={(e) => setNewEp(e.target.value)}
+            className="h-7 flex-1 rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 text-xs"
+          >
+            <option value="">选集</option>
+            {episodes?.map((ep) => (
+              <option key={ep.id} value={ep.id}>
+                第 {ep.number} 集{ep.title ? ` · ${ep.title}` : ''}
+              </option>
+            ))}
+          </select>
+          <Button
+            size="sm"
+            onClick={() =>
+              newEp && bindMut.mutate({ assetId, episodeId: newEp, usageType: 'APPEAR' })
+            }
+            disabled={!newEp || bindMut.isPending}
+            className="h-7 px-2 text-xs"
+          >
+            绑定
+          </Button>
+        </div>
+      )}
+
+      {bindings && bindings.length > 0 ? (
+        <div className="flex flex-wrap gap-1">
+          {bindings.map((b) => (
+            <span
+              key={b.id}
+              className="group flex items-center gap-1 rounded bg-[hsl(var(--color-accent)/0.12)] px-1.5 py-0.5 text-[10px] text-[hsl(var(--color-accent))]"
+            >
+              第{b.episode.number}集
+              {b.scene?.number ? `-${b.scene.number}` : ''}
+              <button
+                onClick={() => unbindMut.mutate({ bindingId: b.id })}
+                className="opacity-0 transition-opacity group-hover:opacity-100"
+              >
+                <X className="size-2.5" />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : (
+        <p className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
+          还没有出场绑定 · 添加后下方资产卡片底部会显示
+        </p>
+      )}
+    </div>
   );
 }

@@ -287,6 +287,7 @@ model Episode {
   scenes      Scene[]
   scripts     Script[]
   assignments EpisodeAssignment[]
+  assetUsages AssetUsageBinding[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -358,11 +359,13 @@ model Shot {
   // 历史快照（用于 Diff 与回滚）
   versionHash String?
 
-  episode  Episode             @relation(fields: [episodeId], references: [id], onDelete: Cascade)
-  scene    Scene?              @relation(fields: [sceneId], references: [id], onDelete: SetNull)
-  group    ShotGroup?          @relation(fields: [groupId], references: [id], onDelete: SetNull)
-  assets   ShotAssetRef[]
-  attempts GenerationAttempt[]
+  episode     Episode             @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  scene       Scene?              @relation(fields: [sceneId], references: [id], onDelete: SetNull)
+  group       ShotGroup?          @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  /// @deprecated 用 assetUsages
+  assets      ShotAssetRef[]
+  assetUsages AssetUsageBinding[]
+  attempts    GenerationAttempt[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -418,6 +421,61 @@ enum AssetRefKind {
 }
 
 // -----------------------------------------------------------------------------
+// 资产出场绑定(W4-MM) — 三层结构 episode / scene / shot
+//
+// 替代 ShotAssetRef(只到 shot 级 + 3 档 refKind),完整表达"陆乘 在 第 14 集
+// 第 2 场 出场,持有 灵泉水玉瓶"这种关系。
+//
+// 一个 Asset 可在同一 episode 内有多条 binding(出现在多 scene/shot)。
+// episodeId 必填(产品需求:卡片底部"1-1 / 2-1 / 14-2"按集 group)。
+// sceneId / shotId 可选(资产可"出现在某集"但还没排具体场/镜)。
+// -----------------------------------------------------------------------------
+
+model AssetUsageBinding {
+  id        String @id @default(cuid())
+  assetId   String
+  projectId String
+
+  episodeId String // 必填:卡片 group by 用
+  sceneId   String?
+  shotId    String?
+
+  usageType AssetUsageType @default(APPEAR)
+  required  Boolean        @default(true) // 必须调用 / 可缺
+  note      String?
+
+  asset   Asset   @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  episode Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  scene   Scene?  @relation(fields: [sceneId], references: [id], onDelete: SetNull)
+  shot    Shot?   @relation(fields: [shotId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@unique([assetId, episodeId, sceneId, shotId, usageType])
+  @@index([assetId])
+  @@index([episodeId])
+  @@index([sceneId])
+  @@index([shotId])
+  @@index([projectId])
+  @@map("asset_usage_bindings")
+}
+
+enum AssetUsageType {
+  APPEAR // 画面出现
+  SPEAK // 角色说话
+  HOLD // 手持道具
+  WEAR // 身着服装/装饰
+  ENVIRONMENT // 场景环境(背景空间)
+  BACKGROUND // 仅作背景出现(无戏剧重点)
+  SOUND_BG // 环境底噪(声音资产)
+  SOUND_VOICE // 配音(声音资产)
+  THEME // 主题音乐
+  REFERENCE // 仅参考(不出现在画面)
+}
+
+// -----------------------------------------------------------------------------
 // 场（剧本场号，如 `1-1 日 内 陆乘家破土屋`）
 // 一集 ⊃ 多场 ⊃ 多镜
 // -----------------------------------------------------------------------------
@@ -434,9 +492,10 @@ model Scene {
   content     String         @db.Text // 该场剧本原文
   positionIdx Int // 集内顺序
 
-  episode Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
-  script  Script? @relation(fields: [scriptId], references: [id], onDelete: SetNull)
-  shots   Shot[]
+  episode     Episode             @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  script      Script?             @relation(fields: [scriptId], references: [id], onDelete: SetNull)
+  shots       Shot[]
+  assetUsages AssetUsageBinding[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -498,44 +557,79 @@ model Asset {
   id          String    @id @default(cuid())
   projectId   String
   type        AssetType
-  name        String
-  alias       String[] // 别名（用于自动 @ 匹配）
+  name        String // 完整名:"陆乘 - 重生初期" / "陆乘 - 疗伤期"
+  alias       String[] // 别名（自动 @ 匹配）
   description String?   @db.Text
-  prompt      String    @db.Text // 提示词
+  prompt      String    @db.Text // 基础提示词(人工/LLM 撰写,生成时与 StyleProfile 拼合)
   promptStep  Json? // 资产拆解多步链中间结果
 
-  // 角色身份（人物用）
-  characterRole String? // '主演-男主演' / '主演-女主演' / '配角-反派' ...
-  tags          String[] // ['悔恨','坚定','重情义']
+  // 同一原型不同时期/变体的 key — 同 projectId 内同 archetypeKey 表示同一角色/场景/道具
+  // 例:archetypeKey="陆乘" 下有"重生初期"和"疗伤期"两个 Asset
+  archetypeKey String?
+
+  // 资产成熟度 L0-L5(派生显示用,实际从槽位 + 状态算)
+  maturity AssetMaturity @default(L0_IDENTIFIED)
+
+  // 重要性分级(道具用,文档建议 S/A/B/C;人物可复用同字段表达戏份)
+  importance String? // 'S' | 'A' | 'B' | 'C'
+
+  // 角色身份(人物用)
+  characterRole String?
+  tags          String[]
 
   // 提示词风格继承
-  styleId String? // → StyleProfile.id；null=随项目
+  styleId String? // → StyleProfile.id;null=随项目
 
-  // 媒体绑定
-  mainMediaId   String? // 主形象图
-  threeViewIds  String[] // 三视图 MediaItem ids
-  panorama360Id String? // 360° 全景图（场景用）
-  refImageIds   String[] // 参考图
+  // ---- 命名槽位(W4-MM):每个槽位 = 一张已确认的 MediaItem ----
+  // 人物
+  portraitMediaId   String? // 9:16 正面形象
+  threeViewMediaId  String? // 16:9 三视图(正/侧/背合一张)
+  // 场景
+  sceneMainMediaId  String? // 主视角(用户拍板的代表视图)
+  sceneFrontMediaId String? // 正面视角
+  sceneLeftMediaId  String? // 左侧视角
+  sceneRightMediaId String? // 右侧视角
+  sceneBackMediaId  String? // 背面视角
+  panoramaMediaId   String? // 360° 全景
+  // 道具 / 风格参考:用通用 mainMediaId
+
+  // 兼容字段(W4-MM 前的 schema,新代码不用,留给历史数据兼容,W5 清理)
+  /// @deprecated 用 portraitMediaId / sceneMainMediaId
+  mainMediaId   String?
+  /// @deprecated 用 threeViewMediaId
+  threeViewIds  String[]
+  /// @deprecated 用 panoramaMediaId
+  panorama360Id String?
+
+  refImageIds String[] // 参考图(用户上传,作为生成时的 reference)
 
   // Phase 2 预留
   loraIds      String[] @default([])
-  voiceMediaId String? // 配音 MediaItem id
+  voiceMediaId String? // 配音参考(保持不同剧集人物声音一致)
+  voiceModelId String? // TTS voice_id(Phase 2)
 
   // Phase 3 预留 - 3D 一致性
   model3dUrl  String?
   gaussianUrl String?
 
-  // 合规（人物专用）
-  complianceId        String? // 火山引擎返回的合规代码
+  // 合规(人物专用)
+  complianceId        String? // 火山/Seedance 返回的合规代码,后续视频生成复用
+  complianceVendor    String? // 'seedance' / 'volcengine_face' / ...
   complianceStatus    ComplianceStatus @default(NOT_REQUIRED)
   complianceCheckedAt DateTime?
+  complianceExpiresAt DateTime? // 部分平台合规码有有效期
+
+  // 锁定 — 已确认资产不允许直接覆盖,改要走新版本
+  lockedAt DateTime?
 
   status AssetStatus @default(DRAFT)
 
-  project  Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  style    StyleProfile?  @relation(fields: [styleId], references: [id])
-  versions AssetVersion[]
-  bindings ShotAssetRef[]
+  project       Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  style         StyleProfile?       @relation(fields: [styleId], references: [id])
+  versions      AssetVersion[]
+  /// @deprecated 用 usageBindings (AssetUsageBinding)
+  bindings      ShotAssetRef[]
+  usageBindings AssetUsageBinding[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -543,8 +637,18 @@ model Asset {
 
   @@index([projectId, type])
   @@index([projectId, name])
+  @@index([projectId, archetypeKey])
   @@index([deletedAt])
   @@map("assets")
+}
+
+enum AssetMaturity {
+  L0_IDENTIFIED // 已识别(剧本拆出来,无设定)
+  L1_PROMPT_READY // 提示词完成
+  L2_CANDIDATE // 有候选图,未确认
+  L3_MAIN_CONFIRMED // 主图已确认
+  L4_CONSISTENCY_READY // 一致性补齐(三视图/多角度/声音)
+  L5_PRODUCTION_READY // 可用于生产(含合规通过)
 }
 
 enum AssetType {
@@ -606,6 +710,10 @@ model MediaItem {
   // 元信息（kind 决定 Schema）
   meta Json // image: {w,h,format}; video: {w,h,duration,fps,codec}; audio: {duration,bpm,sampleRate,waveformPeaks}
 
+  // W4-MM:派生字段,入库时算好便于查询/筛选
+  aspectRatio String? // '9:16' / '16:9' / '1:1' / ...
+  viewKind    String? // 'portrait' / 'three_view' / 'scene_main' / 'scene_front' / 'scene_left' / 'scene_right' / 'scene_back' / 'panorama' / 'main' / 'detail' / 'reference'
+
   // AI 自动标签 / 嵌入向量（Phase 2 用 pgvector）
   tags        String[] @default([])
   aiLabels    Json? // CLIP/CLAP 输出
@@ -634,6 +742,7 @@ model MediaItem {
   @@index([projectId, kind])
   @@index([scope, kind])
   @@index([deletedAt])
+  @@index([aspectRatio, kind])
   @@map("media_items")
 }
 
@@ -698,7 +807,18 @@ model GenerationAttempt {
   finishedAt DateTime?
   durationMs Int?
 
-  // 采纳标记（"废片中的可用片段"）
+  // W4-MM:候选定位 — 这次生成是申请成为某个 Asset 的某个 slot
+  // 例:asset=陆乘, candidateForSlot='portrait'
+  // 用户点"确认"则把 outputMediaId 写到 Asset.portraitMediaId
+  candidateForSlot String? // 'portrait' / 'three_view' / 'scene_main' / 'scene_front' / ... / null
+
+  // W4-MM:用户标记"删除"(对应"不满意的可以删除")— soft reject
+  // 不真删 attempt,保留训练审计
+  rejected   Boolean   @default(false)
+  rejectedAt DateTime?
+  rejectedBy String?
+
+  // 采纳标记("废片中的可用片段")
   adopted   Boolean   @default(false)
   adoptedAt DateTime?
   adoptedBy String?
