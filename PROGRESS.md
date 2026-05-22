@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-05-22（周五，公司 Mac Mini · 二次收工）— W3 收尾(W3.6 + W3.7)
+
+**完成**
+- ✅ **W3.6 行内编辑入训练集**:edit-dialog.tsx 含 ShotEditDialog + GroupEditDialog,改 framing/angle/content/prompt + diffNote;每行 ✎ 按钮;保存写 PromptEdit + toast 反馈
+- ✅ **W3.7 polish**:字号 A-/A+ 8 档(11-18px) + localStorage 持久化 + CSS var 注入;顶部进度条 X/Y 镜;CSV 导出(UTF-8 BOM 让 Excel 正确识别)
+- ✅ 7 包 typecheck 全过 / 40 单测全过
+
+**进行中**
+- 🚧 W3 手动业务验证(配 Claude API Key 跑 e2e)
+- 🚧 跨设备 Mac Studio 验证
+
+**问题 / 待决策**
+- ❓ Episode.status='GENERATING' 软锁 + 集成测试(followup,不阻塞)
+- ❓ xlsx 真格式导出(目前 CSV,Excel 兼容但不是原生 xlsx;若 W4+ 用户要求再加 ExcelJS)
+
+**下次接着做**
+- 📌 跨设备验证 + 真实剧本 e2e
+- 📌 W4 Asset Forge 启动
+
+---
+
 ## 2026-05-22（周五，公司 Mac Mini · 收工）— W3 分镜工坊大块交付（W3.0 → W3.5）
 
 **完成**

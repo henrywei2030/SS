@@ -18,6 +18,16 @@ interface Props {
   initialTab: Tab;
 }
 
+const FONT_SIZE_KEY = 'storyboard.fontSize';
+const FONT_SIZES = [11, 12, 13, 14, 15, 16, 17, 18] as const;
+type FontSize = (typeof FONT_SIZES)[number];
+
+function readFontSize(): FontSize {
+  if (typeof window === 'undefined') return 13;
+  const stored = Number(window.localStorage.getItem(FONT_SIZE_KEY));
+  return (FONT_SIZES as readonly number[]).includes(stored) ? (stored as FontSize) : 13;
+}
+
 export function StoryboardWorkspace({
   projectId,
   locale,
@@ -30,6 +40,19 @@ export function StoryboardWorkspace({
 
   const { data: episodes, refetch: refetchEpisodes } =
     trpc.storyboard.listEpisodes.useQuery({ projectId });
+
+  const [fontSize, setFontSize] = React.useState<FontSize>(13);
+  React.useEffect(() => {
+    setFontSize(readFontSize());
+  }, []);
+  const changeFontSize = (delta: 1 | -1): void => {
+    const idx = FONT_SIZES.indexOf(fontSize);
+    const next = FONT_SIZES[Math.max(0, Math.min(FONT_SIZES.length - 1, idx + delta))]!;
+    setFontSize(next);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(FONT_SIZE_KEY, String(next));
+    }
+  };
 
   // 当前选中 — 从 URL 实时读，跟随 router.replace 立即生效
   const epFromUrl = searchParams.get('ep');
@@ -58,7 +81,10 @@ export function StoryboardWorkspace({
   const selectTab = (t: Tab): void => updateUrl({ tab: t });
 
   return (
-    <div className="grid h-[calc(100vh-2.75rem)] grid-cols-[260px_1fr] gap-0 bg-[hsl(var(--color-background))]">
+    <div
+      className="grid h-[calc(100vh-2.75rem)] grid-cols-[260px_1fr] gap-0 bg-[hsl(var(--color-background))]"
+      style={{ ['--storyboard-fs' as string]: `${fontSize}px` }}
+    >
       {/* 左栏：分集列表 */}
       <EpisodeSidebar
         episodes={episodes ?? []}
@@ -74,6 +100,8 @@ export function StoryboardWorkspace({
           episodeNumber={selectedEpisode?.number}
           tab={tab}
           onTabChange={selectTab}
+          fontSize={fontSize}
+          onFontSizeChange={changeFontSize}
           onAfterAction={() => void refetchEpisodes()}
         />
         <div className="flex-1 overflow-auto">

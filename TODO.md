@@ -7,20 +7,14 @@
 
 ## 🚧 进行中
 
-- [ ] **W3.6 · 手改入 PromptEdit 训练集**（核心 polish 项）
-  - 分镜表行内/弹窗编辑提示词（双击进编辑态 / Esc 取消 / Enter 保存）
-  - updateShot mutation 已就绪（自动写 PromptEdit）— 前端 UI 待做
-  - 同步给组 prompt 编辑入口
-  - 显示"已记录到训练集"toast 反馈
-
-- [ ] **W3.7 · polish · 字号 / xlsx 导出 / 进度条**
-  - A- / A+ 字号调节（localStorage 持久化）
-  - 顶部进度条 8/61（已分镜/总数）
-  - 导出 xlsx（集 → sheet，组 → 行）
-  - 分集卡聚合元信息进一步美化
-
 - [ ] **跨设备协作工作流验证**（Mac Studio 端）
   - 待：在家 Mac Studio `git pull` + 登录同一 Project + 说"开工"验证接续
+
+- [ ] **手动业务验证 W3**（任一设备）
+  - 上传 docx 真实剧本(陆乘 1-1)→ 看 parser 识别率
+  - 配 Claude API Key → 跑 generateForEpisode → 看 LLM 输出质量
+  - 合并/拆分 + 行内编辑全套手动测试
+  - 确认发布触发 EventBus event(消费端 W5 才会接)
 
 ---
 
@@ -91,6 +85,18 @@
 ---
 
 ## ✅ 已完成
+
+### 2026-05-22 — W3 全部交付（W3.0 → W3.7）
+
+#### W3.6 · 行内编辑入 PromptEdit 训练集
+- [x] edit-dialog.tsx 含 ShotEditDialog + GroupEditDialog,改 framing/angle/content/prompt + diffNote — 2026-05-22
+- [x] Shot 行 / Group 行各加 ✎ 编辑按钮,保存自动 invalidate listShots — 2026-05-22
+- [x] toast "改动已记录到 PromptEdit 训练集" — 2026-05-22
+
+#### W3.7 · polish(字号 / 进度 / CSV 导出)
+- [x] 字号 A-/A+ 8 档(11-18px),localStorage 持久化,CSS var `--storyboard-fs` 注入分镜表 — 2026-05-22
+- [x] 顶部进度条 X/Y 镜(status != DRAFT 算已发布)— 2026-05-22
+- [x] CSV 导出(组级合并 prompt + 单镜级 framing/angle/content/prompt,UTF-8 BOM)— 2026-05-22
 
 ### 2026-05-22 — W3 大块交付（W3.0 → W3.5）
 

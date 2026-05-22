@@ -8,6 +8,7 @@ import {
   ArrowUp,
   ArrowDown,
   X,
+  Pencil,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -15,6 +16,8 @@ import { trpc } from '@/lib/trpc/client';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+
+import { ShotEditDialog, GroupEditDialog } from './edit-dialog';
 
 interface Props {
   episodeId: string;
@@ -56,10 +59,14 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
   });
 
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [editingShot, setEditingShot] = React.useState<Shot | null>(null);
+  const [editingGroup, setEditingGroup] = React.useState<Group | null>(null);
 
   // 切集时清空选中
   React.useEffect(() => {
     setSelected(new Set());
+    setEditingShot(null);
+    setEditingGroup(null);
   }, [episodeId]);
 
   const groups = ((data && 'groups' in data ? data.groups : undefined) ?? []) as Group[];
@@ -252,9 +259,12 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
         </div>
       )}
 
-      {/* 分镜表 */}
+      {/* 分镜表 — 字号由 storyboard-workspace 注入的 --storyboard-fs 控制 */}
       <div className="flex-1 overflow-auto">
-        <table className="w-full text-sm">
+        <table
+          className="w-full"
+          style={{ fontSize: 'var(--storyboard-fs, 13px)' }}
+        >
           <thead className="sticky top-0 border-b border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] text-xs text-[hsl(var(--color-muted-foreground))]">
             <tr>
               <th className="w-8 px-2 py-2"></th>
@@ -273,6 +283,8 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
                 selected={selected}
                 onToggleSelect={toggleSelected}
                 onSplit={() => splitGroup.mutate({ groupId: g.id })}
+                onEditGroup={() => setEditingGroup(g)}
+                onEditShot={(s) => setEditingShot(s)}
                 disabled={mutating}
               />
             ))}
@@ -292,6 +304,7 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
                 shot={s}
                 selected={selected.has(s.id)}
                 onToggleSelect={() => toggleSelected(s.id)}
+                onEdit={() => setEditingShot(s)}
                 disabled={mutating}
                 indent={false}
               />
@@ -299,6 +312,27 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
           </tbody>
         </table>
       </div>
+
+      {editingShot && (
+        <ShotEditDialog
+          shot={editingShot}
+          onClose={() => setEditingShot(null)}
+          onSaved={() => {
+            setEditingShot(null);
+            invalidate();
+          }}
+        />
+      )}
+      {editingGroup && (
+        <GroupEditDialog
+          group={editingGroup}
+          onClose={() => setEditingGroup(null)}
+          onSaved={() => {
+            setEditingGroup(null);
+            invalidate();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -312,12 +346,16 @@ function GroupRows({
   selected,
   onToggleSelect,
   onSplit,
+  onEditGroup,
+  onEditShot,
   disabled,
 }: {
   group: Group;
   selected: Set<string>;
   onToggleSelect: (id: string) => void;
   onSplit: () => void;
+  onEditGroup: () => void;
+  onEditShot: (shot: Shot) => void;
   disabled: boolean;
 }): React.ReactElement {
   return (
@@ -343,17 +381,29 @@ function GroupRows({
           </div>
         </td>
         <td className="px-3 py-2 text-right">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onSplit}
-            disabled={disabled}
-            className="gap-1"
-            title="拆分本组,组内分镜回到独立状态"
-          >
-            <Split className="size-3.5" />
-            拆分
-          </Button>
+          <div className="flex justify-end gap-1">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onEditGroup}
+              disabled={disabled}
+              className="size-7 p-0"
+              title="编辑组级提示词 / 组号"
+            >
+              <Pencil className="size-3.5" />
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onSplit}
+              disabled={disabled}
+              className="gap-1"
+              title="拆分本组,组内分镜回到独立状态"
+            >
+              <Split className="size-3.5" />
+              拆分
+            </Button>
+          </div>
         </td>
       </tr>
 
@@ -364,6 +414,7 @@ function GroupRows({
           shot={s}
           selected={selected.has(s.id)}
           onToggleSelect={() => onToggleSelect(s.id)}
+          onEdit={() => onEditShot(s)}
           disabled={disabled}
           indent
         />
@@ -380,12 +431,14 @@ function ShotRow({
   shot,
   selected,
   onToggleSelect,
+  onEdit,
   disabled,
   indent,
 }: {
   shot: Shot;
   selected: boolean;
   onToggleSelect: () => void;
+  onEdit: () => void;
   disabled: boolean;
   indent: boolean;
 }): React.ReactElement {
@@ -431,8 +484,17 @@ function ShotRow({
           {shot.prompt}
         </div>
       </td>
-      <td className="px-3 py-2 text-right text-[10px] text-[hsl(var(--color-muted-foreground))]">
-        {/* W3.6 行内编辑入口 */}
+      <td className="px-3 py-2 text-right">
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onEdit}
+          disabled={disabled}
+          className="size-7 p-0"
+          title="编辑分镜(改动入 PromptEdit 训练集)"
+        >
+          <Pencil className="size-3.5" />
+        </Button>
       </td>
     </tr>
   );

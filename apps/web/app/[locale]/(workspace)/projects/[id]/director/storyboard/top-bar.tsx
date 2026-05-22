@@ -1,10 +1,26 @@
 'use client';
 import * as React from 'react';
-import { Loader2, Sparkles, Upload, FileText, ListChecks, Send } from 'lucide-react';
+import {
+  Loader2,
+  Sparkles,
+  Upload,
+  FileText,
+  ListChecks,
+  Send,
+  Download,
+  Minus,
+  Plus,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
+import type { inferRouterOutputs } from '@trpc/server';
+import type { AppRouter } from '@ss/api';
+
 import { trpc } from '@/lib/trpc/client';
+
+type ListShotsResult = inferRouterOutputs<AppRouter>['storyboard']['listShots'];
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -13,6 +29,8 @@ interface Props {
   episodeNumber: number | undefined;
   tab: 'script' | 'shots';
   onTabChange: (t: 'script' | 'shots') => void;
+  fontSize: number;
+  onFontSizeChange: (delta: 1 | -1) => void;
   onAfterAction: () => void;
 }
 
@@ -22,6 +40,8 @@ export function TopBar({
   episodeNumber,
   tab,
   onTabChange,
+  fontSize,
+  onFontSizeChange,
   onAfterAction,
 }: Props): React.ReactElement {
   return (
@@ -46,6 +66,7 @@ export function TopBar({
 
       {/* 右侧按钮区 — tab 决定显示哪些按钮 */}
       <div className="flex items-center gap-2">
+        {tab === 'shots' && episodeId && <ShotsProgress episodeId={episodeId} />}
         {tab === 'script' ? (
           <ScriptActions
             projectId={projectId}
@@ -53,7 +74,14 @@ export function TopBar({
             onSaved={onAfterAction}
           />
         ) : (
-          <ShotsActions episodeId={episodeId} onAfterAction={onAfterAction} />
+          <ShotsActions
+            episodeId={episodeId}
+            episodeNumber={episodeNumber}
+            onAfterAction={onAfterAction}
+          />
+        )}
+        {tab === 'shots' && (
+          <FontSizeControl fontSize={fontSize} onChange={onFontSizeChange} />
         )}
       </div>
     </div>
@@ -210,11 +238,15 @@ async function fileToBase64(file: File): Promise<string> {
 
 function ShotsActions({
   episodeId,
+  episodeNumber,
   onAfterAction,
 }: {
   episodeId: string | undefined;
+  episodeNumber: number | undefined;
   onAfterAction: () => void;
 }): React.ReactElement {
+  const utils = trpc.useUtils();
+
   const generate = trpc.storyboard.generateForEpisode.useMutation({
     onSuccess: (res) => {
       const msg = `生成完成：${res.shotCount} 镜，${res.groupCount} 组`;
@@ -235,6 +267,18 @@ function ShotsActions({
     },
     onError: (e) => toast.error(e.message),
   });
+
+  const handleExport = async (): Promise<void> => {
+    if (!episodeId) return;
+    try {
+      const data = await utils.storyboard.listShots.fetch({ episodeId, grouped: true });
+      const csv = buildShotsCsv(data, episodeNumber ?? 0);
+      downloadFile(csv, `第${episodeNumber ?? '?'}集分镜.csv`, 'text/csv;charset=utf-8;');
+      toast.success('CSV 导出完成');
+    } catch (e) {
+      toast.error(`导出失败: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
 
   const disabled = !episodeId;
 
@@ -257,6 +301,17 @@ function ShotsActions({
       <Button
         size="sm"
         variant="outline"
+        onClick={handleExport}
+        disabled={disabled}
+        className="gap-1.5"
+        title="导出为 CSV(Excel 可直接打开)"
+      >
+        <Download className="size-3.5" />
+        导出
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
         onClick={() => episodeId && publish.mutate({ episodeId })}
         disabled={disabled || publish.isPending}
         className="gap-1.5"
@@ -270,4 +325,143 @@ function ShotsActions({
       </Button>
     </>
   );
+}
+
+// ---------------------------------------------------------------------------
+// 进度 / 字号 / CSV 导出辅助
+// ---------------------------------------------------------------------------
+
+function ShotsProgress({ episodeId }: { episodeId: string }): React.ReactElement {
+  const { data } = trpc.storyboard.listShots.useQuery({ episodeId, grouped: false });
+  const shots = (data && 'shots' in data ? data.shots : undefined) ?? [];
+  const total = shots.length;
+  const published = shots.filter((s) => s.status !== 'DRAFT').length;
+  if (total === 0) return <></>;
+  return (
+    <Badge variant="secondary" className="font-mono text-[10px]">
+      {published}/{total} 镜
+    </Badge>
+  );
+}
+
+function FontSizeControl({
+  fontSize,
+  onChange,
+}: {
+  fontSize: number;
+  onChange: (delta: 1 | -1) => void;
+}): React.ReactElement {
+  return (
+    <div className="ml-1 flex items-center gap-0.5 rounded border border-[hsl(var(--color-border))] px-0.5">
+      <button
+        onClick={() => onChange(-1)}
+        className="flex size-6 items-center justify-center rounded text-[hsl(var(--color-muted-foreground))] hover:bg-[hsl(var(--color-secondary)/0.5)]"
+        title="缩小字号"
+      >
+        <Minus className="size-3" />
+      </button>
+      <span className="w-6 text-center font-mono text-[10px] text-[hsl(var(--color-muted-foreground))]">
+        {fontSize}
+      </span>
+      <button
+        onClick={() => onChange(1)}
+        className="flex size-6 items-center justify-center rounded text-[hsl(var(--color-muted-foreground))] hover:bg-[hsl(var(--color-secondary)/0.5)]"
+        title="放大字号"
+      >
+        <Plus className="size-3" />
+      </button>
+    </div>
+  );
+}
+
+function buildShotsCsv(data: ListShotsResult, episodeNumber: number): string {
+  const groups = (data && 'groups' in data ? data.groups : undefined) ?? [];
+  const ungrouped = (data && 'ungrouped' in data ? data.ungrouped : undefined) ?? [];
+
+  const headers = [
+    '集',
+    '组号',
+    '组内序',
+    '单镜号',
+    '景别',
+    '角度',
+    '时长(s)',
+    '优先级',
+    '剧本内容',
+    '提示词(含台词/OS)',
+    '状态',
+  ];
+
+  const rows: string[][] = [];
+  for (const g of groups) {
+    g.shots.forEach((s, i) => {
+      rows.push([
+        String(episodeNumber),
+        g.number,
+        `${i + 1}/${g.shots.length}`,
+        s.number,
+        s.framing ?? '',
+        s.angle ?? '',
+        s.durationS.toFixed(1),
+        s.priority ?? '',
+        s.content,
+        s.prompt,
+        s.status,
+      ]);
+    });
+    // 组合并提示词单独一行
+    rows.push([
+      String(episodeNumber),
+      g.number,
+      '组级',
+      '',
+      '',
+      '',
+      g.durationS.toFixed(1),
+      '',
+      '',
+      g.prompt,
+      g.status,
+    ]);
+  }
+  for (const s of ungrouped) {
+    rows.push([
+      String(episodeNumber),
+      '(未分组)',
+      '',
+      s.number,
+      s.framing ?? '',
+      s.angle ?? '',
+      s.durationS.toFixed(1),
+      s.priority ?? '',
+      s.content,
+      s.prompt,
+      s.status,
+    ]);
+  }
+
+  return [headers, ...rows].map(csvRow).join('\n');
+}
+
+function csvRow(cells: string[]): string {
+  return cells
+    .map((c) => {
+      const needsQuote = /[",\n]/.test(c);
+      const escaped = c.replace(/"/g, '""');
+      return needsQuote ? `"${escaped}"` : escaped;
+    })
+    .join(',');
+}
+
+function downloadFile(content: string, filename: string, mime: string): void {
+  // BOM 让 Excel 正确识别 UTF-8
+  const blob = new Blob(['﻿' + content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

@@ -109,10 +109,10 @@
 
 ---
 
-# 三、Storyboard Studio · 分镜工坊 🚧 W3 进行中（85%）
+# 三、Storyboard Studio · 分镜工坊 ✅ W3 完成
 
-**状态**：W3.0-W3.5 已完成,W3.6 行内编辑 + W3.7 polish 剩余
-**位置**：`apps/web/app/[locale]/(workspace)/projects/[id]/director/storyboard/`(已就绪)
+**状态**:W3.0-W3.7 全部完成,产品就绪
+**位置**:`apps/web/app/[locale]/(workspace)/projects/[id]/director/storyboard/`
 
 ### W3 范围
 - ✅ 三栏 Linear 布局（集列表 / 剧本 / 分镜 tab）
@@ -120,8 +120,8 @@
 - ✅ 合并/拆分组（向上/向下/勾选合并 + 拆分回归独立分镜）
 - ✅ 多格式剧本上传（docx / txt / md / rtf / html）+ 版本系统
 - ✅ 分镜发布 → 触发 `EVENTS.STORYBOARD_PUBLISHED`
-- 🚧 W3.6 手改入 PromptEdit 训练集（后端已就绪,前端 UI 剩余）
-- 🚧 W3.7 polish — 字号 / xlsx 导出 / 进度条
+- ✅ 行内编辑(shot + group)→ 自动写 PromptEdit 训练集
+- ✅ 字号 A-/A+ + 进度条 + CSV 导出
 - 📋 Y.js + Hocuspocus 实时协作(Phase 2 试点)
 - 📋 草图低成本预览(Nano Banana Fast,延后)
 
