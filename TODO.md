@@ -1,13 +1,14 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新：2026-05-22(深夜·四收工)
+> 最后更新：2026-05-22(深夜·五收工)
 > 仓库：https://github.com/henrywei2030/SS
 
 ---
 
 ## 🚧 进行中
 
-- [ ] **W5 启动准备** — AIGC 抽卡引擎
+- [ ] **W5.0 数据底座**(下一步) — schema 加 GenerationAttempt 视频字段 + Shot 视频 mediaItem 槽位 + SystemSetting 加 video 配置;分步骤推进
+- [ ] **W5.1+** — AIGC 抽卡引擎
   - 分镜级 4 列布局(资产关联 / 原始剧本 / 视频提示词 / 视频预览)
   - 自动 @ 资产匹配(W1.6 auto-match 算法已就绪)
   - Seedance 抽卡 + 历史记录 + 重抽
@@ -41,8 +42,8 @@
 - [ ] `*.tsbuildinfo` 加到 `.gitignore`（避免增量编译缓存噪声被提交）
 
 ### 📐 W3 / W4 followup(不阻塞下阶段)
-- [ ] **Episode.status='GENERATING' 软锁**防 generateForEpisode 重入扣费(W3.1.followup)
-- [ ] **storyboardRouter / assetRouter 集成测试**(mergeShots / splitGroup / generate / confirmCandidate 并发场景)
+- [x] **Episode.status='GENERATING' 软锁**防 generateForEpisode 重入扣费(W3.1.followup) — 2026-05-22(五收工)
+- [ ] **storyboardRouter / assetRouter 集成测试**(mergeShots / splitGroup / confirmCandidate 并发场景 — generate 已覆盖)
 - [ ] parse.ts 边界 case 测试("时间:xxx"误识场景)
 - [ ] PromptEdit 加 Project / Episode / Script `@@index` 反向外键
 - [ ] 单 shot durationS > maxDurationS 时算法的明确处理

@@ -334,6 +334,58 @@ const bindingRouter = router({
 });
 
 // ---------------------------------------------------------------------------
+// admin.episode — 集级管理(W3.1.followup:软锁逃生口)
+// ---------------------------------------------------------------------------
+
+const episodeRouter = router({
+  /**
+   * 强制解锁卡死的 GENERATING 集 — 用于进程崩溃后业务侧无法自然 release 的兜底。
+   *
+   * 行为:
+   *   - 仅在当前状态 = GENERATING 才允许;非 GENERATING 直接抛 BAD_REQUEST
+   *   - status 归位 NOT_STARTED + 清 generatingStartedAt
+   *   - 写 OperationLog,可审计
+   */
+  forceUnlock: adminProcedure
+    .input(z.object({ episodeId: z.string().cuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const before = await ctx.prisma.episode.findUnique({
+        where: { id: input.episodeId },
+        select: {
+          id: true,
+          status: true,
+          generatingStartedAt: true,
+          projectId: true,
+        },
+      });
+      if (!before) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '集不存在' });
+      }
+      if (before.status !== 'GENERATING') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '本集未处于生成中状态,无需解锁',
+        });
+      }
+
+      const updated = await ctx.prisma.episode.update({
+        where: { id: before.id },
+        data: { status: 'NOT_STARTED', generatingStartedAt: null },
+      });
+
+      await logOperation(
+        ctx,
+        'episode.force_unlock',
+        'episode',
+        before.id,
+        before,
+        updated,
+      );
+      return { ok: true, previousStartedAt: before.generatingStartedAt };
+    }),
+});
+
+// ---------------------------------------------------------------------------
 // 聚合
 // ---------------------------------------------------------------------------
 
@@ -343,4 +395,5 @@ export const adminRouter = router({
   prompt: promptRouter,
   system: systemRouter,
   binding: bindingRouter,
+  episode: episodeRouter,
 });

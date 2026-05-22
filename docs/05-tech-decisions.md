@@ -326,6 +326,34 @@ bus.publish<EventOf<typeof EVENTS.GENERATION_COMPLETED>>(EVENTS.GENERATION_COMPL
 
 ---
 
+## ADR-19 · Episode 软锁 = DB 列 + advisory_xact_lock(不用纯应用层)
+**日期**：2026-05-22 · **状态**：✅ 已实施(W3.1.followup)
+
+**决策**:防 `generateForEpisode` 重入双重扣费,用**两层锁**:
+1. 业务层:Episode.status='GENERATING' + generatingStartedAt 软锁(可见、可审计、跨进程持久)
+2. 抢锁原子性:Postgres `pg_advisory_xact_lock(hashtext('episode_lock:' || id))` 串行化同一 episode 的 CAS
+
+**替代方案**:
+- 纯进程内 Map / Mutex — 多 worker 部署无效
+- Redis SETNX — 多一个依赖,且故障恢复语义复杂
+- Postgres `SELECT ... FOR UPDATE` — 锁行长,事务大;只解决并发不解决"用户可见状态"
+- DB unique 约束 — 不可表达"独占运行中"
+
+**理由**:
+- 软锁状态 UI 可见(用户能看到"正在生成中")
+- advisory lock 是非阻塞、事务级、自动释放(crash 也释放)
+- 15 分钟 stale TTL 自愈:进程崩溃后下次抢锁自动接管,不需要人工
+- admin.episode.forceUnlock 提供逃生口,操作可审计(写 OperationLog)
+
+**代价 / 风险**:
+- 多了一个枚举值(GENERATING)— UI 需要处理这个状态
+- "previousStatus 恢复"在 stale 接管时只能退回 NOT_STARTED(真实历史已丢)— 接受,极少触发
+- finally 内 release 失败不能掩盖原始错误,只 log → 极端情况下死锁需等 TTL 或人工解锁
+
+**测试覆盖**:14 个并发场景单测(packages/api/src/utils/episode-lock.test.ts)
+
+---
+
 ## 撤销决策的流程
 
 如果某个 ADR 被推翻：

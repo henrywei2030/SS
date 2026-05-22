@@ -5,6 +5,38 @@
 
 ---
 
+## 2026-05-22(周五,公司 Mac Mini · 五次收工)— W3.1.followup 软锁(Episode.status='GENERATING' 防重入)
+
+**完成**
+- ✅ **W3.1.followup Episode 软锁交付** — 解决 generateForEpisode 并发重入双重扣费风险:
+  - Schema:EpisodeStatus 加 `GENERATING` 枚举值 + Episode 加 `generatingStartedAt DateTime?` 字段
+  - Migration:`20260522075846_w3_followup_episode_soft_lock`(两行 SQL,additive 安全)
+  - 新 helper [packages/api/src/utils/episode-lock.ts](packages/api/src/utils/episode-lock.ts):
+    - `acquireEpisodeLock` — 事务内 `pg_advisory_xact_lock` 串行化抢锁,CAS 设 GENERATING + 戳 startedAt;15 分钟 stale TTL 自愈(进程崩溃也不会永远卡死)
+    - `releaseEpisodeLock` — 仅当 status==GENERATING 才回滚到 previousStatus(防外部 force-unlock 后误改)
+    - `isEpisodeLockedNow` — 纯函数,publishEpisode 用
+  - generateForEpisode:入口 acquire + try/finally release;失败 log 不掩盖原始错误
+  - publishEpisode:本集 fresh GENERATING 拒绝发布(防发布到一半数据)
+  - admin.episode.forceUnlock 端点:逃生口,只允 GENERATING → NOT_STARTED,写 OperationLog 可审计
+- ✅ **14 个并发场景单测**(覆盖 6 个分支)— [packages/api/src/utils/episode-lock.test.ts](packages/api/src/utils/episode-lock.test.ts):
+  - 抢锁 from NOT_STARTED/IN_PROGRESS / fresh GENERATING 抢锁失败 / stale 自愈 / orphan(GENERATING+null startedAt)/ 集不存在 NOT_FOUND
+  - 连续两次抢锁模拟并发请求 / release 正常还原 / 外部 force-unlock 后 release no-op
+  - isEpisodeLockedNow 各分支(fresh/stale/orphan/NOT_STARTED/IN_PROGRESS 残留 startedAt)
+- ✅ **修了 @ss/api 测试脚本**:原本 `vitest run --passWithNoTests` 在包目录下找不到测试文件(配置 include 用了 `packages/**` 相对根目录),改成 `--config=/dev/null` 走默认 scan
+- ✅ 质量:7 包 typecheck 全绿 / **73 单测全过**(原 59 + 新 14 lock)/ 29 张表 + 9 migrations
+
+**进行中**
+- 🚧 W5.0 启动准备(分步骤做)— AIGC 抽卡数据底座
+
+**问题 / 待决策**
+- ❓ 无 — 软锁方案干净落地
+
+**下次接着做**
+- 📌 W5.0 数据底座:GenerationAttempt 视频字段补全 + Shot 视频 mediaItem 槽位 + SystemSetting video 配置
+- 📌 W5.1 后续:分镜级 4 列布局 UI 骨架
+
+---
+
 ## 2026-05-22(周五,公司 Mac Mini · 四次收工 · 深夜)— W4 完整交付 + 6 轮 audit 修复 70 项
 
 **完成**

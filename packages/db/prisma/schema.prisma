@@ -281,6 +281,10 @@ model Episode {
   publishedAt      DateTime?
   publishedVersion Int       @default(0)
 
+  // W3.1.followup 软锁：generateForEpisode 进入时戳 startedAt + 切 status=GENERATING；
+  // try/finally 释放回原 status。startedAt 超过 SOFT_LOCK_TTL_MS 视为 stale,允许抢回。
+  generatingStartedAt DateTime?
+
   project     Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
   shots       Shot[]
   shotGroups  ShotGroup[]
@@ -302,6 +306,7 @@ model Episode {
 enum EpisodeStatus {
   NOT_STARTED
   IN_PROGRESS
+  GENERATING
   COMPLETED
   ARCHIVED
 }

@@ -311,7 +311,7 @@ model SystemSetting {
 | `MemberRole` | OWNER / ADMIN / LEADER / MEMBER / VIEWER | 项目角色 |
 | `InvitationStatus` | PENDING / ACCEPTED / REJECTED / EXPIRED / CANCELLED | 邀请 |
 | `ScriptSource` | UPLOAD / AI_GENERATED / IMPORTED | 剧本来源 |
-| `EpisodeStatus` | NOT_STARTED / IN_PROGRESS / COMPLETED / ARCHIVED | 集数状态 |
+| `EpisodeStatus` | NOT_STARTED / IN_PROGRESS / **GENERATING** / COMPLETED / ARCHIVED | 集数状态(GENERATING 为 W3.1.followup 软锁中间态) |
 | `AssignRole` | OWNER / COLLAB / REVIEWER | 集数分配角色 |
 | `ShotStatus` | DRAFT / PUBLISHED / QUEUED / GENERATING / GENERATED / ADOPTED / IN_EDIT / FINAL / FAILED / BUDGET_BLOCKED | 镜头状态机 |
 | `Priority` | S / A / B / C | 制作价值优先级 |

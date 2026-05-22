@@ -20,6 +20,11 @@ import { EVENTS } from '@ss/shared/events';
 import { router, protectedProcedure } from '../trpc.js';
 import type { Context } from '../context.js';
 import { logOperation } from '../middleware/audit.js';
+import {
+  acquireEpisodeLock,
+  isEpisodeLockedNow,
+  releaseEpisodeLock,
+} from '../utils/episode-lock.js';
 
 // ---------------------------------------------------------------------------
 // 通用：项目访问校验
@@ -675,6 +680,11 @@ export const storyboardRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const ep = await loadEpisodeOrThrow(ctx, input.episodeId);
+
+      // W3.1.followup 软锁:抢锁失败抛 CONFLICT;抢到后必须配 release(finally 内)
+      const lock = await acquireEpisodeLock(ctx.prisma, ep.id);
+
+      try {
       const bindings = await getStoryboardBindings(ctx);
 
       // 1. 取剧本 — 严格按 projectId + deletedAt 过滤；未指定 scriptId 时取当前版本
@@ -914,6 +924,15 @@ export const storyboardRouter = router({
         cost: totalCost,
         errors,
       };
+      } finally {
+        // 释放失败不能掩盖原始错误 — 只 log,等 stale TTL 自愈或人工解锁
+        await releaseEpisodeLock(ctx.prisma, lock).catch((err) => {
+          console.error('[generateForEpisode] failed to release lock', {
+            episodeId: ep.id,
+            err: err instanceof Error ? err.message : err,
+          });
+        });
+      }
     }),
 
   // -------- 发布 --------
@@ -922,6 +941,15 @@ export const storyboardRouter = router({
     .input(z.object({ episodeId: z.string().cuid() }))
     .mutation(async ({ ctx, input }) => {
       const ep = await loadEpisodeOrThrow(ctx, input.episodeId);
+
+      // W3.1.followup 软锁:本集正在生成中(且未 stale)不可发布,防发布到一半数据
+      if (isEpisodeLockedNow(ep)) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: '本集正在生成分镜,无法发布(请稍候或在管理员后台强制解锁)',
+        });
+      }
+
       const now = new Date();
 
       // 发布语义:
