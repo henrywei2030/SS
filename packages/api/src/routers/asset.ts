@@ -862,6 +862,29 @@ export const assetRouter = router({
         },
       });
 
+      // Cost Ledger 双写 — Provider 没继承 BaseProvider,这里显式记账,保证预算护栏可见
+      try {
+        await ctx.prisma.costLedgerEntry.create({
+          data: {
+            userId: ctx.user.id,
+            projectId: asset.projectId,
+            assetId: asset.id,
+            attemptId: attempt.id,
+            providerId,
+            modelId: input.modelId ?? providerId,
+            action: 'image.generate',
+            inputUnits: 0,
+            outputUnits: imageResult.imageUrls.length,
+            unitPriceCny: '0',
+            costCny: imageResult.costCny.toFixed(4),
+            success: true,
+            billingCycle: new Date().toISOString().slice(0, 7),
+          },
+        });
+      } catch (e) {
+        console.error('[asset.generateImage] CostLedger write failed:', e);
+      }
+
       await logOperation(ctx, 'asset.generateImage', 'asset', asset.id, null, {
         slot: input.slot,
         count: imageResult.imageUrls.length,
@@ -994,14 +1017,24 @@ export const assetRouter = router({
           message: 'MediaItem 不存在或不属于本项目',
         });
       }
-      // MediaItem.sourceRef 在 generateImage 时存的是 asset.id
-      // 允许 source != AIGC 的图(用户上传未来支持时)绕过此检查
-      if (media.source === 'AIGC' && media.sourceRef && media.sourceRef !== asset.id) {
+      // MediaItem 归属校验 — 多层防御:
+      //   1. AIGC 来源:sourceRef 必须 === 本 asset.id(不接受 null,不允许跨资产挪用)
+      //   2. UPLOAD/IMPORTED:必须同 projectId(上面已查过 projectId,这里冗余确认)
+      //   3. EXTERNAL:暂不允许直接 confirm(Phase 2 决策)
+      if (media.source === 'AIGC') {
+        if (!media.sourceRef || media.sourceRef !== asset.id) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'MediaItem 来自其他资产的生成 — 跨资产挪用破坏一致性,请重新为本资产生成',
+          });
+        }
+      } else if (media.source === 'EXTERNAL') {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: 'MediaItem 来自其他资产的生成 — 跨资产挪用会破坏一致性,请重新为本资产生成',
+          message: 'EXTERNAL 来源的 MediaItem 暂不允许直接确认到资产槽位,请先入库为正式资产',
         });
       }
+      // UPLOAD / IMPORTED 来源:已经过 projectId 校验,放行(允许用户上传图作为资产参考)
 
       const fieldName = SLOT_FIELD[input.slot];
       const patch: Record<string, string | null> = { [fieldName]: input.mediaItemId };

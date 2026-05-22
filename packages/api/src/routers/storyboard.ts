@@ -348,6 +348,12 @@ export const storyboardRouter = router({
         data: input.patch,
       });
 
+      // 关联当前剧本版本(scriptId)到训练数据 — ML pipeline 还原 prompt 上下文必需
+      const currentScript = await ctx.prisma.script.findFirst({
+        where: { episodeId: before.episodeId, isCurrent: true, deletedAt: null },
+        select: { id: true },
+      });
+
       // 把每个变化的字段都写成一条 PromptEdit 训练数据
       // recordPromptEdit 内部过滤：只记 framing/angle/content/prompt 等可训练字段
       for (const [field, newVal] of Object.entries(input.patch)) {
@@ -362,6 +368,7 @@ export const storyboardRouter = router({
           diffNote: input.diffNote,
           projectId: before.episode.projectId,
           episodeId: before.episodeId,
+          scriptId: currentScript?.id,
         });
       }
 
@@ -401,10 +408,18 @@ export const storyboardRouter = router({
       }
       await assertProjectAccess(ctx, shot.episode.projectId, ctx.user.id);
 
-      await ctx.prisma.shot.update({
-        where: { id: input.shotId },
-        data: { deletedAt: new Date() },
-      });
+      // 联动清理 W4 AssetUsageBinding 指向本 shot 的引用,防止悬空 binding
+      const now = new Date();
+      await ctx.prisma.$transaction([
+        ctx.prisma.shot.update({
+          where: { id: input.shotId },
+          data: { deletedAt: now },
+        }),
+        ctx.prisma.assetUsageBinding.updateMany({
+          where: { shotId: input.shotId, deletedAt: null },
+          data: { deletedAt: now },
+        }),
+      ]);
       await logOperation(
         ctx,
         'shot.delete',
@@ -606,6 +621,11 @@ export const storyboardRouter = router({
         data: input.patch,
       });
 
+      const currentScript = await ctx.prisma.script.findFirst({
+        where: { episodeId: before.episodeId, isCurrent: true, deletedAt: null },
+        select: { id: true },
+      });
+
       for (const [field, newVal] of Object.entries(input.patch)) {
         if (newVal === undefined) continue;
         const oldVal = (before as unknown as Record<string, unknown>)[field];
@@ -618,6 +638,7 @@ export const storyboardRouter = router({
           diffNote: input.diffNote,
           projectId: before.episode.projectId,
           episodeId: before.episodeId,
+          scriptId: currentScript?.id,
         });
       }
 
@@ -703,26 +724,44 @@ export const storyboardRouter = router({
         );
       }
 
-      // 3. 若 replaceExisting，先 soft-delete 现有 shots + groups
+      // 3. 若 replaceExisting:级联软删现有 shots + groups + scenes + 关联的 AssetUsageBinding
+      //    防 W4 audit 永远报"悬空 binding" + 旧 sceneId 引用断裂
       if (input.replaceExisting) {
+        const now = new Date();
         await ctx.prisma.$transaction([
           ctx.prisma.shot.updateMany({
             where: { episodeId: ep.id, deletedAt: null },
-            data: { deletedAt: new Date() },
+            data: { deletedAt: now },
           }),
           ctx.prisma.shotGroup.updateMany({
             where: { episodeId: ep.id, deletedAt: null },
-            data: { deletedAt: new Date() },
+            data: { deletedAt: now },
+          }),
+          ctx.prisma.scene.updateMany({
+            where: { episodeId: ep.id, deletedAt: null },
+            data: { deletedAt: now },
+          }),
+          // 本集相关的 AssetUsageBinding 一并清(防止 binding 引用已删 shot/scene)
+          ctx.prisma.assetUsageBinding.updateMany({
+            where: { episodeId: ep.id, deletedAt: null },
+            data: { deletedAt: now },
           }),
         ]);
       }
 
-      // 4. 项目风格
+      // 4. 项目风格 — 完整带过 StyleProfile 三段 prompt + forbidden,与 W4 拼接公式对齐
       const project = await ctx.prisma.project.findUnique({
         where: { id: ep.projectId },
         include: { style: true },
       });
       const styleSlug = project?.style?.slug;
+      const stylePrompt = project?.style
+        ? {
+            scenePrompt: project.style.scenePrompt,
+            characterPrompt: project.style.characterPrompt,
+            forbiddenWords: project.style.forbiddenWords,
+          }
+        : undefined;
 
       // 5. 已建档资产名单（用于 @ 引用提示）
       const knownAssets = await ctx.prisma.asset.findMany({
@@ -755,6 +794,7 @@ export const storyboardRouter = router({
             scene: parsedScene,
             modelId: bindings.modelId,
             styleSlug,
+            stylePrompt,
             knownCharacters,
             defaultShotDurationS: bindings.defaultShotDurationS,
             maxShotDurationS: bindings.maxDurationS,

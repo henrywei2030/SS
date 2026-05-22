@@ -52,23 +52,41 @@ const requireAdmin = t.middleware(({ ctx, next }) => {
   return next({ ctx: { ...ctx, user: ctx.user } });
 });
 
-/** 自动把 SsError 翻译成 TRPCError */
+/**
+ * HTTP 状态码 → tRPC code 完整映射
+ *
+ * tRPC 不支持 402/451/502 等 HTTP code,统一退到最相近的语义码;
+ * errorFormatter 会把 ssCode 透传到前端,前端可读真实 SsError code(如 'BUDGET_EXCEEDED')
+ */
+const HTTP_TO_TRPC: Record<number, ConstructorParameters<typeof TRPCError>[0]['code']> = {
+  400: 'BAD_REQUEST',
+  401: 'UNAUTHORIZED',
+  402: 'FORBIDDEN', // PAYMENT_REQUIRED(预算超限)→ ssCode=BUDGET_EXCEEDED
+  403: 'FORBIDDEN',
+  404: 'NOT_FOUND',
+  409: 'CONFLICT',
+  422: 'UNPROCESSABLE_CONTENT',
+  429: 'TOO_MANY_REQUESTS',
+  451: 'FORBIDDEN', // ComplianceError → ssCode=COMPLIANCE_REJECTED
+  502: 'INTERNAL_SERVER_ERROR', // ProviderError → ssCode=PROVIDER_FAILED
+  503: 'INTERNAL_SERVER_ERROR',
+  504: 'TIMEOUT',
+};
+
+function httpStatusToTrpcCode(
+  status: number,
+): ConstructorParameters<typeof TRPCError>[0]['code'] {
+  return HTTP_TO_TRPC[status] ?? 'INTERNAL_SERVER_ERROR';
+}
+
+/** 自动把 SsError 翻译成 TRPCError(ssCode 通过 errorFormatter 透传) */
 const wrapErrors = t.middleware(async ({ next }) => {
   try {
     return await next();
   } catch (e) {
     if (e instanceof SsError) {
       throw new TRPCError({
-        code:
-          e.httpStatus === 403
-            ? 'FORBIDDEN'
-            : e.httpStatus === 404
-              ? 'NOT_FOUND'
-              : e.httpStatus === 400
-                ? 'BAD_REQUEST'
-                : e.httpStatus === 402
-                  ? 'FORBIDDEN'
-                  : 'INTERNAL_SERVER_ERROR',
+        code: httpStatusToTrpcCode(e.httpStatus),
         message: e.message,
         cause: e,
       });

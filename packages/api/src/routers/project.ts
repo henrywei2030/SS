@@ -100,6 +100,7 @@ export const projectRouter = router({
         ctx.prisma.shot.count({
           where: {
             episode: { projectId: project.id },
+            deletedAt: null, // 与 shotCount 一致,防 progressPct > 100%
             status: { in: ['ADOPTED', 'IN_EDIT', 'FINAL'] },
           },
         }),
@@ -189,10 +190,20 @@ export const projectRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      // 校验访问权限 — 任何登录用户不能克隆别人的项目
       const src = await ctx.prisma.project.findFirst({
-        where: { id: input.id, deletedAt: null },
+        where: {
+          id: input.id,
+          deletedAt: null,
+          OR: [
+            { ownerId: ctx.user.id },
+            { members: { some: { userId: ctx.user.id } } },
+          ],
+        },
       });
-      if (!src) throw new TRPCError({ code: 'NOT_FOUND' });
+      if (!src) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '项目不存在或无权访问' });
+      }
 
       const cloned = await ctx.prisma.project.create({
         data: {

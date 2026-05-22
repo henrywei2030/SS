@@ -2,6 +2,7 @@
  * Seed 脚本 — 初始化系统默认数据
  * 运行: pnpm db:seed
  */
+import bcrypt from 'bcryptjs';
 import { PrismaClient, StyleKind, PromptCategory, ProviderKind } from '@prisma/client';
 
 const prisma = new PrismaClient();
@@ -188,20 +189,38 @@ async function main() {
   console.log(`    ✓ ${templates.length} 个 Prompt 模板`);
 
   // ---------- 4. 默认管理员账号 ----------
-  // 占位 — 实际密码哈希由 auth adapter 处理；这里使用 bcrypt 占位字符串
-  console.log('  → 创建默认管理员（admin / admin@starsalign.local）');
+  // 用真 bcrypt 哈希一个可登录的默认密码,部署后必须立即改密
+  // 密码优先从 env(ADMIN_DEFAULT_PASSWORD)读,否则用 'admin123!@#' (字符长 + 含大写/符号)
+  const adminPassword = process.env.ADMIN_DEFAULT_PASSWORD ?? 'admin123!@#';
+  const passwordHash = await bcrypt.hash(adminPassword, 12);
+
+  console.log('  → 创建默认管理员(admin / admin@starsalign.local)');
+  const existingAdmin = await prisma.user.findUnique({
+    where: { email: 'admin@starsalign.local' },
+  });
   await prisma.user.upsert({
     where: { email: 'admin@starsalign.local' },
     create: {
       email: 'admin@starsalign.local',
       username: 'admin',
       displayName: '管理员',
-      passwordHash: '$2b$10$placeholder.hash.replaced.by.first.login.flow',
+      passwordHash,
       isAdmin: true,
       locale: 'zh-CN',
     },
+    // 已存在则不覆盖密码(避免重跑 seed 把用户改过的密码冲掉)
     update: {},
   });
+  if (!existingAdmin) {
+    console.log('');
+    console.log('   ════════════════════════════════════════════');
+    console.log(`   默认管理员密码: ${adminPassword}`);
+    console.log('   ⚠️  生产环境务必立即登录后修改密码');
+    console.log('   ════════════════════════════════════════════');
+    console.log('');
+  } else {
+    console.log('   (admin 已存在,保留原密码)');
+  }
 
   // ---------- 5. 系统级默认设置 ----------
   console.log('  → 创建系统级默认设置');
@@ -345,7 +364,7 @@ async function main() {
   console.log(`    ✓ ${systemSettings.length} 条系统设置`);
 
   console.log('\n✅ 种子数据初始化完成\n');
-  console.log('   默认管理员: admin@starsalign.local（首次登录设置密码）');
+  console.log('   默认管理员: admin@starsalign.local(初始密码见上方,务必尽快改密)');
   console.log('   AI Provider API Key 默认未设置 — 请登录后在 Admin → AI Provider 后台配置');
   console.log('   该步骤通过 AES-256-GCM 加密存储到数据库，无需写入 .env 文件\n');
 }

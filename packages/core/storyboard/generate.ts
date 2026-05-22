@@ -26,13 +26,22 @@ export interface GenerateStoryboardInput {
   ctx: CallContext;
   /** 项目风格 slug（'ai_real' / 'anim_3d' / 'anim_2d'），影响美术风格描述 */
   styleSlug?: string;
-  /** 已知角色资产名单，用于 @ 引用提示 */
+  /**
+   * 完整 StyleProfile 风格段(W4 + W3 拼接公式对齐)— scenePrompt 拼到分镜 prompt 里
+   * 让 LLM 输出的视频提示词遵循全剧统一风格
+   */
+  stylePrompt?: {
+    scenePrompt?: string | null;
+    characterPrompt?: string | null;
+    forbiddenWords?: string[] | null;
+  };
+  /** 已知角色资产名单,用于 @ 引用提示 */
   knownCharacters?: string[];
   /** LLM 模型 — 默认从 SystemSetting `binding.storyboard.generation.modelId` 读取 */
   modelId?: string;
-  /** 单镜默认时长（秒） — 默认 3 */
+  /** 单镜默认时长(秒) — 默认 3 */
   defaultShotDurationS?: number;
-  /** 单镜最大时长（秒） — 用于裁剪 LLM 返回的过长 durationS，默认 15 */
+  /** 单镜最大时长(秒) — 用于裁剪 LLM 返回的过长 durationS,默认 15 */
   maxShotDurationS?: number;
 }
 
@@ -150,7 +159,7 @@ export async function generateStoryboard(
 // ---------------------------------------------------------------------------
 
 function buildUserPrompt(input: GenerateStoryboardInput): string {
-  const { scene, styleSlug, knownCharacters } = input;
+  const { scene, styleSlug, stylePrompt, knownCharacters } = input;
 
   const lines = scene.lines
     .map((l) => {
@@ -167,6 +176,20 @@ function buildUserPrompt(input: GenerateStoryboardInput): string {
     })
     .join('\n');
 
+  // 完整风格段:scenePrompt(场景质感)+ characterPrompt(人物风格)+ forbiddenWords
+  // 让生成的镜头 prompt 直接继承全剧统一风格
+  const styleBlock = stylePrompt
+    ? [
+        stylePrompt.scenePrompt ? `场景风格: ${stylePrompt.scenePrompt}` : null,
+        stylePrompt.characterPrompt ? `人物风格: ${stylePrompt.characterPrompt}` : null,
+        stylePrompt.forbiddenWords && stylePrompt.forbiddenWords.length > 0
+          ? `禁止: ${stylePrompt.forbiddenWords.join('、')}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join('\n')
+    : '';
+
   const meta = [
     `场号: ${scene.number}`,
     `时段: ${zhTimeOfDay(scene.timeOfDay)}`,
@@ -174,6 +197,7 @@ function buildUserPrompt(input: GenerateStoryboardInput): string {
     scene.place ? `地点: ${scene.place}` : null,
     scene.characters.length ? `本场人物: ${scene.characters.join('、')}` : null,
     styleSlug ? `美术风格: ${zhStyle(styleSlug)}` : null,
+    styleBlock ? `\n【全剧风格规约】\n${styleBlock}` : null,
     knownCharacters?.length
       ? `已建档资产: ${knownCharacters.map((c) => `@${c}`).join(' / ')}`
       : null,

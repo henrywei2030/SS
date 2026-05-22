@@ -4,7 +4,7 @@
  */
 import { promises as fs } from 'node:fs';
 import { createReadStream } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve as pathResolve } from 'node:path';
 import type { Readable } from 'node:stream';
 
 import type { StorageAdapter, PutOptions, PutResult, ObjectInfo } from './types.js';
@@ -18,13 +18,29 @@ export interface LocalFsConfig {
 
 export class LocalFsStorageAdapter implements StorageAdapter {
   readonly id: string;
+  private readonly absRootDir: string;
 
   constructor(private readonly cfg: LocalFsConfig) {
+    this.absRootDir = pathResolve(cfg.rootDir);
     this.id = `local-fs:${cfg.rootDir}`;
   }
 
+  /**
+   * 安全 resolve key 到绝对路径 — 防 `../` 路径穿越
+   *
+   * 攻击向量:key='../../etc/passwd' 会让 fs.writeFile 越权写到 rootDir 外。
+   * 修复:resolve 后必须 startsWith(absRootDir)。
+   */
   private resolve(key: string): string {
-    return join(this.cfg.rootDir, key);
+    // 拒绝绝对路径(以 / 或 ~ 开头)
+    if (key.startsWith('/') || key.startsWith('~') || key.includes('\0')) {
+      throw new Error(`Invalid storage key (absolute / null byte): ${key}`);
+    }
+    const fullPath = pathResolve(this.absRootDir, key);
+    if (!fullPath.startsWith(this.absRootDir + '/') && fullPath !== this.absRootDir) {
+      throw new Error(`Path traversal attempt blocked: key='${key}'`);
+    }
+    return fullPath;
   }
 
   async putObject(

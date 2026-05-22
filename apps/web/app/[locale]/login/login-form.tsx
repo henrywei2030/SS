@@ -32,10 +32,13 @@ export function LoginForm({ redirectTo }: { redirectTo: string | null }): React.
         const j = (await res.json().catch(() => ({}))) as { message?: string };
         throw new Error(j.message ?? t('auth.errors.invalidCredentials'));
       }
-      const next =
-        redirectTo && redirectTo.startsWith('/')
-          ? redirectTo
-          : `/${params.locale}/projects`;
+      // 防开放重定向:`//evil.com/path` 也以 `/` 开头但被浏览器视作 protocol-relative
+      const isSafeRedirect =
+        !!redirectTo &&
+        redirectTo.startsWith('/') &&
+        !redirectTo.startsWith('//') &&
+        !redirectTo.startsWith('/\\');
+      const next = isSafeRedirect ? redirectTo : `/${params.locale}/projects`;
       router.push(next);
       router.refresh();
     } catch (e) {
