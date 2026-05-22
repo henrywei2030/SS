@@ -48,6 +48,8 @@ export interface AssetBreakdownResult {
   cost: number;
   modelId: string;
   raw?: unknown;
+  /** LLM 返回不可解析 / 无候选时填,router 显式回给前端,避免"扣了钱以为剧本太简单" */
+  warning?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -132,12 +134,22 @@ export async function breakdownAssets(
   );
 
   const extracted = extractAssets(result.json, input.maxCharacters ?? 20);
+  const totalDrafts =
+    extracted.characters.length + extracted.scenes.length + extracted.props.length;
+
+  let warning: string | undefined;
+  if (!result.json) {
+    warning = 'LLM 未返回 JSON(已计费但本次未拆出资产)';
+  } else if (totalDrafts === 0) {
+    warning = 'LLM 输出未识别到任何资产(已计费但本次未拆出资产 — 检查剧本格式或调整 prompt)';
+  }
 
   return {
     ...extracted,
     cost: result.costCny,
     modelId,
     raw: result.json,
+    warning,
   };
 }
 

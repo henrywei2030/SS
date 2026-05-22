@@ -165,13 +165,23 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
     doMergeShots(ids);
   };
 
-  const deleteSelected = (): void => {
+  const deleteSelected = async (): Promise<void> => {
     if (selected.size === 0) return;
     if (!confirm(`确定删除选中的 ${selected.size} 个分镜?`)) return;
-    for (const id of selected) {
-      deleteShot.mutate({ shotId: id });
+    // 改 Promise.allSettled,避免串行 N 次 mutation + invalidate 风暴
+    // 用 mutateAsync 等所有 settle 后再统一 invalidate
+    const ids = Array.from(selected);
+    const results = await Promise.allSettled(
+      ids.map((id) => deleteShot.mutateAsync({ shotId: id })),
+    );
+    const failed = results.filter((r) => r.status === 'rejected').length;
+    if (failed > 0) {
+      toast.error(`删除完成,${failed} 个失败`);
+    } else {
+      toast.success(`已删除 ${ids.length} 个分镜`);
     }
     setSelected(new Set());
+    invalidate();
   };
 
   if (isLoading) {

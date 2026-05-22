@@ -101,6 +101,11 @@ export function AssetCard({ asset, heroUrl, onClick }: Props): React.ReactElemen
           <img
             src={heroUrl}
             alt={asset.name}
+            loading="lazy"
+            onError={(e) => {
+              // 图源(CDN/picsum)挂了时降级为图标占位,不显示 broken-image
+              (e.currentTarget as HTMLImageElement).style.display = 'none';
+            }}
             className="absolute inset-0 size-full object-cover"
           />
         ) : heroMediaId ? (

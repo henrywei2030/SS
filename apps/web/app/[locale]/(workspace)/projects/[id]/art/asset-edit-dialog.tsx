@@ -405,12 +405,14 @@ function InfoPanel({
       toast.success('已锁定');
       onChanged();
     },
+    onError: (e) => toast.error(`锁定失败: ${e.message}`),
   });
   const unlockMut = trpc.asset.unlockAsset.useMutation({
     onSuccess: () => {
       toast.success('已解锁');
       onChanged();
     },
+    onError: (e) => toast.error(`解锁失败: ${e.message}`),
   });
   const deleteMut = trpc.asset.delete.useMutation({
     onSuccess: () => {
@@ -836,7 +838,7 @@ function GenerationPanel({
                       mediaItemId: media.id,
                     })
                   }
-                  onReject={() => rejectMut.mutate({ attemptId: c.attempt.id })}
+                  onReject={() => rejectMut.mutate({ mediaItemId: media.id })}
                 />
               )),
             )}
@@ -861,7 +863,7 @@ function GenerationPanel({
             setInfoOpen(null);
           }}
           onReject={() => {
-            rejectMut.mutate({ attemptId: infoOpen.attempt.id });
+            rejectMut.mutate({ mediaItemId: infoOpen.media.id });
             setInfoOpen(null);
           }}
         />

@@ -212,10 +212,20 @@ async function main() {
     update: {},
   });
   if (!existingAdmin) {
+    // 仅 dev / 未显式设 env 时打印明文密码,生产环境只提示用 env 注入,避免日志泄漏
+    const isProd = process.env.NODE_ENV === 'production';
+    const usedEnv = !!process.env.ADMIN_DEFAULT_PASSWORD;
     console.log('');
     console.log('   ════════════════════════════════════════════');
-    console.log(`   默认管理员密码: ${adminPassword}`);
-    console.log('   ⚠️  生产环境务必立即登录后修改密码');
+    if (isProd && !usedEnv) {
+      console.log('   ⚠️  生产环境未设 ADMIN_DEFAULT_PASSWORD,用了内置默认密码');
+      console.log('   ⚠️  请用 scripts/set-admin-password 立即重置');
+    } else if (!isProd) {
+      console.log(`   默认管理员密码: ${adminPassword}`);
+      console.log('   ⚠️  生产环境务必立即登录后修改密码');
+    } else {
+      console.log('   ✓ 默认管理员已用 ADMIN_DEFAULT_PASSWORD 初始化(密码不回显)');
+    }
     console.log('   ════════════════════════════════════════════');
     console.log('');
   } else {
@@ -260,6 +270,12 @@ async function main() {
       value: '80',
       category: 'feature_flag',
       description: '预算预警百分比（80% 黄色，100% 红色）',
+    },
+    {
+      key: 'auth.allowSignup',
+      value: 'false',
+      category: 'security',
+      description: '是否允许公开注册(默认关闭,防任何人创建账号;本地/团队部署可改 true)',
     },
 
     // ----- 模型用途绑定（让后台一处切换，所有调用统一）-----

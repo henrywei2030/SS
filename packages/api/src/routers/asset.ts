@@ -464,29 +464,29 @@ export const assetRouter = router({
         }
       }
 
-      // 若改了 prompt 或任何槽位字段,联动重算 maturity
+      // 若改了 prompt 或任何槽位字段,联动重算 maturity — 与 patch 同事务一次写入
+      // 防"先 update patch → 再 update maturity"中间他人 confirm 把 maturity 覆盖
       const slotFieldNames = Object.values(SLOT_FIELD);
       const touchesPromptOrSlot =
         input.patch.prompt !== undefined ||
         Object.keys(input.patch).some((k) => slotFieldNames.includes(k));
 
-      const after = await ctx.prisma.asset.update({
-        where: { id: input.assetId },
-        data: input.patch,
+      const after = await ctx.prisma.$transaction(async (tx) => {
+        const fresh = await tx.asset.findFirstOrThrow({
+          where: { id: input.assetId, deletedAt: null },
+        });
+        const projected = {
+          ...fresh,
+          ...input.patch,
+        } as Parameters<typeof computeMaturity>[0];
+        const maturityUpdate = touchesPromptOrSlot
+          ? { maturity: computeMaturity(projected) }
+          : {};
+        return tx.asset.update({
+          where: { id: input.assetId },
+          data: { ...input.patch, ...maturityUpdate },
+        });
       });
-
-      if (touchesPromptOrSlot) {
-        const newMaturity = computeMaturity(
-          after as unknown as Parameters<typeof computeMaturity>[0],
-        );
-        if (newMaturity !== after.maturity) {
-          await ctx.prisma.asset.update({
-            where: { id: after.id },
-            data: { maturity: newMaturity },
-          });
-          after.maturity = newMaturity;
-        }
-      }
 
       // 文本字段改动入训练集
       for (const [field, newVal] of Object.entries(input.patch)) {
@@ -642,6 +642,7 @@ export const assetRouter = router({
         cost: result.cost,
         modelId,
         scriptId: script.id,
+        warning: result.warning,
       };
     }),
 
@@ -788,88 +789,83 @@ export const assetRouter = router({
       }
       const finishedAt = new Date();
 
-      // 每张图建 MediaItem(并发 Promise.all 避免 N 次串行 round-trip)
-      // sanitize filename — asset.name 可能含中文/空格/标点,转 ASCII-safe key
+      // 三类写入(MediaItem×N + GenerationAttempt + CostLedgerEntry)用同一事务
+      // 任一失败回滚全部 — 防出现"图片入库但没账单"或"账单但找不到图"
       const safeName = asset.name
         .replace(/[^a-zA-Z0-9_-]+/g, '_')
         .slice(0, 40);
-      const medias = await Promise.all(
-        imageResult.imageUrls.map((url, i) =>
-          ctx.prisma.mediaItem.create({
-            data: {
-              projectId: asset.projectId,
-              scope: 'PROJECT',
-              kind: 'IMAGE',
-              filename: `${safeName}-${input.slot}-${startedAt.getTime()}-${i}.png`,
-              mimeType: 'image/png',
-              // mock 阶段无真实文件,按 width*height*0.5 估占用(避免 Phase 2 统计全 0)
-              sizeBytes:
-                imageResult.width && imageResult.height
-                  ? Math.round(imageResult.width * imageResult.height * 0.5)
-                  : 0,
-              // 用 placeholder:// 前缀让真接入时一眼能扫出迁移目标
-              storageKey: url.startsWith('http')
-                ? `placeholder://external?u=${encodeURIComponent(url)}`
-                : url,
-              cdnUrl: url,
-              meta: {
-                slot: input.slot,
-                prompt: compiled.positive,
-                negative: compiled.negative,
-                width: imageResult.width,
-                height: imageResult.height,
-                providerId,
-                modelId: input.modelId ?? providerId,
+      const { mediaIds, attempt } = await ctx.prisma.$transaction(async (tx) => {
+        const createdMedias = await Promise.all(
+          imageResult.imageUrls.map((url, i) =>
+            tx.mediaItem.create({
+              data: {
+                projectId: asset.projectId,
+                scope: 'PROJECT',
+                kind: 'IMAGE',
+                filename: `${safeName}-${input.slot}-${startedAt.getTime()}-${i}.png`,
+                mimeType: 'image/png',
+                sizeBytes:
+                  imageResult.width && imageResult.height
+                    ? Math.round(imageResult.width * imageResult.height * 0.5)
+                    : 0,
+                storageKey: url.startsWith('http')
+                  ? `placeholder://external?u=${encodeURIComponent(url)}`
+                  : url,
+                cdnUrl: url,
+                meta: {
+                  slot: input.slot,
+                  prompt: compiled.positive,
+                  negative: compiled.negative,
+                  width: imageResult.width,
+                  height: imageResult.height,
+                  providerId,
+                  modelId: input.modelId ?? providerId,
+                },
+                aspectRatio,
+                viewKind: input.slot,
+                source: 'AIGC',
+                sourceRef: asset.id,
               },
+            }),
+          ),
+        );
+        const ids = createdMedias.map((m) => m.id);
+        const attemptRow = await tx.generationAttempt.create({
+          data: {
+            projectId: asset.projectId,
+            assetId: asset.id,
+            providerId,
+            modelId: input.modelId ?? providerId,
+            action: 'IMAGE',
+            candidateForSlot: input.slot,
+            inputJson: {
+              prompt: compiled.positive,
+              negative: compiled.negative,
               aspectRatio,
-              viewKind: input.slot,
-              source: 'AIGC',
-              sourceRef: asset.id,
+              sizePx: input.sizePx,
+              count: input.count,
+              parts: compiled.parts,
             },
-          }),
-        ),
-      );
-      const mediaIds = medias.map((m) => m.id);
-
-      const attempt = await ctx.prisma.generationAttempt.create({
-        data: {
-          projectId: asset.projectId,
-          assetId: asset.id,
-          providerId,
-          modelId: input.modelId ?? providerId,
-          action: 'IMAGE',
-          candidateForSlot: input.slot,
-          inputJson: {
-            prompt: compiled.positive,
-            negative: compiled.negative,
-            aspectRatio,
-            sizePx: input.sizePx,
-            count: input.count,
-            parts: compiled.parts,
-            providerRawHint: 'see GenerationAttempt for full input',
+            outputMediaId: ids[0],
+            outputMediaIds: ids,
+            inputUnits: 0,
+            outputUnits: imageResult.imageUrls.length,
+            unitPriceCny: '0',
+            costCny: imageResult.costCny.toFixed(4),
+            status: 'SUCCESS',
+            startedAt,
+            finishedAt,
+            durationMs: finishedAt.getTime() - startedAt.getTime(),
+            createdBy: ctx.user.id,
           },
-          outputMediaId: mediaIds[0],
-          outputMediaIds: mediaIds,
-          inputUnits: 0,
-          outputUnits: imageResult.imageUrls.length,
-          unitPriceCny: '0',
-          costCny: imageResult.costCny.toFixed(4),
-          status: 'SUCCESS',
-          startedAt,
-          finishedAt,
-          durationMs: finishedAt.getTime() - startedAt.getTime(),
-          createdBy: ctx.user.id,
-        },
-      });
-
-      // Cost Ledger 双写 — Provider 没继承 BaseProvider,这里显式记账,保证预算护栏可见
-      try {
-        await ctx.prisma.costLedgerEntry.create({
+        });
+        // Cost Ledger 同事务双写,失败回滚 attempt + medias
+        await tx.costLedgerEntry.create({
           data: {
             userId: ctx.user.id,
             projectId: asset.projectId,
             assetId: asset.id,
-            attemptId: attempt.id,
+            attemptId: attemptRow.id,
             providerId,
             modelId: input.modelId ?? providerId,
             action: 'image.generate',
@@ -881,9 +877,8 @@ export const assetRouter = router({
             billingCycle: new Date().toISOString().slice(0, 7),
           },
         });
-      } catch (e) {
-        console.error('[asset.generateImage] CostLedger write failed:', e);
-      }
+        return { mediaIds: ids, attempt: attemptRow };
+      });
 
       await logOperation(ctx, 'asset.generateImage', 'asset', asset.id, null, {
         slot: input.slot,
@@ -1037,19 +1032,23 @@ export const assetRouter = router({
       // UPLOAD / IMPORTED 来源:已经过 projectId 校验,放行(允许用户上传图作为资产参考)
 
       const fieldName = SLOT_FIELD[input.slot];
-      const patch: Record<string, string | null> = { [fieldName]: input.mediaItemId };
 
-      // 重算 maturity
-      const projected = {
-        ...asset,
-        [fieldName]: input.mediaItemId,
-      } as Parameters<typeof computeMaturity>[0];
-      const newMaturity = computeMaturity(projected);
-
-      const updated = await ctx.prisma.asset.update({
-        where: { id: asset.id },
-        data: { ...patch, maturity: newMaturity },
+      // 事务内重新读 + 计算 + 更新,防并发 confirm 不同 slot 时基于陈旧状态算 maturity
+      const updated = await ctx.prisma.$transaction(async (tx) => {
+        const fresh = await tx.asset.findFirstOrThrow({
+          where: { id: asset.id, deletedAt: null },
+        });
+        const projected = {
+          ...fresh,
+          [fieldName]: input.mediaItemId,
+        } as Parameters<typeof computeMaturity>[0];
+        const newMaturity = computeMaturity(projected);
+        return tx.asset.update({
+          where: { id: asset.id },
+          data: { [fieldName]: input.mediaItemId, maturity: newMaturity },
+        });
       });
+      const newMaturity = updated.maturity;
 
       await logOperation(ctx, 'asset.slot.confirm', 'asset', asset.id, asset, {
         slot: input.slot,
@@ -1061,24 +1060,79 @@ export const assetRouter = router({
       return updated;
     }),
 
-  /** 删除候选 — soft reject GenerationAttempt(不真删,保留训练审计) */
+  /**
+   * 删除候选 — 单张 media 粒度(MediaItem 软删 + 从 attempt.outputMediaIds 移除)
+   *
+   * 修正历史 bug:之前 `rejectCandidate({ attemptId })` 会把整个 attempt 标 rejected,
+   * 即 4 张候选图同一 attempt 时点删 1 张会"误杀"另外 3 张。
+   * 现按 mediaItemId 单图操作:
+   *   - 软删 MediaItem (deletedAt)
+   *   - 从 GenerationAttempt.outputMediaIds 数组移除该 id
+   *   - 若 attempt.outputMediaIds 全空 → 顺手把 attempt 标 rejected(无残留 attempt)
+   */
   rejectCandidate: protectedProcedure
-    .input(z.object({ attemptId: z.string().cuid() }))
+    .input(
+      z.object({
+        mediaItemId: z.string().cuid().optional(),
+        // 向前兼容:旧前端传 attemptId 时 reject 整个 attempt
+        attemptId: z.string().cuid().optional(),
+      }).refine((d) => !!d.mediaItemId || !!d.attemptId, {
+        message: '必须提供 mediaItemId 或 attemptId',
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
-      const attempt = await ctx.prisma.generationAttempt.findUnique({
-        where: { id: input.attemptId },
-      });
-      if (!attempt) {
-        throw new TRPCError({ code: 'NOT_FOUND' });
+      // 模式 A:mediaItemId 单图删
+      if (input.mediaItemId) {
+        const media = await ctx.prisma.mediaItem.findFirst({
+          where: { id: input.mediaItemId, deletedAt: null },
+        });
+        if (!media) throw new TRPCError({ code: 'NOT_FOUND', message: 'MediaItem 不存在' });
+        if (media.projectId) {
+          await assertProjectAccess(ctx, media.projectId, ctx.user.id);
+        }
+
+        return ctx.prisma.$transaction(async (tx) => {
+          // 1. 软删 media
+          await tx.mediaItem.update({
+            where: { id: media.id },
+            data: { deletedAt: new Date() },
+          });
+          // 2. 从所有引用本 media 的 attempt 中移除该 mediaId
+          const refs = await tx.generationAttempt.findMany({
+            where: { outputMediaIds: { has: media.id } },
+          });
+          for (const a of refs) {
+            const next = a.outputMediaIds.filter((x) => x !== media.id);
+            const allCleared = next.length === 0;
+            await tx.generationAttempt.update({
+              where: { id: a.id },
+              data: {
+                outputMediaIds: next,
+                // 若 attempt 已无任何输出 → 标 rejected(无残留)
+                ...(allCleared
+                  ? { rejected: true, rejectedAt: new Date(), rejectedBy: ctx.user.id }
+                  : {}),
+              },
+            });
+          }
+          await logOperation(ctx, 'asset.candidate.rejectMedia', 'media_item', media.id, media, null);
+          return { ok: true, deletedMediaId: media.id };
+        });
       }
+
+      // 模式 B:旧逻辑(attemptId 整组 reject) — 保留兼容
+      const attempt = await ctx.prisma.generationAttempt.findUnique({
+        where: { id: input.attemptId! },
+      });
+      if (!attempt) throw new TRPCError({ code: 'NOT_FOUND' });
       await assertProjectAccess(ctx, attempt.projectId, ctx.user.id);
 
       const updated = await ctx.prisma.generationAttempt.update({
-        where: { id: input.attemptId },
+        where: { id: input.attemptId! },
         data: { rejected: true, rejectedAt: new Date(), rejectedBy: ctx.user.id },
       });
       await logOperation(ctx, 'asset.candidate.reject', 'generation_attempt', updated.id, attempt, updated);
-      return updated;
+      return { ok: true, attemptId: updated.id };
     }),
 
   /** 取消槽位确认(清除 Asset.<slot>MediaId,候选图回到备用区) */
@@ -1098,16 +1152,23 @@ export const assetRouter = router({
         });
       }
       const fieldName = SLOT_FIELD[input.slot];
-      const projected = {
-        ...asset,
-        [fieldName]: null,
-      } as Parameters<typeof computeMaturity>[0];
-      const newMaturity = computeMaturity(projected);
 
-      const updated = await ctx.prisma.asset.update({
-        where: { id: asset.id },
-        data: { [fieldName]: null, maturity: newMaturity },
+      // 事务内重新读 + 计算 + 更新 — 同 confirmCandidate
+      const updated = await ctx.prisma.$transaction(async (tx) => {
+        const fresh = await tx.asset.findFirstOrThrow({
+          where: { id: asset.id, deletedAt: null },
+        });
+        const projected = {
+          ...fresh,
+          [fieldName]: null,
+        } as Parameters<typeof computeMaturity>[0];
+        const newMaturity = computeMaturity(projected);
+        return tx.asset.update({
+          where: { id: asset.id },
+          data: { [fieldName]: null, maturity: newMaturity },
+        });
       });
+      const newMaturity = updated.maturity;
       await logOperation(ctx, 'asset.slot.unconfirm', 'asset', asset.id, asset, {
         slot: input.slot,
         maturity: newMaturity,

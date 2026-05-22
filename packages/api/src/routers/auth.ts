@@ -1,6 +1,7 @@
 /**
  * Auth Router — 登录、注册、登出、改密
  */
+import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
 import { getAuthAdapter } from '@ss/adapters/auth';
@@ -26,11 +27,28 @@ export const authRouter = router({
         email: z.string().email(),
         username: z.string().min(3).max(40),
         displayName: z.string().min(1).max(60),
-        password: z.string().min(8),
+        // 密码强度:8 字符以上 + 至少含字母 + 数字(防"12345678" / "password" 等弱密码)
+        password: z
+          .string()
+          .min(8, '密码至少 8 字符')
+          .regex(/[A-Za-z]/, '密码必须含字母')
+          .regex(/[0-9]/, '密码必须含数字'),
         locale: z.enum(['zh-CN', 'en']).optional(),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      // 公开注册由 SystemSetting `auth.allowSignup` 控制(默认关)
+      // 防任何人能注册账号 → 横向漏洞;本地部署可在 admin UI 显式开启
+      const setting = await ctx.prisma.systemSetting.findUnique({
+        where: { key: 'auth.allowSignup' },
+      });
+      const allowSignup = setting?.value === 'true';
+      if (!allowSignup) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: '公开注册已关闭 — 请联系管理员添加账号,或先在 SystemSetting 开启 auth.allowSignup',
+        });
+      }
       const auth = getAuthAdapter();
       return auth.signup(input);
     }),

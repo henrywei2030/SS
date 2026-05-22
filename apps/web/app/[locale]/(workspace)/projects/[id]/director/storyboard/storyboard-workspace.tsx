@@ -56,10 +56,12 @@ export function StoryboardWorkspace({
 
   // 当前选中 — 从 URL 实时读，跟随 router.replace 立即生效
   const epFromUrl = searchParams.get('ep');
-  const tabFromUrl = searchParams.get('tab') === 'script' ? 'script' : 'shots';
+  const rawTab = searchParams.get('tab');
+  // tab fallback 链:URL 显式 script/shots 优先,否则用 initialTab(SSR 注入),否则默认 'shots'
+  const tab: Tab =
+    rawTab === 'script' ? 'script' : rawTab === 'shots' ? 'shots' : initialTab;
   const selectedEpisodeId =
     epFromUrl ?? initialEpisodeId ?? episodes?.[0]?.id;
-  const tab: Tab = tabFromUrl ?? initialTab;
 
   const selectedEpisode = React.useMemo(
     () => episodes?.find((e) => e.id === selectedEpisodeId),
