@@ -378,8 +378,11 @@ function buildShotsCsv(data: ListShotsResult, episodeNumber: number): string {
   const groups = (data && 'groups' in data ? data.groups : undefined) ?? [];
   const ungrouped = (data && 'ungrouped' in data ? data.ungrouped : undefined) ?? [];
 
+  // 层级列让 Excel 浏览者一眼分辨"组级合并 prompt"和"组内单镜数据"。
+  // 组级 prompt = 该组送给视频模型的最终 prompt(单镜 prompt 在编辑时也存了一份原始版,导出时一并暴露便于训练审计)
   const headers = [
     '集',
+    '层级',
     '组号',
     '组内序',
     '单镜号',
@@ -394,9 +397,26 @@ function buildShotsCsv(data: ListShotsResult, episodeNumber: number): string {
 
   const rows: string[][] = [];
   for (const g of groups) {
+    // 先输出组级合并 prompt(导出主行,送给视频模型用的就是这条)
+    rows.push([
+      String(episodeNumber),
+      '组级',
+      g.number,
+      '—',
+      '—',
+      '—',
+      '—',
+      g.durationS.toFixed(1),
+      '—',
+      '—',
+      g.prompt,
+      g.status,
+    ]);
+    // 再输出组内每个单镜的细节(训练审计用)
     g.shots.forEach((s, i) => {
       rows.push([
         String(episodeNumber),
+        '子镜',
         g.number,
         `${i + 1}/${g.shots.length}`,
         s.number,
@@ -409,26 +429,14 @@ function buildShotsCsv(data: ListShotsResult, episodeNumber: number): string {
         s.status,
       ]);
     });
-    // 组合并提示词单独一行
-    rows.push([
-      String(episodeNumber),
-      g.number,
-      '组级',
-      '',
-      '',
-      '',
-      g.durationS.toFixed(1),
-      '',
-      '',
-      g.prompt,
-      g.status,
-    ]);
   }
+  // 未分组单镜独立列出(无"组"概念)
   for (const s of ungrouped) {
     rows.push([
       String(episodeNumber),
+      '单镜',
       '(未分组)',
-      '',
+      '—',
       s.number,
       s.framing ?? '',
       s.angle ?? '',

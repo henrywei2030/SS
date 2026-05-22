@@ -204,13 +204,25 @@ enum ScriptSource {
   IMPORTED
 }
 
-model ScriptAnalysis {
-  id        String  @id @default(cuid())
-  scriptId  String
-  episodeId String?
-  modelId   String // 'claude-sonnet-4-5' etc.
+enum AnalysisScope {
+  EPISODE // 单集分析(W2.7,scriptId 必填)
+  PROJECT // 整剧批量分析(W6+,projectId 必填,scriptId=null)
+}
 
-  // 8 维评分
+model ScriptAnalysis {
+  id String @id @default(cuid())
+
+  // 维度 — 单集 / 整剧聚合（为 W6+ 批量分析预留）
+  // scope=EPISODE → scriptId+episodeId 必填,projectId 任选
+  // scope=PROJECT → projectId 必填,scriptId=null,episodeIds 存覆盖的集
+  scope      AnalysisScope @default(EPISODE)
+  scriptId   String?
+  episodeId  String?
+  projectId  String? // scope=PROJECT 时必填
+  episodeIds String[]      @default([]) // scope=PROJECT 时覆盖的 episode.id 列表
+  modelId    String // 'claude-sonnet-4-5' etc.
+
+  // 8 维评分（单集为原始分,整剧为各集均值/加权）
   hookScore     Float?
   suspenseScore Float?
   twistScore    Float?
@@ -221,26 +233,35 @@ model ScriptAnalysis {
   urgencyScore  Float?
   overallScore  Float?
 
-  // 整集诊断
+  // 整集 / 整剧 诊断
   summary    String? @db.Text
   highlights Json // [{ severity, type, text }]
   issues     Json // [{ severity, scene, type, suggestion }]
 
-  // 剧情曲线（情绪强度 / 节奏 / 钩子 / 爽点）
+  // 剧情曲线（情绪强度 / 节奏 / 钩子 / 爽点）— 单集时间轴 0-N 秒
   curveJson Json // [{ time, emotion, beat, badges[] }]
 
   // 制作曲线（用于 AIGC 优先级派发）
   productionPlan Json // [{ sceneIdx, priority: 'S'|'A'|'B'|'C', durationS }]
 
+  // [W6 预留] 各集对比数据快照,避免每次重算聚合
+  // 形如 [{episodeId, episodeNumber, scores:{...}, beats:n}]
+  perEpisodeStats Json?
+
+  // [W6 预留] 整剧维度时的对比数据(如各集张力均值数组,stacked bar 8 维)
+  comparisonJson Json?
+
   costCny    Decimal @db.Decimal(10, 4)
   durationMs Int     @default(0)
 
-  script Script @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  script Script? @relation(fields: [scriptId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   createdBy String
 
   @@index([scriptId])
+  @@index([projectId, scope, createdAt])
+  @@index([scope, createdAt])
   @@index([episodeId])
   @@map("script_analyses")
 }
@@ -705,7 +726,8 @@ enum GenerationAction {
   TEXT
   AUDIO
   COMPLIANCE
-  ANALYSIS
+  ANALYSIS // 单集剧本分析
+  BATCH_ANALYSIS // 整剧批量分析(W6+,可能一次跑 60+ 集 LLM)
 }
 
 enum AttemptStatus {

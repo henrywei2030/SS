@@ -475,10 +475,13 @@ export const storyboardRouter = router({
           .map((s, i) => `[${i + 1}/${sorted.length}] ${s.framing ?? ''} ${s.angle ?? ''}\n${s.prompt}`)
           .join('\n\n');
 
-      // group.positionIdx 用 max+1 单调递增（含 soft-deleted），
-      // 避免与 shots.positionIdx 共享空间或与历史 group 撞 unique。
-      // 组的展示顺序由前端按"组内最小 shot.positionIdx"再排即可。
-      // advisory lock 保证读 max + create 之间无 race。
+      // 记录被选中 shots 当前所属的旧组 — 合并后这些组可能变空,需要清理
+      const oldGroupIds = Array.from(
+        new Set(shots.map((s) => s.groupId).filter((id): id is string => id !== null)),
+      );
+
+      // group.positionIdx 用 max+1 单调递增（含 soft-deleted）
+      // advisory lock 保证读 max + create + 清空组的整个过程原子
       const group = await ctx.prisma.$transaction(async (tx) => {
         await tx.$executeRawUnsafe(
           `SELECT pg_advisory_xact_lock(hashtext('storyboard_group:' || $1)::bigint)`,
@@ -504,6 +507,25 @@ export const storyboardRouter = router({
           where: { id: { in: input.shotIds } },
           data: { groupId: g.id },
         });
+
+        // 清理变空的旧组(剩 0 个 shot 的)
+        if (oldGroupIds.length > 0) {
+          const emptyOldGroups = await tx.shotGroup.findMany({
+            where: {
+              id: { in: oldGroupIds },
+              deletedAt: null,
+              shots: { none: { deletedAt: null } },
+            },
+            select: { id: true },
+          });
+          if (emptyOldGroups.length > 0) {
+            await tx.shotGroup.updateMany({
+              where: { id: { in: emptyOldGroups.map((x) => x.id) } },
+              data: { deletedAt: new Date() },
+            });
+          }
+        }
+
         return g;
       });
 
@@ -715,9 +737,10 @@ export const storyboardRouter = router({
       const createdShotIds: string[] = [];
       const errors: string[] = [];
 
-      // 取当前 episode 现有 shot 的最大 positionIdx 作为起点（增量模式）
+      // 取当前 episode 历史 shot 的最大 positionIdx 作为起点(包含 soft-deleted)
+      // Postgres unique 索引仍包含已 soft-del 的行,跳过会撞 unique
       const lastShot = await ctx.prisma.shot.findFirst({
-        where: { episodeId: ep.id, deletedAt: null },
+        where: { episodeId: ep.id },
         orderBy: { positionIdx: 'desc' },
       });
       let positionIdx = (lastShot?.positionIdx ?? 0);
@@ -861,8 +884,13 @@ export const storyboardRouter = router({
       const ep = await loadEpisodeOrThrow(ctx, input.episodeId);
       const now = new Date();
 
-      // 已经进入生成/采纳/剪辑/完成流程的 shot 不回退到 PUBLISHED
-      // 仅把 DRAFT 状态的 shot/group 推到 PUBLISHED；重新发布只更新版本号 + 时间戳
+      // 发布语义:
+      //   - DRAFT → 升级为 PUBLISHED + 戳 publishedAt
+      //   - PUBLISHED → 保持 PUBLISHED,publishedAt 戳更新(等于重新触发下游消费者)
+      //   - QUEUED/GENERATING/GENERATED/ADOPTED/IN_EDIT/FINAL/FAILED/BUDGET_BLOCKED → 不动
+      //     (已在制作流水中或终态,避免覆盖丢进度)
+      const REPUBLISHABLE: Array<'DRAFT' | 'PUBLISHED'> = ['DRAFT', 'PUBLISHED'];
+
       const updated = await ctx.prisma.$transaction(async (tx) => {
         const e = await tx.episode.update({
           where: { id: ep.id },
@@ -876,7 +904,7 @@ export const storyboardRouter = router({
           where: {
             episodeId: ep.id,
             deletedAt: null,
-            status: 'DRAFT',
+            status: { in: REPUBLISHABLE },
           },
           data: { status: 'PUBLISHED', publishedAt: now },
         });
@@ -884,7 +912,7 @@ export const storyboardRouter = router({
           where: {
             episodeId: ep.id,
             deletedAt: null,
-            status: 'DRAFT',
+            status: { in: REPUBLISHABLE },
           },
           data: { status: 'PUBLISHED' },
         });

@@ -376,14 +376,61 @@ export const scriptRouter = router({
       return loadScriptWithAccess(ctx, input.scriptId);
     }),
 
-  /** 取最新分析结果 */
+  /** 取最新单集分析结果 */
   latestAnalysis: protectedProcedure
     .input(z.object({ scriptId: z.string().cuid() }))
     .query(async ({ ctx, input }) => {
       const script = await loadScriptWithAccess(ctx, input.scriptId);
       return ctx.prisma.scriptAnalysis.findFirst({
-        where: { scriptId: script.id },
+        where: { scriptId: script.id, scope: 'EPISODE' },
         orderBy: { createdAt: 'desc' },
+      });
+    }),
+
+  /**
+   * [W6 预留] 取本项目最新整剧批量分析
+   *
+   * 返回 ScriptAnalysis(scope=PROJECT) 最新一条,含 8 维均值 + perEpisodeStats + comparisonJson。
+   * 当前 W3 阶段没有数据,UI 拿到 null 即可显示"尚未做过整剧分析"。
+   */
+  latestProjectAnalysis: protectedProcedure
+    .input(z.object({ projectId: z.string().cuid() }))
+    .query(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId, ctx.user.id);
+      return ctx.prisma.scriptAnalysis.findFirst({
+        where: { projectId: input.projectId, scope: 'PROJECT' },
+        orderBy: { createdAt: 'desc' },
+      });
+    }),
+
+  /**
+   * [W6 预留] 整剧批量分析 — 占位实现
+   *
+   * 真实实现需要异步 worker(BullMQ / pg-boss):
+   *   1. 取本项目所有 isCurrent=true 的 Script
+   *   2. 并发跑 LLM(限流 3)生成每集 analysis(scope=EPISODE)
+   *   3. 聚合各集分数 + 写 ScriptAnalysis(scope=PROJECT,带 perEpisodeStats + comparisonJson)
+   *   4. 触发 EVENTS.SCRIPT_BATCH_ANALYSIS_DONE(尚未定义)
+   *
+   * 现在直接返回 NOT_IMPLEMENTED + 占位 jobId,等 W6 worker 落地。
+   * Schema 已就位(scope/projectId/episodeIds/perEpisodeStats/comparisonJson)。
+   */
+  analyzeProject: protectedProcedure
+    .input(
+      z.object({
+        projectId: z.string().cuid(),
+        episodeIds: z.array(z.string().cuid()).optional(),
+        modelId: z.string().default('claude-sonnet-4-5'),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId, ctx.user.id);
+      // [W6] 这里要 enqueue 一个异步任务。当前返回 placeholder。
+      void input.episodeIds;
+      void input.modelId;
+      throw new TRPCError({
+        code: 'NOT_IMPLEMENTED',
+        message: '整剧批量分析(W6)尚未上线 — 后端 worker + LLM 并发限流待实现',
       });
     }),
 
