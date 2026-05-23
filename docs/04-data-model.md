@@ -23,6 +23,12 @@
 > - **`AssetDraft` LLM 输出** 新增 `archetypeKey` 必出字段(同人物变体共享 key,如 "陆乘-重生初期"/"疗伤期" 都用 `lucheng`),Asset 变体能力贯穿。
 > - **`Episode.status`** 状态转换守卫:publishEpisode 只允 NOT_STARTED/IN_PROGRESS → IN_PROGRESS,防 COMPLETED/ARCHIVED 终态被 downgrade;script.upload/uploadFile 入口加 isEpisodeLockedNow 守卫,防 GENERATING 期间换剧本致跨版本 shot。
 > - **`Asset.maturity`** 升级路径补齐:setComplianceManually 通过合规后必触发 computeMaturity(L4→L5)。
+>
+> 2026-05-23 (九收工) 更新(W5.1 token 化数据底座):
+> - **`asset_usage_bindings`** 加 2 列:`shotGroupId String?`(AIGC 生成段级 binding,典型 1-8 这种 ShotGroup)+ `refSlotIdx Int?`(group 内稳定序号 1/2/3,UI "图片N"/"音频N" + 视频提示词 @图片N token 引用同一编号)。
+> - 重建 partial functional unique 含 shotGroupId 维度(`COALESCE(sceneId,'') + COALESCE(shotGroupId,'') + COALESCE(shotId,'') + WHERE deletedAt IS NULL`)— migration `20260523113000_w5_1_assetusage_shotgroup_refslot`。
+> - **`ShotGroup`** 加 `bindings AssetUsageBinding[]` 反向关系。
+> - **AssetUsageType 不扩**:音频用既有 SOUND_BG / SOUND_VOICE / THEME 三个值,compile 时用 `kindFromUsage()` 派生 IMAGE/AUDIO 而不是存独立字段。
 
 | 领域 | 表 | 用途 |
 |---|---|---|

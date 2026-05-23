@@ -5,6 +5,55 @@
 
 ---
 
+## 2026-05-23(周六,win-laptop · 九次收工)— W5.1 token 化重写 + W5.2 v0 AIGC 工作台
+
+**完成**
+- ✅ **migration 跑了两条**:
+  - D1 `20260523103000_audit_p0_assetusage_partial_unique`(partial functional unique 真正生效,AssetUsageBinding 并发双插 bug 终结)
+  - W5.1 `20260523113000_w5_1_assetusage_shotgroup_refslot`(加 shotGroupId + refSlotIdx + FK + 索引 + 重建 partial unique 含 shotGroupId 维度)
+  - DB sanity 已 psql 校验:_prisma_migrations 4 条全在 / asset_usage_bindings 多 2 列
+- ✅ **W5.1 schema + compileShotVideoPrompt token 化全重写**(对齐用户 04AIGC 模块文档 + 截图设计):
+  - schema:`AssetUsageBinding` 加 `shotGroupId String?` + `refSlotIdx Int?` + `ShotGroup.bindings` 反向关系 + 2 个索引
+  - `packages/core/storyboard/video.ts` 重写,4 个公开 API:
+    - `tokenFor(kind, idx)` — 输出 `@图片N` / `@音频N`
+    - `isAudioUsage / kindFromUsage` — 从 AssetUsageType 派生 IMAGE/AUDIO 分类(用 SOUND_BG/SOUND_VOICE/THEME 三个已有 enum,不加新值)
+    - `autoTagPromptWithReferences(text, bindings)` — "自动 @"按钮的纯函数(找 name/alias 后插 token,首次出现 only,已标过的跳过)
+    - `compileShotGroupVideoPrompt(input)` — 编译 Seedance 输入(positive 含 token 占位 + references[] 解析 mediaUrl + 双向 warnings)
+  - 公式 4 段:风格 → 文本 → 时长比例 → 额外指令(W5.0 时是描述性 9 段,W5.1 改成 token 化 4 段)
+  - 风格三段(character + scene + **prop** ✓ — 修 audit P1)
+  - 39 个单测(原 19 → +105%):helpers / autoTag 11 case / compile happy / warnings 双向 / 风格 / negative / 时长比例 clamp / token 解析 edge case
+- ✅ **W5.2 v0 AIGC 单集工作台**(对齐用户决策"详情面板"形态):
+  - 新 `packages/api/src/routers/aigc.ts`,挂 `trpc.aigc.*`,7 个 procedure:
+    - `listEpisodes(projectId)` — 集数总览(W5.3 用)
+    - `listGroups(episodeId)` — 左侧 1-8/9-18 列表(含 shot/binding 计数)
+    - `getGroupDetail(groupId)` — 右侧 4 区数据(含 mediaUrl 投影 character→portrait/scene→sceneMain/voice→voiceMedia)
+    - `autoMatchAssets(groupId)` — 调 W1.6 autoMatchAssets,创建 binding 时 type=SCENE/CHARACTER/PROP 顺序续 refSlotIdx,跳过已 bound
+    - `autoTagPrompt(groupId)` — autoTagPromptWithReferences 插 token 回 ShotGroup.prompt
+    - `updateGroupPrompt(groupId, prompt, diffNote)` — 编辑同事务写 PromptEdit(targetType=SHOT_GROUP)训练集
+    - `previewCompiledPrompt(groupId)` — 实时编译 + 警告
+  - 新页面 `apps/web/app/[locale]/(workspace)/projects/[id]/aigc/[episodeId]/`:
+    - `page.tsx` — server entry,SSR 注入 initialGroupId
+    - `aigc-workspace.tsx` — client 主组件,grid `[280px_1fr]`,左 Group 列表 + 右详情
+    - 右侧 4 个 section:资产关联(binding 卡片网格,token badge `@图片N` 角标)/ 原始剧本(只读 shots/scenes)/ 视频提示词(monospace 显示 + warning 提示)/ 视频预览(W5.4 占位)
+    - 可工作按钮:**自动匹配**(toast 反馈新增/跳过数)、**自动 @**(检测 changed 状态)
+    - 占位按钮:关联素材 / 上传素材 / 编辑 / 生成视频 — disabled 留 W5.2.1 / W5.4
+
+**进行中**
+- 🚧 W5.2.1 v1 4 按钮 — 关联素材 / 上传素材 / 编辑提示词 / 删除 binding
+- 🚧 W5.3 集数总览页 — 5 集卡片网格 + 状态筛选
+
+**问题 / 待决策**
+- ❓ W5.2 v0 实际跑通需要先有 ShotGroup(导演工作台已生成分镜的 episode),没有真数据时 UI 显示"本集还没有生成段"
+- ❓ W5.2.1 上传素材怎么处理 — 直接进项目素材库还是临时挂?(决策影响 MinIO bucket 命名)
+- ❓ W5.3 5 集卡片"团队人数"统计指什么 — 项目成员 / 集 assignee 分配过的人数?
+
+**下次接着做**
+- 📌 W5.2.1 4 按钮补齐(1.5h)→ W5.3 集数总览(1h)→ W5.4 Seedance 接入(2h+)
+- 📌 真实业务验证:配 Claude API Key → 跑剧本 + 拆解 + 分镜 + AIGC 工作台一条龙
+- 📌 audit P1 followup:propPrompt 已在 W5.1 修 ✓ / VideoAssetRef 加 mediaUrl 已在 W5.1 修 ✓ / shotId→Binding 查询 W5.2 落到 group 级 ✓ — 3 项 P1 都顺手做了
+
+---
+
 ## 2026-05-23(周六,win-laptop · 八次收工)— Win 首次拉起 + W5.0 跨平台修 + W1-W5 跨模块 audit P0 8 项
 
 **完成**

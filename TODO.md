@@ -1,6 +1,6 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-05-23(八收工 · Win 接入 + W5.0 跨平台修 + W1-W5 跨模块 audit P0 8 项)
+> 最后更新:2026-05-23(九收工 · W5.1 token 化重写 + W5.2 v0 AIGC 工作台)
 > 仓库:https://github.com/henrywei2030/SS
 
 ---
@@ -10,8 +10,12 @@
 - [x] **W5.0 数据底座** — SystemSetting 4 条 + compileShotVideoPrompt 拼接公式 + GenerationAttempt.providerJobId — 2026-05-22(六收工)
 - [x] **W5.0 修补**(Win-laptop · 八收工)— vitest 跨平台 / aspectRatio 空白 fallback / 9 段顺序断言 — 2026-05-23
 - [x] **W1-W5 跨模块 audit P0 8 项**(Win-laptop · 八收工)— D1 partial unique / D2 publish 状态守卫 / A1 maturity 重算 / A2 archetypeKey 贯穿 / C1 script.upload 软锁 / B1 三入口 GenerationAttempt / B2 失败 ledger / B3 真单价 — 2026-05-23
-- [ ] **D1 migration 待跑**:`pnpm db:migrate` 应用 `20260523103000_audit_p0_assetusage_partial_unique`(AssetUsageBinding partial functional unique)
-- [ ] **W5.1 UI 骨架**(下一步,待定形态)— 分镜级 4 列布局(资产关联 / 原始剧本 / 视频提示词 / 视频预览);**产品形态待决策**:表格式(每镜一行 4 格)/ 详情面板(选中后展开)/ 混合
+- [x] **D1 migration 已跑**(Win-laptop · 九收工)— `20260523103000_audit_p0_assetusage_partial_unique` 应用 — 2026-05-23
+- [x] **W5.1 schema + compileShotVideoPrompt token 化重写**(Win-laptop · 九收工)— AssetUsageBinding 加 shotGroupId+refSlotIdx / video.ts 重写 4 个 API(tokenFor / autoTagPromptWithReferences / compileShotGroupVideoPrompt / kindFromUsage)/ 19→39 单测 / migration `20260523113000_w5_1_assetusage_shotgroup_refslot` — 2026-05-23
+- [x] **W5.2 v0 AIGC 单集工作台**(Win-laptop · 九收工)— aigc router 7 procedures + UI 左列表 + 右详情 4 区 + 自动匹配 / 自动 @ 可用 — 2026-05-23
+- [ ] **W5.2.1** 工作台 v1 — 4 个按钮补:关联素材 / 上传素材 / 编辑提示词 / 删除 binding
+- [ ] **W5.3** AIGC 集数总览页(5 集卡片网格 + 状态筛选 + 进度统计 + 创建集数)
+- [ ] **W5.4** Seedance 抽卡 router + 视频预览(HTML5 video 标签) + GenerationAttempt(action=VIDEO)
 - [ ] **W5.2+** — Seedance 抽卡 router + 自动 @ 资产匹配(W1.6 auto-match 已就绪)
 - [ ] **W5.3** — BullMQ video-gen worker + 实时进度推送(SSE)+ providerJobId 轮询
 

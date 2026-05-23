@@ -10,6 +10,7 @@ import { projectRouter } from './routers/project.js';
 import { scriptRouter } from './routers/script.js';
 import { storyboardRouter } from './routers/storyboard.js';
 import { assetRouter } from './routers/asset.js';
+import { aigcRouter } from './routers/aigc.js';
 import { adminRouter } from './routers/admin.js';
 import { i18nRouter } from './routers/i18n.js';
 
@@ -20,6 +21,7 @@ export const appRouter = router({
   script: scriptRouter,
   storyboard: storyboardRouter,
   asset: assetRouter,
+  aigc: aigcRouter,
   admin: adminRouter,
   i18n: i18nRouter,
 });
