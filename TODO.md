@@ -1,6 +1,6 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-05-24(十三收工 · 7+1 轮深漏洞 audit 修 12 项 + 系统层加固)
+> 最后更新:2026-05-24(十四收工 · W5.5 BullMQ 异步 + W5.5.1 扩展 + W7 后台 4 页 + 14 项 audit + ADR-25/26)
 > 仓库:https://github.com/henrywei2030/SS
 
 ---
@@ -34,7 +34,9 @@
 - [x] **`*.tsbuildinfo` 加到 `.gitignore`**(十二收工,原 TODO 待办)— 顺手清掉 — 2026-05-24
 - [x] **7 轮深漏洞 audit + 修 7 项**(十三收工)— 认证/注入/并发/经济/泄漏/供应链/部署 7 维度,73 项 agent 报告筛 7 项真 vuln:aigc 占位 attempt + advisory_lock 修 / login dummy bcrypt 防时序 / changePassword deletedAt / setSetting isSecret 不进 OperationLog / Asset.update name TOCTOU / set-admin-password 强制传参 / db:reset NODE_ENV 守卫 — 2026-05-24
 - [x] **第 13 轮系统层 audit + 修 5 项**(十三收工)— db:migrate (dev) 生产守卫 + clean script 跨平台 + Next.js security headers (X-Frame/Content-Type/Referrer/Permissions) + Prisma SIGTERM 优雅退出 + APP_MASTER_KEY 弱 key warn — 2026-05-24
-- [ ] **W5.5** BullMQ video-gen worker(异步队列 + SSE 进度 + providerJobId 轮询)— 真接 Seedance 时必修
+- [x] **W5.5** BullMQ video-gen worker(异步队列 + SSE 进度 + providerJobId 轮询)— 完整交付,Mock 全链路跑通,14 项 audit 修(十四收工 · 2026-05-24)
+- [x] **W5.5.1** 扩展参数 + 高级选项 UI(resolution/audio/watermark/webSearch/refVideo/refAudio + 'auto' aspectRatio,对照即梦/可灵 UI)— 十四收工
+- [x] **W7 后台轻量四页**(audit/api-usage/settings/health)— adminRouter 加 3 sub-router + 4 页 UI — 十四收工
 - [ ] **W5.6** 素材库(Media Vault)— /media 上传 / 搜索 / 收藏 / 批量,Phase 2 / W6+
 
 - [ ] **跨设备协作工作流验证**(多端)

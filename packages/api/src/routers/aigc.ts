@@ -23,6 +23,8 @@ import {
   type VideoReference,
 } from '@ss/core/storyboard';
 import { EVENTS } from '@ss/shared/events';
+import { addVideoGenJob } from '@ss/queue/video-gen';
+import { signStreamToken } from '@ss/queue/sse-token';
 
 import { router, protectedProcedure, rateLimit } from '../trpc.js';
 import type { Context } from '../context.js';
@@ -990,10 +992,17 @@ export const aigcRouter = router({
       z.object({
         groupId: z.string().cuid(),
         durationS: z.number().min(1).max(15).optional(),
-        aspectRatio: z.enum(['9:16', '16:9', '1:1']).optional(),
+        aspectRatio: z.enum(['9:16', '16:9', '1:1', 'auto']).optional(),
         providerOverride: z.string().max(100).optional(),
         extraInstruction: z.string().max(500).optional(),
         extraNegative: z.array(z.string().max(50)).max(20).optional(),
+        // W5.5.1 扩展参数(2026-05-24)
+        resolution: z.enum(['480p', '720p', '1080p']).optional(),
+        generateAudio: z.boolean().optional(),
+        addWatermark: z.boolean().optional(),
+        webSearchEnabled: z.boolean().optional(),
+        refVideoUrl: z.string().min(1).max(2000).optional(),
+        refAudioUrl: z.string().min(1).max(2000).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -1001,7 +1010,12 @@ export const aigcRouter = router({
       const bindings = await getVideoBindings(ctx);
 
       const providerId = input.providerOverride ?? bindings.providerId;
-      const aspectRatio = input.aspectRatio ?? bindings.defaultAspectRatio;
+      // W5.5.1:'auto' 比例 resolve 到项目默认(短剧默认 9:16)
+      const resolvedAspect =
+        input.aspectRatio === 'auto' || input.aspectRatio === undefined
+          ? bindings.defaultAspectRatio
+          : input.aspectRatio;
+      const aspectRatio = resolvedAspect;
       const durationS = Math.min(
         input.durationS ?? grp.durationS ?? 5,
         bindings.maxDurationS,
@@ -1295,186 +1309,225 @@ export const aigcRouter = router({
         },
       });
 
-      // 4. 调 Provider
+      // 4. 入队 BullMQ video-gen worker(ADR-25 W5.5)
+      //    handler 立即返回 attemptId,worker 收到 job 后:
+      //      - 调 provider.generate(ctx.skipLedger=true)
+      //      - 写 MediaItem + 升 attempt SUCCESS|FAILED + costLedgerEntry
+      //      - publish EVENTS.GENERATION_COMPLETED + Redis 'success'/'failed' 推 SSE
+      //    失败分类(白名单):timeout/429/5xx → retry;censored/compliance → UnrecoverableError
       const refImageUrls = compiled.references
         .filter((r) => r.kind === 'IMAGE')
-        .map((r) => r.mediaUrl);
+        .map((r) => r.mediaUrl)
+        .filter((u): u is string => !!u);
 
-      try {
-        const result = await provider.generate(
-          {
-            prompt: compiled.positive,
-            durationS,
-            aspectRatio,
-            refImageUrls: refImageUrls.length > 0 ? refImageUrls : undefined,
-          },
-          {
-            userId: ctx.user.id,
-            projectId: grp.episode.projectId,
-            episodeId: grp.episodeId,
-            attemptId: attempt.id,
-            // W1-W5 audit P1 followup:防 Provider + router 双写 ledger,
-            // 真接 Seedance 时 SeedanceProvider 内有 5 处 recordLedger,会跟下面
-            // tx.costLedgerEntry.create 重复写,导致 cost 翻倍。router 单点写。
-            skipLedger: true,
-          },
+      // W5.5.1 audit 修复 P2:Provider 不支持的多模态参考字段直接拒(防绕 UI 直调 API 滥用)
+      const caps = await ctx.prisma.providerConfig
+        .findUnique({
+          where: { providerId },
+          select: { defaultParams: true },
+        })
+        .catch(() => null);
+      const capsParams =
+        caps?.defaultParams && typeof caps.defaultParams === 'object'
+          ? (caps.defaultParams as Record<string, unknown>)
+          : {};
+      if (input.refVideoUrl && capsParams.supportsRefVideo !== true) {
+        await failPlaceholder(
+          new Error(`当前 Provider 不支持 refVideo(请去 admin/providers 配 supportsRefVideo:true)`),
+          'BAD_REQUEST',
         );
+      }
+      if (input.refAudioUrl && capsParams.supportsRefAudio !== true) {
+        await failPlaceholder(
+          new Error(`当前 Provider 不支持 refAudio`),
+          'BAD_REQUEST',
+        );
+      }
 
-        // 5. 成功:写 MediaItem(VIDEO)+ 更新 attempt
-        const finishedAt = new Date();
-        const safeName = grp.number.replace(/[^a-zA-Z0-9_-]+/g, '_');
-        const { mediaId, updatedAttempt } = await ctx.prisma.$transaction(async (tx) => {
-          const media = await tx.mediaItem.create({
-            data: {
-              projectId: grp.episode.projectId,
-              scope: 'PROJECT',
-              kind: 'VIDEO',
-              filename: `${safeName}-${startedAt.getTime()}.mp4`,
-              mimeType: 'video/mp4',
-              sizeBytes: 0, // Phase 1 不真实下载,sizeBytes 0
-              storageKey: result.videoUrl.startsWith('http')
-                ? `external://${result.videoUrl}`
-                : result.videoUrl,
-              cdnUrl: result.videoUrl,
-              aspectRatio,
-              meta: {
-                width: result.width,
-                height: result.height,
-                durationS: result.durationS,
-                fps: result.fps,
-                providerId,
-                providerJobId: result.providerJobId,
-                thumbnailUrl: result.thumbnailUrl,
-              },
-              source: 'AIGC',
-              sourceRef: attempt.id,
-            },
-          });
-          // W1-W5 audit 三轮 B2:用 provider 自报 unit price 而非反推,
-          // 防 actualDuration ≠ input.durationS 时 ledger 单价列误导审计
-          const unitPrice = provider.info.defaultUnitPriceCny.toFixed(6);
-          const a = await tx.generationAttempt.update({
-            where: { id: attempt.id },
-            data: {
-              status: 'SUCCESS',
-              providerJobId: result.providerJobId,
-              outputMediaId: media.id,
-              outputMediaIds: [media.id],
-              inputUnits: durationS,
-              outputUnits: result.durationS,
-              unitPriceCny: unitPrice,
-              costCny: result.costCny.toFixed(4),
-              finishedAt,
-              durationMs: finishedAt.getTime() - startedAt.getTime(),
-            },
-          });
-          await tx.costLedgerEntry.create({
-            data: {
-              userId: ctx.user.id,
-              projectId: grp.episode.projectId,
-              episodeId: grp.episodeId,
-              attemptId: attempt.id,
-              providerId,
-              modelId: providerId,
-              action: 'video.generate',
-              inputUnits: durationS,
-              outputUnits: result.durationS,
-              unitPriceCny: unitPrice,
-              costCny: result.costCny.toFixed(4),
-              success: true,
-              billingCycle: new Date().toISOString().slice(0, 7),
-            },
-          });
-          return { mediaId: media.id, updatedAttempt: a };
-        });
-
-        await logOperation(ctx, 'aigc.generateVideo', 'shotGroup', grp.id, null, {
+      // W5.5 audit 修复 P0-7:入队失败时占位 attempt 必须标 FAILED,否则 5min 内同 group 抽卡被拒
+      try {
+        await addVideoGenJob({
           attemptId: attempt.id,
-          mediaId,
+          projectId: grp.episode.projectId,
+          episodeId: grp.episodeId,
+          shotGroupId: grp.id,
+          userId: ctx.user.id,
           providerId,
-          aspectRatio,
+          modelId: providerId,
+          prompt: compiled.positive,
           durationS,
-          cost: result.costCny,
-          projectId: grp.episode.projectId,
+          aspectRatio,
+          refImageUrls: refImageUrls.length > 0 ? refImageUrls : undefined,
+          // W5.5.1 扩展参数透传(Provider 自己消费 extra)
+          resolution: input.resolution,
+          generateAudio: input.generateAudio,
+          addWatermark: input.addWatermark,
+          webSearchEnabled: input.webSearchEnabled,
+          refVideoUrl: input.refVideoUrl,
+          refAudioUrl: input.refAudioUrl,
+          groupNumber: grp.number,
         });
-
-        // W5 完善 E1 + 三轮 E1:发布事件(payload 类型已 union,跟 events.ts 对齐)
-        // W5.5 BullMQ worker 和 W6 剪辑模块挂这里
-        await getEventBus()
-          .publish(
-            EVENTS.GENERATION_COMPLETED,
-            {
-              kind: 'video' as const,
-              attemptId: updatedAttempt.id,
-              shotGroupId: grp.id,
-              episodeId: grp.episodeId,
-              projectId: grp.episode.projectId,
-              providerId,
-              mediaId,
-              videoUrl: result.videoUrl,
-              durationS: result.durationS,
-              costCny: result.costCny,
-            },
-            { publisherId: 'aigc.generateVideo' },
-          )
-          .catch((err) => {
-            console.error('[aigc.generateVideo] event publish failed:', err);
-          });
-
-        return {
-          attemptId: updatedAttempt.id,
-          mediaId,
-          videoUrl: result.videoUrl,
-          thumbnailUrl: result.thumbnailUrl,
-          durationS: result.durationS,
-          width: result.width,
-          height: result.height,
-          providerId,
-          costCny: result.costCny,
-        };
-      } catch (e) {
+      } catch (enqueueErr) {
+        const errMsg = enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr);
         const finishedAt = new Date();
-        const errMsg = e instanceof Error ? e.message : String(e);
-        await ctx.prisma.$transaction(async (tx) => {
-          await tx.generationAttempt.update({
-            where: { id: attempt.id },
-            data: {
-              status: 'FAILED',
-              errorMsg: errMsg,
-              finishedAt,
-              durationMs: finishedAt.getTime() - startedAt.getTime(),
-            },
-          });
-          await tx.costLedgerEntry.create({
-            data: {
-              userId: ctx.user.id,
-              projectId: grp.episode.projectId,
-              episodeId: grp.episodeId,
-              attemptId: attempt.id,
-              providerId,
-              modelId: providerId,
-              action: 'video.generate',
-              inputUnits: durationS,
-              outputUnits: 0,
-              unitPriceCny: '0',
-              costCny: '0',
-              success: false,
-              billingCycle: new Date().toISOString().slice(0, 7),
-            },
-          });
-        });
-        await logOperation(ctx, 'aigc.generateVideo.failed', 'shotGroup', grp.id, null, {
-          attemptId: attempt.id,
-          providerId,
-          error: errMsg,
-          projectId: grp.episode.projectId,
+        await ctx.prisma.generationAttempt.update({
+          where: { id: attempt.id },
+          data: {
+            status: 'FAILED',
+            errorMsg: `enqueue failed: ${errMsg}`,
+            finishedAt,
+            durationMs: finishedAt.getTime() - startedAt.getTime(),
+          },
         });
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
-          message: `视频生成失败: ${errMsg}`,
-          cause: e, // W7 audit R9:保留 cause 便于生产追源
+          message: `视频任务入队失败,请稍后重试:${errMsg}`,
+          cause: enqueueErr,
         });
       }
+
+      await logOperation(ctx, 'aigc.generateVideo.enqueued', 'shotGroup', grp.id, null, {
+        attemptId: attempt.id,
+        providerId,
+        aspectRatio,
+        durationS,
+        projectId: grp.episode.projectId,
+      });
+
+      return {
+        attemptId: attempt.id,
+        status: 'RUNNING' as const,
+      };
+    }),
+
+  // ============================== W5.5 SSE + 能力查询 ==============================
+
+  /**
+   * SSE 访问 token(ADR-25 M5)— EventSource 不能塞自定义 header,只能用 query。
+   *
+   * 用 HMAC 短 TTL 票据替代"session cookie 走 query"的不安全做法:
+   *   - 校 attemptId 关联的 projectId 用户访问权后签 5min token
+   *   - 前端拿 token → `new EventSource('/api/sse/aigc/${id}?token=...')`
+   *   - SSE route 仅校 token,长连接服务零业务逻辑
+   */
+  getStreamToken: protectedProcedure
+    .input(z.object({ attemptId: z.string().cuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const attempt = await ctx.prisma.generationAttempt.findFirst({
+        where: { id: input.attemptId, action: 'VIDEO' },
+        include: { shotGroup: { include: { episode: true } } },
+      });
+      if (!attempt || !attempt.shotGroup) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'attempt 不存在' });
+      }
+      await assertProjectAccess(ctx, attempt.shotGroup.episode.projectId);
+      return signStreamToken({
+        attemptId: input.attemptId,
+        userId: ctx.user.id,
+      });
+    }),
+
+  /**
+   * Provider 能力查询(W5.5)— 前端渲染时长选择器范围 / 比例选择 / 显示当前模型名
+   *
+   * 数据源优先级:
+   *   1. ProviderConfig.defaultParams.maxDurationS(后台 /admin/providers 可改 JSON 字段)
+   *   2. Provider.info.maxDuration(Adapter 自报)
+   *   3. SystemSetting `shot.video.maxDurationS`(全局兜底)
+   *   4. 10s 默认
+   *
+   * 不传 providerId 时返回当前 SystemSetting binding 的 video provider 信息。
+   * 业界 2026 现状:视频模型上限 ≤15s,这里硬截。
+   */
+  getProviderCapabilities: protectedProcedure
+    .input(z.object({ providerId: z.string().max(100).optional() }))
+    .query(async ({ ctx, input }) => {
+      const bindings = await getVideoBindings(ctx);
+      const providerId = input.providerId ?? bindings.providerId;
+
+      const config = await ctx.prisma.providerConfig.findUnique({
+        where: { providerId },
+        select: {
+          displayName: true,
+          defaultParams: true,
+          isActive: true,
+        },
+      });
+
+      // Provider Adapter 自报(kind 不对会 throw)
+      const provider = await getVideoProvider(providerId);
+
+      // 解析 defaultParams JSON(后台 /admin/providers 可改)
+      const params: Record<string, unknown> =
+        config?.defaultParams && typeof config.defaultParams === 'object'
+          ? (config.defaultParams as Record<string, unknown>)
+          : {};
+
+      const adminMaxDuration =
+        typeof params.maxDurationS === 'number' ? params.maxDurationS : null;
+      const adminMinDuration =
+        typeof params.minDurationS === 'number' ? params.minDurationS : null;
+      const adminAspectRatios = Array.isArray(params.supportedAspectRatios)
+        ? (params.supportedAspectRatios as unknown[]).filter(
+            (r): r is '9:16' | '16:9' | '1:1' =>
+              r === '9:16' || r === '16:9' || r === '1:1',
+          )
+        : null;
+
+      const rawMaxDuration =
+        adminMaxDuration ?? provider.info.maxDuration ?? bindings.maxDurationS ?? 10;
+      const maxDurationS = Math.min(Math.max(rawMaxDuration, 1), 15);
+      const minDurationS = Math.max(adminMinDuration ?? 1, 1);
+      const supportedAspectRatios =
+        adminAspectRatios && adminAspectRatios.length > 0
+          ? adminAspectRatios
+          : (['9:16', '16:9', '1:1'] as const);
+
+      // W5.5.1 扩展(2026-05-24):分辨率 / 音频 / 水印 / 参考素材等能力标志
+      // 数据源同 maxDuration:ProviderConfig.defaultParams 优先,fallback 到默认值
+      const adminResolutions = Array.isArray(params.supportedResolutions)
+        ? (params.supportedResolutions as unknown[]).filter(
+            (r): r is '480p' | '720p' | '1080p' =>
+              r === '480p' || r === '720p' || r === '1080p',
+          )
+        : null;
+      const supportedResolutions: Array<'480p' | '720p' | '1080p'> =
+        adminResolutions && adminResolutions.length > 0
+          ? adminResolutions
+          : ['720p', '1080p'];
+      const defaultResolution =
+        typeof params.defaultResolution === 'string' &&
+        ['480p', '720p', '1080p'].includes(params.defaultResolution)
+          ? (params.defaultResolution as '480p' | '720p' | '1080p')
+          : '720p';
+
+      const supportsAudio = params.supportsAudio === true;
+      const supportsWatermark = params.supportsWatermark !== false; // 默认 true(水印多数 Provider 都能后处理)
+      const supportsWebSearch = params.supportsWebSearch === true;
+      const supportsRefImage = params.supportsRefImage !== false; // 默认 true
+      const supportsRefVideo = params.supportsRefVideo === true;
+      const supportsRefAudio = params.supportsRefAudio === true;
+
+      const isMock = provider.info.displayName.toLowerCase().includes('mock');
+
+      return {
+        providerId,
+        displayName: config?.displayName ?? provider.info.displayName ?? providerId,
+        maxDurationS,
+        minDurationS,
+        supportedAspectRatios,
+        // W5.5.1 扩展能力
+        supportedResolutions,
+        defaultResolution,
+        supportsAudio,
+        supportsWatermark,
+        supportsWebSearch,
+        supportsRefImage,
+        supportsRefVideo,
+        supportsRefAudio,
+        isActive: config?.isActive ?? true,
+        isMock,
+      };
     }),
 
   /**

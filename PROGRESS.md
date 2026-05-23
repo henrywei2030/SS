@@ -5,6 +5,69 @@
 
 ---
 
+## 2026-05-24(周日,win-laptop · 十四次收工)— W5.5 BullMQ 异步 + W7 后台 4 页 + 14 项 audit + ADR-25/26
+
+**完成 — W5.5 全栈异步 + W7 后台 + 同行调研 + ADR 升级**
+
+### W5.5 BullMQ video-gen worker 完整交付(异步链路打通)
+- ✅ **packages/queue 新包**:BullMQ Queue + ioredis + HMAC SSE token + 4 subpath exports(@ss/queue/{redis,types,video-gen,sse-token})
+- ✅ **apps/workers/video-gen 新独立进程**:bootstrap + waitUntilReady + autorun:false + 25s grace shutdown(health → worker → redis → prisma)+ workerId + /health HTTP endpoint(9200)
+- ✅ **aigc.generateVideo 异步化**:handler 占位 attempt + 校验 + compile + 入队 + 立即 return `{attemptId, RUNNING}`;worker 跑 provider.generate + $transaction(MediaItem + attempt + ledger)+ EventBus + Redis publish + OperationLog
+- ✅ **HMAC 5min token 鉴权 SSE**:`aigc.getStreamToken` 签发 + SSE route timingSafeEqual + token-attemptId 匹配 + 30min 硬超时 + DB 进入兜底
+- ✅ **前端 useAigcProgress hook**:EventSource 状态机;workspace 接入显示蓝色进度条 + Provider 名 + MOCK 角标
+
+### W5.5.1 扩展参数(对照即梦/可灵 UI)
+- ✅ VideoGenJobData 加 6 字段(resolution/audio/watermark/webSearch/refVideo/refAudio,全 optional)
+- ✅ getProviderCapabilities 加 8 能力标志(supportedResolutions + supports*),后台 ProviderConfig.defaultParams JSON 可配,**零 schema 改**
+- ✅ aspectRatio 加 'auto'(router resolve 到 project 默认)
+- ✅ 前端高级选项 details 折叠 + 分辨率下拉 + 3 toggle + 参考素材占位(视/音 Phase 2)+ ToggleRow 复用
+- ✅ Mock provider 打日志确认 extra 透传链路:`[mock-video:xxx] extra params received: {...}`
+
+### W7 后台轻量四页(adminRouter 加 3 sub-router)
+- ✅ **/admin/audit**:OperationLog 分页 + 筛选 action/targetType + 展开 before/after JSON + contains 大小写不敏感
+- ✅ **/admin/api-usage**:GenerationAttempt + CostLedger 全局聚合 — KPI 4 卡 + 30 天 SVG 趋势 + Provider 表 + Action 分布
+- ✅ **/admin/settings**:按 6 category 分组 + 行内编辑 + SECRET 双层拒编辑 + 搜索过滤
+- ✅ **/admin/health**:DB/Redis/MinIO 并行 ping + 10s refetchInterval + 错误展示
+
+### 同行调研 2 轮(对照 fynt + langfuse)
+- 第 1 轮 W5.5 实施前深读:fynt(queue/redis/executor/worker/index)+ langfuse(webhooks/workerManager/shutdown/app)→ 1200 字对照报告
+- 第 2 轮 audit:Agent 跑 git diff HEAD 全栈审视 → P0/P1/P2 分级报告
+
+### 14 项 audit 修复
+- **第 1 轮 8 项(W5.5 实施时)**:lockDuration 5min / stale RUNNING 启动扫描 / processor idempotency check / 失败白名单 strict snake_case / removeOnFail age 维度 / Redis 错误 30s 节流 / unhandledRejection exitCode=1 / catch 内 DB 失败兜底
+- **第 2 轮 6 项(W5.5.1 + audit)**:**P0** 入队失败 attempt 卡 RUNNING(addVideoGenJob 包 try/catch + 立即 FAILED)/ **P0** SSE 订阅 race 丢消息(subscribe 后 double-check DB)/ **P1** stale cutoff 5→10min(防慢 job 误标)/ **P1** ToggleRow Provider 切换 reset / **P2** audit contains insensitive / **P2** refVideo/refAudio Provider 守卫(防绕 UI 滥用)
+
+### ADR 升级
+- ✅ **ADR-25 v2**(W5.5 异步化决策)— 同行借鉴 12 项映射 + M1-M11 模块清单 + Phase 2 不在范围
+- ✅ **ADR-25 v3 扩展段**(W5.5.1)— 字段透传模式 + 8 项 Phase 2 升级空间(L1-L8)
+- ✅ **ADR-26 跨模块 Agent 联动预留**(SUPERSEDES 原占位)— 13 mutation 候选 + `.meta({ agentTool })` 接口预备 + 5 项已就位 Agent 友好基础设施
+
+**进行中**
+- 🚧 (W5.5 + W7 后台 4 页全部交付,无在途)
+
+**问题 / 待决策**
+- ❓ Phase 1.5 真接 Seedance(配 API Key + 火山合规) — Mock 全链路已跑通
+- ❓ 跨设备实测 V2 协议(切 mac 后续验证)
+- ❓ Phase 2 升级 8 项(L1-L8 ADR-25 v3 已记录)
+
+**下次接着做**
+- 📌 task #3 W6 Collab Hub(数据层就绪,纯 UI)
+- 📌 task #4 W5.6 Media Vault MVP
+- 📌 task #5 W3-W5 polish / task #6 W7 收尾(Tauri+EN+DB Explorer)/ task #7 README+CHANGELOG
+
+**质量**
+- 15 包 typecheck 全过(新增 @ss/queue + @ss/worker-video-gen 两个 workspace 包)
+- 零 schema 改 / 零 migration
+- ADR-25 v2 + v3 + ADR-26 完整
+
+**累计**
+- 14 次收工 audit 累计:**55+ 项**(13 收工 41 + 本次 14)
+- 18 ADR 已落定(本次新 ADR-26 / ADR-25 升 v3)
+- 110+ 单测全过零回归
+- 新增 2 monorepo workspace 包
+
+---
+
 ## 2026-05-24(周日,win-laptop · 十三次收工)— 7+1 轮深漏洞 audit 修 12 项
 
 **完成 — 8 轮深扫(7 漏洞 + 1 系统层)+ 12 项真 vuln 修复**

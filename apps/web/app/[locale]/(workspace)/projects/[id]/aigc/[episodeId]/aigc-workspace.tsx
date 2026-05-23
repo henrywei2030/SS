@@ -4,6 +4,7 @@ import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { toast } from 'sonner';
 
 import { trpc } from '@/lib/trpc/client';
+import { useAigcProgress } from '@/lib/hooks/use-aigc-progress';
 
 interface Props {
   projectId: string;
@@ -103,9 +104,11 @@ export function AigcWorkspace({
 
   const generateVideoMutation = trpc.aigc.generateVideo.useMutation({
     onSuccess: (data) => {
-      toast.success(`视频已生成(${data.providerId}, ${data.durationS}s)`);
+      // W5.5:视频生成已异步化(ADR-25),handler 入队后立即返回 attemptId(status=RUNNING)
+      // 前端通过 SSE 订阅 worker 推送的进度(Step D 接);本阶段过渡态:toast + autoSelect attemptId,
+      // listGroups invalidate 后 group 显示"生成中",用户手动刷新页面才能看到完成。
+      toast.success('视频任务已提交,等待生成完成');
       if (selectedGroupId) invalidateGroup(selectedGroupId);
-      // W5 完善 U1:生成成功后 UI 自动切到新 take
       setAutoSelectAttemptId(data.attemptId);
     },
     onError: (e) => {
@@ -636,7 +639,12 @@ interface DetailProps {
   savePromptPending: boolean;
   onGenerateVideo: (opts: {
     durationS?: number;
-    aspectRatio?: '9:16' | '16:9' | '1:1';
+    aspectRatio?: '9:16' | '16:9' | '1:1' | 'auto';
+    // W5.5.1 扩展(对照即梦/可灵 UI)
+    resolution?: '480p' | '720p' | '1080p';
+    generateAudio?: boolean;
+    addWatermark?: boolean;
+    webSearchEnabled?: boolean;
   }) => void;
   generateVideoPending: boolean;
   onRejectTake: (attemptId: string) => void;
@@ -872,14 +880,66 @@ function GroupDetail({
 }
 
 // ---------------------------------------------------------------------------
-// 视频预览区(W5.4)
+// 视频预览区(W5.4 + W5.5.1 扩展选项)
 // ---------------------------------------------------------------------------
+
+/**
+ * W5.5.1:开关行(对照参考图 toggle UI)— 高级选项区复用
+ */
+function ToggleRow({
+  label,
+  hint,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (v: boolean) => void;
+}): React.ReactElement {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <label className="flex items-center gap-1.5">
+        <span className="font-medium">{label}</span>
+        {hint && (
+          <span className="rounded bg-[hsl(var(--color-muted))] px-1 text-[9px] font-medium text-[hsl(var(--color-muted-foreground))]">
+            {hint}
+          </span>
+        )}
+      </label>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        disabled={disabled}
+        onClick={() => onChange(!checked)}
+        className={`relative inline-flex h-5 w-9 items-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-30 ${
+          checked ? 'bg-blue-600' : 'bg-[hsl(var(--color-muted))]'
+        }`}
+      >
+        <span
+          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition ${
+            checked ? 'translate-x-5' : 'translate-x-1'
+          }`}
+        />
+      </button>
+    </div>
+  );
+}
 
 interface VideoPreviewProps {
   groupId: string;
   onGenerate: (opts: {
     durationS?: number;
-    aspectRatio?: '9:16' | '16:9' | '1:1';
+    aspectRatio?: '9:16' | '16:9' | '1:1' | 'auto';
+    // W5.5.1 扩展
+    resolution?: '480p' | '720p' | '1080p';
+    generateAudio?: boolean;
+    addWatermark?: boolean;
+    webSearchEnabled?: boolean;
   }) => void;
   generatePending: boolean;
   onReject: (attemptId: string) => void;
@@ -901,6 +961,67 @@ function VideoPreviewSection({
   const [selectedTakeId, setSelectedTakeId] = React.useState<string | null>(null);
   const [aspectRatio, setAspectRatio] = React.useState<'9:16' | '16:9' | '1:1'>('9:16');
   const [durationS, setDurationS] = React.useState<number>(5);
+
+  // W5.5.1 扩展选项 state(对照参考图)— Provider 不支持时 button 提交前会过滤
+  const [resolution, setResolution] = React.useState<'480p' | '720p' | '1080p'>('720p');
+  const [generateAudio, setGenerateAudio] = React.useState<boolean>(false);
+  const [addWatermark, setAddWatermark] = React.useState<boolean>(false);
+  const [webSearchEnabled, setWebSearchEnabled] = React.useState<boolean>(false);
+
+  // W5.5 D6:Provider 能力查询(用当前 SystemSetting binding 的 video provider)
+  const { data: capabilities } = trpc.aigc.getProviderCapabilities.useQuery({});
+  // W5.5 D6:group.durationS 作为智能默认(按分镜复杂度,1 个 shot 6s / 3 个 shots 15s 等)
+  const { data: groupDetail } = trpc.aigc.getGroupDetail.useQuery({ groupId });
+  // W5.5 D5:SSE 实时进度(对当前正在跑的 attempt 订阅)
+  const progress = useAigcProgress(autoSelectAttemptId);
+  const utils = trpc.useUtils();
+
+  // W5.5 D6:capabilities + group 加载后,按 group 复杂度 + Provider 上限设默认 durationS
+  React.useEffect(() => {
+    if (!capabilities || !groupDetail) return;
+    const groupDur = Math.round(groupDetail.group.durationS) || 5;
+    const def = Math.min(
+      Math.max(groupDur, capabilities.minDurationS),
+      capabilities.maxDurationS,
+    );
+    setDurationS(def);
+  }, [capabilities, groupDetail]);
+
+  // W5.5 D7:capabilities 加载后,当前 aspectRatio 若不在支持列表里,切到第一个
+  React.useEffect(() => {
+    if (!capabilities) return;
+    if (!capabilities.supportedAspectRatios.includes(aspectRatio)) {
+      const first = capabilities.supportedAspectRatios[0];
+      if (first) setAspectRatio(first);
+    }
+  }, [capabilities, aspectRatio]);
+
+  // W5.5.1:capabilities 加载后,同步默认分辨率(切 Provider 时分辨率列表可能变)
+  React.useEffect(() => {
+    if (!capabilities) return;
+    setResolution((prev) =>
+      capabilities.supportedResolutions.includes(prev)
+        ? prev
+        : capabilities.defaultResolution,
+    );
+  }, [capabilities]);
+
+  // W5.5.1 audit 修 P1-4:capabilities 切换 Provider 时,toggle 状态 reset 到合规默认
+  // 防止前一个 Provider 支持音频时用户开了,切到不支持的 Provider 后 UI 还停在 ON 误导
+  React.useEffect(() => {
+    if (!capabilities) return;
+    if (!capabilities.supportsAudio) setGenerateAudio(false);
+    if (!capabilities.supportsWatermark) setAddWatermark(false);
+    if (!capabilities.supportsWebSearch) setWebSearchEnabled(false);
+  }, [capabilities]);
+
+  // W5.5 D5:终态后 invalidate listVideoTakes + listGroups,UI 拉到新 SUCCESS take
+  React.useEffect(() => {
+    if (progress.kind === 'success' || progress.kind === 'failed') {
+      void utils.aigc.listVideoTakes.invalidate({ groupId });
+      void utils.aigc.listGroups.invalidate();
+    }
+  }, [progress.kind, groupId, utils]);
 
   // 默认选中最新成功的 take
   React.useEffect(() => {
@@ -924,8 +1045,21 @@ function VideoPreviewSection({
   return (
     <section>
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold">视频预览</h3>
+        <h3 className="text-sm font-semibold">
+          视频预览
+          {capabilities && (
+            <span className="ml-2 text-xs font-normal text-[hsl(var(--color-muted-foreground))]">
+              · {capabilities.displayName}
+              {capabilities.isMock && (
+                <span className="ml-1 rounded bg-amber-500/15 px-1 text-[10px] text-amber-700 dark:text-amber-400">
+                  MOCK
+                </span>
+              )}
+            </span>
+          )}
+        </h3>
         <div className="flex items-center gap-2">
+          {/* W5.5 D7:aspectRatio 按 Provider 支持的渲染 */}
           <select
             value={aspectRatio}
             onChange={(e) =>
@@ -933,29 +1067,183 @@ function VideoPreviewSection({
             }
             className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-2 py-1.5 text-xs"
           >
-            <option value="9:16">9:16 竖屏</option>
-            <option value="16:9">16:9 横屏</option>
-            <option value="1:1">1:1 方形</option>
+            {(capabilities?.supportedAspectRatios ?? ['9:16', '16:9', '1:1']).map((r) => (
+              <option key={r} value={r}>
+                {r === '9:16' ? '9:16 竖屏' : r === '16:9' ? '16:9 横屏' : '1:1 方形'}
+              </option>
+            ))}
           </select>
+          {/* W5.5 D6:durationS 按 Provider maxDuration 动态渲染 1-N 秒 */}
           <select
             value={durationS}
             onChange={(e) => setDurationS(Number(e.target.value))}
             className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-2 py-1.5 text-xs"
+            title={
+              capabilities
+                ? `${capabilities.displayName} 支持 ${capabilities.minDurationS}-${capabilities.maxDurationS}s`
+                : '加载 Provider 能力中...'
+            }
           >
-            <option value={3}>3s</option>
-            <option value={5}>5s</option>
-            <option value={8}>8s</option>
-            <option value={10}>10s</option>
+            {(() => {
+              if (!capabilities) {
+                return [3, 5, 8, 10].map((s) => (
+                  <option key={s} value={s}>{s}s</option>
+                ));
+              }
+              const opts: number[] = [];
+              for (let s = capabilities.minDurationS; s <= capabilities.maxDurationS; s++) {
+                opts.push(s);
+              }
+              return opts.map((s) => (
+                <option key={s} value={s}>{s}s</option>
+              ));
+            })()}
           </select>
           <button
-            onClick={() => onGenerate({ aspectRatio, durationS })}
-            disabled={generatePending}
+            onClick={() =>
+              onGenerate({
+                aspectRatio,
+                durationS,
+                // W5.5.1:Provider 不支持的选项不传(router 透传给 worker → provider)
+                resolution: capabilities?.supportedResolutions.includes(resolution)
+                  ? resolution
+                  : undefined,
+                generateAudio: capabilities?.supportsAudio ? generateAudio : undefined,
+                addWatermark: capabilities?.supportsWatermark ? addWatermark : undefined,
+                webSearchEnabled: capabilities?.supportsWebSearch
+                  ? webSearchEnabled
+                  : undefined,
+              })
+            }
+            disabled={
+              generatePending ||
+              progress.kind === 'connecting' ||
+              progress.kind === 'running' ||
+              progress.kind === 'progress'
+            }
             className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
           >
-            {generatePending ? '生成中...' : '生成视频'}
+            {generatePending
+              ? '提交中...'
+              : progress.kind === 'connecting'
+                ? '连接中...'
+                : progress.kind === 'running' || progress.kind === 'progress'
+                  ? '生成中...'
+                  : '生成视频'}
           </button>
         </div>
       </div>
+
+      {/* W5.5.1:高级选项(默认折叠,对照参考图选项集) */}
+      <details className="mb-3 rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))]">
+        <summary className="flex cursor-pointer select-none items-center justify-between px-3 py-2 text-xs font-medium hover:bg-[hsl(var(--color-muted))]/40">
+          <span>高级选项</span>
+          {capabilities && (
+            <span className="text-[10px] font-normal text-[hsl(var(--color-muted-foreground))]">
+              分辨率 · 音频 · 水印 · 参考素材
+            </span>
+          )}
+        </summary>
+        <div className="space-y-3 border-t border-[hsl(var(--color-border))] p-3 text-xs">
+          {/* 视频分辨率 */}
+          <div className="flex items-center justify-between gap-3">
+            <label className="flex items-center gap-1.5">
+              <span className="font-medium">视频分辨率</span>
+              <span className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
+                越高越贵
+              </span>
+            </label>
+            <select
+              value={resolution}
+              onChange={(e) =>
+                setResolution(e.target.value as '480p' | '720p' | '1080p')
+              }
+              disabled={!capabilities}
+              className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-2 py-1 text-xs"
+            >
+              {(capabilities?.supportedResolutions ?? ['720p']).map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* 开关:生成音频 / 添加水印 / 联网搜索 */}
+          <ToggleRow
+            label="生成同步音频"
+            hint={!capabilities?.supportsAudio ? '当前模型不支持' : undefined}
+            checked={generateAudio}
+            disabled={!capabilities?.supportsAudio}
+            onChange={setGenerateAudio}
+          />
+          <ToggleRow
+            label="添加水印"
+            hint={!capabilities?.supportsWatermark ? '当前模型不支持' : undefined}
+            checked={addWatermark}
+            disabled={!capabilities?.supportsWatermark}
+            onChange={setAddWatermark}
+          />
+          <ToggleRow
+            label="联网搜索增强"
+            hint={!capabilities?.supportsWebSearch ? 'Phase 2' : undefined}
+            checked={webSearchEnabled}
+            disabled={!capabilities?.supportsWebSearch}
+            onChange={setWebSearchEnabled}
+          />
+
+          {/* 参考素材区(图片自动 @ + 视/音频留 W5.6 / Phase 2) */}
+          <div className="border-t border-[hsl(var(--color-border))] pt-3">
+            <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
+              参考素材
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between rounded-md border border-[hsl(var(--color-border))] px-2 py-1.5">
+                <span>参考图片</span>
+                <span className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
+                  通过资产自动关联,见详情第 4 区
+                </span>
+              </div>
+              <div className="flex items-center justify-between rounded-md border border-[hsl(var(--color-border))] px-2 py-1.5 opacity-50">
+                <span>参考视频</span>
+                <span className="rounded bg-[hsl(var(--color-muted))] px-1 text-[9px]">
+                  {capabilities?.supportsRefVideo ? 'W5.6' : 'Phase 2'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between rounded-md border border-[hsl(var(--color-border))] px-2 py-1.5 opacity-50">
+                <span>参考音频</span>
+                <span className="rounded bg-[hsl(var(--color-muted))] px-1 text-[9px]">
+                  {capabilities?.supportsRefAudio ? 'W5.6' : 'Phase 2'}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      {/* W5.5 D5:SSE 实时进度状态条 */}
+      {(progress.kind === 'connecting' ||
+        progress.kind === 'running' ||
+        progress.kind === 'progress') && (
+        <div className="mb-3 flex items-center gap-2 rounded-md border border-blue-500/30 bg-blue-500/5 px-3 py-2 text-xs text-blue-700 dark:text-blue-300">
+          <span className="inline-block size-2 animate-pulse rounded-full bg-blue-500" />
+          <span>
+            {progress.kind === 'connecting' && '建立连接中...'}
+            {progress.kind === 'running' &&
+              `视频生成中(${capabilities?.displayName ?? 'provider'} 预计 30-60s)...`}
+            {progress.kind === 'progress' &&
+              (progress.message ?? `生成中 ${progress.percent ?? ''}%`)}
+          </span>
+        </div>
+      )}
+      {progress.kind === 'failed' && (
+        <div className="mb-3 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-700 dark:text-red-300">
+          ⛔ 生成失败:{progress.errorMsg}
+          {progress.retryable && (
+            <span className="ml-2 text-[hsl(var(--color-muted-foreground))]">(可重试)</span>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-[280px_1fr] gap-4">
         {/* 左:主预览 */}

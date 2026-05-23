@@ -93,6 +93,11 @@ export class MockVideoProvider implements IVideoProvider {
   }
 
   async generate(req: VideoRequest, _ctx: CallContext): Promise<VideoResult> {
+    // W5.5.1:透传扩展参数确认链路通(Mock 阶段仅日志,真接 Provider 时消费)
+    if (req.extra && Object.keys(req.extra).length > 0) {
+      console.log(`[mock-video:${this.info.id}] extra params received:`, req.extra);
+    }
+
     // 模拟异步延迟,让 UI loading 可见
     const latency = this.opts.fakeLatencyMs ?? 800;
     await new Promise((r) => setTimeout(r, latency));

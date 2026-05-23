@@ -736,6 +736,301 @@ const episodeRouter = router({
 });
 
 // ---------------------------------------------------------------------------
+// admin.health — 基础设施健康检查(W7)
+//
+// 并行 ping DB / Redis / MinIO 三个依赖,返回 ok + 延迟 + 错误。
+// 用于 admin /health 运维页 + Docker healthcheck / K8s readinessProbe。
+// ---------------------------------------------------------------------------
+
+export interface ServiceHealth {
+  ok: boolean;
+  latencyMs: number;
+  error: string | null;
+}
+
+const healthRouter = router({
+  check: adminProcedure.query(async ({ ctx }) => {
+    const checkDb = async (): Promise<ServiceHealth> => {
+      const start = Date.now();
+      try {
+        await ctx.prisma.$queryRaw`SELECT 1`;
+        return { ok: true, latencyMs: Date.now() - start, error: null };
+      } catch (e) {
+        return {
+          ok: false,
+          latencyMs: Date.now() - start,
+          error: e instanceof Error ? e.message : String(e),
+        };
+      }
+    };
+
+    const checkRedis = async (): Promise<ServiceHealth> => {
+      const start = Date.now();
+      try {
+        // 动态 import 防 SSR 阶段 ioredis 在 edge runtime 失败(本路径只跑 Node)
+        const { getPrimaryRedis } = await import('@ss/queue/redis');
+        const redis = getPrimaryRedis();
+        const result = await redis.ping();
+        return {
+          ok: result === 'PONG',
+          latencyMs: Date.now() - start,
+          error: result === 'PONG' ? null : `unexpected reply: ${result}`,
+        };
+      } catch (e) {
+        return {
+          ok: false,
+          latencyMs: Date.now() - start,
+          error: e instanceof Error ? e.message : String(e),
+        };
+      }
+    };
+
+    const checkMinio = async (): Promise<ServiceHealth> => {
+      const start = Date.now();
+      const endpoint = process.env.S3_ENDPOINT;
+      if (!endpoint) {
+        return { ok: false, latencyMs: 0, error: 'S3_ENDPOINT not set' };
+      }
+      try {
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 3000);
+        const res = await fetch(`${endpoint.replace(/\/$/, '')}/minio/health/live`, {
+          signal: ctrl.signal,
+        });
+        clearTimeout(tid);
+        return {
+          ok: res.ok,
+          latencyMs: Date.now() - start,
+          error: res.ok ? null : `HTTP ${res.status}`,
+        };
+      } catch (e) {
+        return {
+          ok: false,
+          latencyMs: Date.now() - start,
+          error: e instanceof Error ? e.message : String(e),
+        };
+      }
+    };
+
+    const [db, redis, minio] = await Promise.all([checkDb(), checkRedis(), checkMinio()]);
+    return {
+      db,
+      redis,
+      minio,
+      checkedAt: new Date().toISOString(),
+    };
+  }),
+});
+
+// ---------------------------------------------------------------------------
+// admin.audit — OperationLog 浏览(W7)
+//
+// 全局审计日志:分页 + 筛选 actor / action / targetType / projectId / 时间。
+// 提供 distinctActions / distinctTargetTypes 给筛选下拉用。
+// ---------------------------------------------------------------------------
+
+const auditRouter = router({
+  list: adminProcedure
+    .input(
+      z.object({
+        page: z.number().min(1).default(1),
+        pageSize: z.number().min(10).max(100).default(50),
+        actorId: z.string().cuid().optional(),
+        action: z.string().max(100).optional(),
+        targetType: z.string().max(50).optional(),
+        projectId: z.string().cuid().optional(),
+        since: z.string().datetime().optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const where: Record<string, unknown> = {};
+      if (input.actorId) where.actorId = input.actorId;
+      // audit 修 P0-2 → P2:contains 大小写不敏感(用户搜 "Aigc" 应找到 "aigc.generate")
+      if (input.action) where.action = { contains: input.action, mode: 'insensitive' };
+      if (input.targetType) where.targetType = input.targetType;
+      if (input.projectId) where.projectId = input.projectId;
+      if (input.since) where.createdAt = { gte: new Date(input.since) };
+
+      const [logs, total] = await Promise.all([
+        ctx.prisma.operationLog.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          take: input.pageSize,
+          skip: (input.page - 1) * input.pageSize,
+          include: {
+            user: { select: { displayName: true, email: true } },
+            project: { select: { name: true } },
+          },
+        }),
+        ctx.prisma.operationLog.count({ where }),
+      ]);
+
+      return {
+        logs: logs.map((l) => ({
+          id: l.id,
+          actorId: l.actorId,
+          actorName: l.user.displayName ?? l.user.email,
+          projectId: l.projectId,
+          projectName: l.project?.name ?? null,
+          action: l.action,
+          targetType: l.targetType,
+          targetId: l.targetId,
+          beforeJson: l.beforeJson,
+          afterJson: l.afterJson,
+          ip: l.ip,
+          userAgent: l.userAgent,
+          createdAt: l.createdAt,
+        })),
+        total,
+        page: input.page,
+        pageSize: input.pageSize,
+        hasMore: input.page * input.pageSize < total,
+      };
+    }),
+
+  distinctActions: adminProcedure.query(async ({ ctx }) => {
+    const rows = await ctx.prisma.operationLog.groupBy({
+      by: ['action'],
+      _count: { _all: true },
+      orderBy: { _count: { action: 'desc' } },
+      take: 50,
+    });
+    return rows.map((r) => ({ action: r.action, count: r._count._all }));
+  }),
+
+  distinctTargetTypes: adminProcedure.query(async ({ ctx }) => {
+    const rows = await ctx.prisma.operationLog.groupBy({
+      by: ['targetType'],
+      _count: { _all: true },
+      orderBy: { _count: { targetType: 'desc' } },
+    });
+    return rows.map((r) => ({ targetType: r.targetType, count: r._count._all }));
+  }),
+});
+
+// ---------------------------------------------------------------------------
+// admin.apiUsage — GenerationAttempt + CostLedger 全局聚合(W7)
+//
+// 跟 insights 的区别:不过滤 projectId,看的是整个平台用量
+//   - overall: 总 attempt 数(按 status)+ 总 cost
+//   - byProvider: 每个 provider 的 attempt 分布 + cost,按 cost desc
+//   - byAction: 按 action 枚举(VIDEO/IMAGE/TEXT/ANALYSIS/...)分布
+//   - dailyTrend: 30 天日 cost + count 曲线
+// ---------------------------------------------------------------------------
+
+export interface ProviderStats {
+  providerId: string;
+  success: number;
+  failed: number;
+  inflight: number;
+  cost: number;
+}
+
+const apiUsageRouter = router({
+  summary: adminProcedure
+    .input(
+      z.object({
+        days: z.number().min(1).max(90).default(30),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const since = new Date(Date.now() - input.days * 24 * 3600 * 1000);
+
+      const [overall, totalCost, byProvider, providerCost, byAction, dailyTrend] =
+        await Promise.all([
+          ctx.prisma.generationAttempt.groupBy({
+            by: ['status'],
+            where: { createdAt: { gte: since } },
+            _count: { _all: true },
+          }),
+          ctx.prisma.costLedgerEntry.aggregate({
+            where: { createdAt: { gte: since }, success: true },
+            _sum: { costCny: true },
+          }),
+          ctx.prisma.generationAttempt.groupBy({
+            by: ['providerId', 'status'],
+            where: { createdAt: { gte: since } },
+            _count: { _all: true },
+          }),
+          ctx.prisma.costLedgerEntry.groupBy({
+            by: ['providerId'],
+            where: { createdAt: { gte: since }, success: true },
+            _sum: { costCny: true },
+          }),
+          ctx.prisma.generationAttempt.groupBy({
+            by: ['action'],
+            where: { createdAt: { gte: since } },
+            _count: { _all: true },
+          }),
+          ctx.prisma.$queryRaw<Array<{ day: string; total: bigint; cost: number }>>`
+            SELECT
+              to_char(date_trunc('day', created_at), 'YYYY-MM-DD') as day,
+              COUNT(*) as total,
+              COALESCE(SUM(cost_cny), 0)::float as cost
+            FROM cost_ledger_entries
+            WHERE created_at >= ${since} AND success = true
+            GROUP BY day
+            ORDER BY day ASC
+          `,
+        ]);
+
+      // 聚合 byProvider:把 status 维度合并到 provider 维度
+      const providerMap = new Map<string, ProviderStats>();
+      for (const r of byProvider) {
+        const entry: ProviderStats = providerMap.get(r.providerId) ?? {
+          providerId: r.providerId,
+          success: 0,
+          failed: 0,
+          inflight: 0,
+          cost: 0,
+        };
+        if (r.status === 'SUCCESS') entry.success = r._count._all;
+        else if (r.status === 'FAILED') entry.failed = r._count._all;
+        else if (r.status === 'QUEUED' || r.status === 'RUNNING')
+          entry.inflight += r._count._all;
+        providerMap.set(r.providerId, entry);
+      }
+      for (const r of providerCost) {
+        const entry = providerMap.get(r.providerId);
+        if (entry) {
+          entry.cost = Number(r._sum.costCny ?? 0);
+        } else {
+          providerMap.set(r.providerId, {
+            providerId: r.providerId,
+            success: 0,
+            failed: 0,
+            inflight: 0,
+            cost: Number(r._sum.costCny ?? 0),
+          });
+        }
+      }
+
+      const sumByStatus = (status: string): number =>
+        overall.find((r) => r.status === status)?._count._all ?? 0;
+
+      return {
+        days: input.days,
+        overall: {
+          total: overall.reduce((s, r) => s + r._count._all, 0),
+          success: sumByStatus('SUCCESS'),
+          failed: sumByStatus('FAILED'),
+          inflight: sumByStatus('QUEUED') + sumByStatus('RUNNING'),
+          totalCostCny: Number(totalCost._sum.costCny ?? 0),
+        },
+        byProvider: Array.from(providerMap.values()).sort((a, b) => b.cost - a.cost),
+        byAction: byAction
+          .map((r) => ({ action: r.action, count: r._count._all }))
+          .sort((a, b) => b.count - a.count),
+        dailyTrend: dailyTrend.map((r) => ({
+          day: r.day,
+          total: Number(r.total),
+          cost: r.cost,
+        })),
+      };
+    }),
+});
+
+// ---------------------------------------------------------------------------
 // 聚合
 // ---------------------------------------------------------------------------
 
@@ -747,4 +1042,7 @@ export const adminRouter = router({
   system: systemRouter,
   binding: bindingRouter,
   episode: episodeRouter,
+  health: healthRouter,
+  audit: auditRouter,
+  apiUsage: apiUsageRouter,
 });

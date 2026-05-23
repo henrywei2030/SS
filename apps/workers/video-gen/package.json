@@ -1,0 +1,25 @@
+{
+  "name": "@ss/worker-video-gen",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ss/adapters": "workspace:*",
+    "@ss/db": "workspace:*",
+    "@ss/queue": "workspace:*",
+    "@ss/shared": "workspace:*",
+    "bullmq": "^5.21.0",
+    "ioredis": "^5.4.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.3"
+  }
+}

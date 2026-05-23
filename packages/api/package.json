@@ -21,6 +21,7 @@
     "@ss/core": "workspace:*",
     "@ss/db": "workspace:*",
     "@ss/i18n": "workspace:*",
+    "@ss/queue": "workspace:*",
     "@ss/shared": "workspace:*",
     "@trpc/server": "^11.0.0-rc.660",
     "mammoth": "^1.8.0",

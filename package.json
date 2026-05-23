@@ -27,7 +27,9 @@
     "db:reset": "pnpm --filter @ss/db reset",
     "infra:up": "docker compose -f infra/docker-compose.yml up -d",
     "infra:down": "docker compose -f infra/docker-compose.yml down",
-    "infra:logs": "docker compose -f infra/docker-compose.yml logs -f"
+    "infra:logs": "docker compose -f infra/docker-compose.yml logs -f",
+    "worker:dev": "pnpm --filter @ss/worker-video-gen dev",
+    "worker:start": "pnpm --filter @ss/worker-video-gen start"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.9",

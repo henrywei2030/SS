@@ -26,6 +26,7 @@
     "@ss/core": "workspace:*",
     "@ss/db": "workspace:*",
     "@ss/i18n": "workspace:*",
+    "@ss/queue": "workspace:*",
     "@ss/shared": "workspace:*",
     "@tanstack/react-query": "^5.59.0",
     "@trpc/client": "^11.0.0-rc.660",
