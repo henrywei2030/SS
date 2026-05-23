@@ -38,6 +38,14 @@
 > - **`PromptTemplate` 业务接入**:loadPromptTemplate helper 让 3 个 LLM 入口(asset/breakdown / storyboard/generate / script/analyze)从 DB 拉,fallback 到 hardcoded;seed 补 `script_analysis_main` 模板。Admin 改完实时生效(无缓存)
 > - **`me.presets` 公开 endpoint**:让 W3 storyboard 编辑分镜(framing/angle)能拉 admin/presets 的预设字典(datalist 模式,自定义值兼容)
 > - **`generation_attempts.inputJson` 脱敏**:`sanitize-prompt` helper 将 prompt 明文改为 preview(200 字)+ sha256 hash;references 仅留 idx+kind+assetId(剥 name+mediaUrl);防 DBA / 备份泄露 / listVideoTakes 越权拿原文
+>
+> 2026-05-24 (十一收工) 更新(W1-W7 audit P1/P2 followup + Shot schema 联动 + Step 1):
+> - **`shots`** 加 `movement String?` + `lighting String?`(W7 4 大预设 framing/angle/movement/lighting 完整落库,跟 admin.preset 联动;migration `20260524000000_w7_followup_shot_movement_lighting`)
+> - **`shots`** 加 `startFrameMediaId String?` + `endFrameMediaId String?`(ADR-23,Seedance 2.0/Veo 3.1/Wan 2.6 FLF2V 预留,Phase 1 不用 Phase 2 启用;migration `20260524100000_adr23_shot_first_last_frame`)
+> - **`assets`** 公开导出移除 `ShotAssetRef` 类型,schema model 仍保留但标 `@deprecated`(W6 schema 升级时一起 drop)
+> - **`users`** signup 加 deletedAt 过滤(防软删邮箱永久占用 P0)
+> - **`projects` / `episodes` / `shots` / `scenes`** 多处 deletedAt 过滤补齐(admin.style.delete / project.get / archive 路径)
+> - **Decimal.js 接入 cost ledger**:CostLedgerEntry 累加用 Prisma.Decimal,防 IEEE-754 大额漂移(ledger.ts/insights.ts/aigc.ts/base.ts 4 文件)
 
 | 领域 | 表 | 用途 |
 |---|---|---|
@@ -137,10 +145,24 @@ model Asset {
 
   styleId        String?
 
-  mainMediaId    String?          // 主形象图
-  threeViewIds   String[]         // 三视图
-  panorama360Id  String?          // 360° 全景（场景）
-  refImageIds    String[]         // 参考图
+  // W4-MM 后的 7 视角槽位(以下三个旧字段已 @deprecated,新代码不要用)
+  /// @deprecated 用 portraitMediaId / sceneMainMediaId
+  mainMediaId    String?
+  /// @deprecated 用 threeViewMediaId
+  threeViewIds   String[]
+  /// @deprecated 用 panoramaMediaId
+  panorama360Id  String?
+
+  // W4-MM 新槽位(人物 + 场景 + 道具/风格)
+  portraitMediaId   String?  // 人物 9:16 正面形象
+  threeViewMediaId  String?  // 人物 16:9 三视图(正/侧/背合一张)
+  sceneMainMediaId  String?  // 场景主视角
+  sceneFrontMediaId String?  // 场景正面
+  sceneLeftMediaId  String?  // 场景左侧
+  sceneRightMediaId String?  // 场景右侧
+  sceneBackMediaId  String?  // 场景背面
+  panoramaMediaId   String?  // 场景 360° 全景
+  refImageIds       String[] // 参考图(生成时作 reference)
 
   // ★ Phase 2 升级钩子
   loraIds        String[] @default([])     // LoRA 训练集

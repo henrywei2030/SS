@@ -1,6 +1,6 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-05-24(十一收工 · W1-W7 全栈深 audit 29 项全清 + Shot schema 联动 LLM/UI/DB)
+> 最后更新:2026-05-24(十二收工 · 改进意见 Step 1 + Phase 0 体检 + 仓库清理 33 文件 + CLAUDE.md V2 强同步协议)
 > 仓库:https://github.com/henrywei2030/SS
 
 ---
@@ -26,6 +26,12 @@
 - [x] **R9 Decimal.js 引入 cost ledger**(十一收工)— ledger.ts + insights.ts + aigc.ts + base.ts 用 Prisma.Decimal 累加替 Number 防 IEEE-754 漂移 — 2026-05-24
 - [x] **R7 aigc-workspace memoization**(十一收工)— selectedGroupId useMemo + 8 个 GroupDetail handler useCallback,根除 parent re-render 时 inline arrow 重建 — 2026-05-24
 - [x] **W1-W7 全栈深 audit + 7 项新 bug 修**(十一收工)— admin.style.delete 软删过滤 / project.get 多处 deletedAt / admin.binding.set 拒 inactive provider / auth.signup 软删邮箱永占 P0 / changePassword 强密度+ratelimit / minio.copyObject URL 编码 / styles-manager 重复 refetch — 2026-05-24
+- [x] **改进意见 Step 1 + Phase 0 体检**(十二收工)— License 跟踪文档 + 3 ADR(Mastra/首尾帧/反向护城河)+ Shot startFrame/endFrame schema+migration + Mock 失败注入 + 14 仓库 license 实测纠正(huobao CC-BY-NC-SA / Toonflow Apache 不是 AGPL / mastra+langfuse 双轨制) — 2026-05-24
+- [x] **仓库清理 33 文件 + tsconfig 防再生成**(十二收工)— git rm 28 个 adapters 源码同位 .d.ts/.js + 5 个 tsbuildinfo + .gitignore 加 *.tsbuildinfo + adapters tsconfig noEmit + 本地 .next/dist/.turbo 释放 106MB — 2026-05-24
+- [x] **文档时效性 audit + 杨帆引用清理**(十二收工)— docs/03 进度速览刷新到 W5 90%/W6 ✅/W7 ✅ + docs/04 加 Shot movement/lighting/首尾帧 + docs/02 资产护城河更新 + 4 处杨帆引用全删 — 2026-05-24
+- [x] **代码优化(安全前提)**(十二收工)— TRAINABLE_TEXT_FIELDS 抽 @ss/shared 单一真相源 + MAX_LENGTHS 常量集中(asset/storyboard router 同源) — 2026-05-24
+- [x] **CLAUDE.md V2 强同步协议**(十二收工)— 开工加 Dirty Check + git fetch + reset --hard origin/main + 环境差异自动检测;收工 git add . → git add -A + 强制 verify(本地↔GitHub 真一致);跨设备衔接保证 — 2026-05-24
+- [x] **`*.tsbuildinfo` 加到 `.gitignore`**(十二收工,原 TODO 待办)— 顺手清掉 — 2026-05-24
 - [ ] **W5.5** BullMQ video-gen worker(异步队列 + SSE 进度 + providerJobId 轮询)— 真接 Seedance 时必修
 - [ ] **W5.6** 素材库(Media Vault)— /media 上传 / 搜索 / 收藏 / 批量,Phase 2 / W6+
 

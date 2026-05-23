@@ -1,7 +1,14 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "./dist",
+    // 历史上跑 `tsc`(非 noEmit)曾把 .d.ts/.js 输出到源码同位污染仓库,
+    // 因 include 列了多个 rootDir-平级目录(src/storage/provider/eventbus/auth)
+    // 导致 TS 自动 rootDir 推断后 outDir 计算错位。
+    //
+    // 修复方案:noEmit + 删除 outDir。monorepo 内 import 直接消费 .ts(package.json
+    // main/exports 都指 ./src/...ts 等源码),production build 由 Next.js / tsx 处理。
+    // dist/ 目录纯死代码,不需要生成。
+    "noEmit": true,
     "lib": ["ES2022", "DOM"]
   },
   "include": ["src/**/*", "storage/**/*", "provider/**/*", "eventbus/**/*", "auth/**/*"]

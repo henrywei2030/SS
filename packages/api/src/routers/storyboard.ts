@@ -86,17 +86,9 @@ async function getStoryboardBindings(ctx: Context): Promise<{
 //   - durationS/priority/sceneId 等是结构/调度字段，不进训练集
 // ---------------------------------------------------------------------------
 
-/** 训练数据集只采集这些 AI 文本字段 */
-const TRAINABLE_TEXT_FIELDS = new Set([
-  'framing',
-  'angle',
-  // W1-W5 audit P1 followup:W7 4 预设全部进训练集
-  'movement',
-  'lighting',
-  'content',
-  'prompt',
-  'number', // 组级镜号也是 AI 输出的，可作训练
-]);
+/** 训练数据集只采集这些 AI 文本字段 — 从 @ss/shared 常量集中管理 */
+import { TRAINABLE_TEXT_FIELDS as TRAINABLE_TEXT_FIELD_LIST } from '@ss/shared';
+const TRAINABLE_TEXT_FIELDS = new Set<string>(TRAINABLE_TEXT_FIELD_LIST);
 
 async function recordPromptEdit(
   ctx: Context,

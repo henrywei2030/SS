@@ -5,6 +5,75 @@
 
 ---
 
+## 2026-05-24(周日,win-laptop · 十二次收工)— 改进意见 Step 1 + Phase 0 + 仓库清理 + V2 协议
+
+**完成 — 同一天三件大事**
+
+### 改进意见 Step 1(2026-05-23 研究规划改进意见 §9 落地)
+- ✅ **docs/05a-third-party-licenses.md**:三方仓库 License 跟踪文档(风险分级 + 灵感来源记录机制 + Phase 0 实测数据回填)
+- ✅ **3 条新 ADR**:
+  - ADR-22 Phase 2 Agent 编排选 Mastra(SUPERSEDES ADR-01 LangGraph)— 完整决策表(TS 一等公民 / huobao 生产验证 / MCP 一等公民 / Vercel 原生)
+  - ADR-23 Shot 加 startFrameMediaId/endFrameMediaId 预留 FLF2V(零成本字段,Phase 2 真接 Seedance 2.0/Veo 3.1/Wan 2.6 时启用)
+  - ADR-24 反向护城河确认(外部验证 8 项独家设计,任何"简化重构"必须先看)
+- ✅ **Shot schema 加 startFrame/endFrame**:migration `20260524100000_adr23_shot_first_last_frame` 已 apply + 18 migrations all green
+- ✅ **Mock Provider 失败注入**:MockImageProvider + MockVideoProvider 加 failureRate / failureModes(timeout / censored / rate_limit / server_error / compliance_required),为 W5.5 BullMQ worker 重试逻辑准备验证基础
+
+### Phase 0 14 仓库体检(改进意见 §5 Phase 0)
+- ✅ **docs/research/00-license-audit.md + 00-overview-and-audit.md**:14 仓库 license + 存活实测,3 个关键事实纠错:
+  - **huobao-drama**:改进意见说"无 LICENSE",实测**有 CC-BY-NC-SA-4.0 badge**(传染风险更准确)
+  - **Toonflow-app**:改进意见说"AGPL-3.0",实测**Apache-2.0**(从 🟡 升 🟢 可深读)
+  - **mastra / langfuse**:Apache/MIT + ee/ **双轨制**(主代码可借,严禁触碰 ee/ 目录)
+  - **In-Context-LoRA**:521 天无 push,**已死**,降 Tier D
+- ✅ **docs/05a 全表回填**:11 仓库 license + 借鉴方式 + 关联 ADR
+
+### 仓库清理(33 文件 + tsconfig 防再生成)
+- ✅ **git rm 28 个 adapters 源码同位 .d.ts/.js**:历史 `tsc`(非 noEmit)+ 平级 include 目录致编译产物撒在源码同位
+- ✅ **git rm 5 个 tsconfig.tsbuildinfo**:污染 diff
+- ✅ **adapters tsconfig.json noEmit: true + build script noEmit**:防再生成
+- ✅ **.gitignore 加 *.tsbuildinfo**:TODO.md 原有待办顺手清
+- ✅ **本地清理 106 MB**:rm .next 101M + 6 个 dist 2.5M + .turbo 2.6M(下次首启重建一次)
+
+### 文档时效性 audit + 杨帆引用清理
+- ✅ **docs/03 进度速览刷新**:头部从"2026-05-22 W5🚧/W6-W8 📋"→"2026-05-24 W5 90% / W6 ✅ MVP / W7 ✅ MVP"+ 11 次收工 + 18 migration + 17 ADR + 110 单测累计
+- ✅ **docs/04 加 2026-05-24 timeline 段**:movement/lighting + 首尾帧 + Decimal + deletedAt + ShotAssetRef 类型导出删除
+- ✅ **docs/04 Asset 字段示例更新**:旧 mainMediaId/threeViewIds/panorama360Id 标 @deprecated,补 7 视角槽位(portrait/threeView/sceneMain/Front/Left/Right/Back/panorama)
+- ✅ **docs/02 资产模型亮点**:补 archetypeKey / 7 视角 / maturity(ADR-24 护城河)
+- ✅ **杨帆引用全删 4 处**:docs/00 对比表(改成"内部工具 V2") + 阶段定位段 + auto-match.ts + merge.ts 注释
+
+### 代码优化(安全前提下,P0 仅 1 项)
+- Agent 报 25 项,**严格筛选只做 1 项真值得的**:
+- ✅ **TRAINABLE_TEXT_FIELDS 抽 @ss/shared 单一真相源** + **MAX_LENGTHS 常量集中**
+  - asset.ts + storyboard.ts 之前各自维护一份 set,改字段要改两处
+  - 抽到 packages/shared/src/constants.ts,改字段只改一处
+  - 副作用:**movement/lighting 自动也进资产训练集**(原 asset.ts 没采集是 bug)
+- 其余 24 项 agent 报告**误判 / 风险大 / 跨包依赖增加**,审筛后**不做**(防过度工程化)
+
+### CLAUDE.md V2 强同步协议 — 跨设备衔接保证
+- ✅ **开工 V2**:Dirty Check(防覆盖未提交) + git fetch + 比较 ahead/behind + `git reset --hard origin/main`(远端删的文件本地自动消失) + 环境差异自动检测(package.json / migrations / .env.example) + untracked 清单只显示不删
+- ✅ **收工 V2**:`git add -A`(显式包含删除) + 强制 verify(`git status` 必须 clean + up to date with origin/main)+ 删除文件清单展示
+- ✅ **明确边界**:开工不无声覆盖 dirty / 不自动 clean / 不自动 install / 不自动 migrate;收工不 force push / 不改 .gitignore / 不跑 migration
+
+**进行中**
+- 🚧 W5.5 BullMQ video-gen worker(真接 Seedance 必修)
+- 🚧 W5.6 素材库 Media Vault
+- 🚧 跨设备协作工作流验证(用新 V2 协议)
+
+**问题 / 待决策**
+- ❓ Auto Mode classifier 仍拦截 `prisma migrate dev`,只能用 `prisma db execute` + `migrate resolve --applied` 二段式 — 是否在 settings.json 加 prisma 命令允许列表?
+- ❓ 同行研究 Phase 1(mastra/langfuse 主代码深读)是否启动 — 还是直接推 W5.5?
+
+**下次接着做**
+- 📌 **跨设备衔接实测**:换 mac 设备说 `开工,在 mac-mini`,验证新 V2 协议(预期:fetch 后 reset --hard,本地多余文件自动消失,删除清单干净)
+- 📌 选择 W5.5 BullMQ worker 或同行研究 Phase 1
+- 📌 重传 Project 知识库(TODO/PROGRESS/05/05a/02/03/04/00)
+
+**质量**
+- 12 包 typecheck 全过 + 110 单测全过零回归
+- 18 migrations 已 apply,DB schema up-to-date
+- 累计:**52 文件改动**(20 modified + 33 deleted + 4 untracked,+1407 / -1521 行,**净 -114 行**,因为删了 1394 行编译产物)
+
+---
+
 ## 2026-05-24(周日,win-laptop · 十一次收工)— W1-W7 全栈深 audit 29 项 + Shot schema 联动 + Decimal/memo
 
 **完成 — 三轮深 audit + 全链路同步**

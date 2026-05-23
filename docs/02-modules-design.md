@@ -156,7 +156,9 @@
 
 ### 资产数据模型亮点
 - `Asset.alias[]` — 别名（用于 AIGC 自动 @ 匹配）
-- `Asset.threeViewIds[]` / `panorama360Id` — 多视图
+- `Asset.archetypeKey` — 同人物多变体(陆乘-重生初期/疗伤期)— ADR-24 护城河
+- **7 视角槽位**(W4-MM):人物 portrait+threeView / 场景 sceneMain+Front/Left/Right/Back+panorama
+- `Asset.maturity` — L0-L5 升级路径 — ADR-24 护城河
 - `Asset.complianceId` — 火山引擎返回的合规代码（视频生成时复用）
 - `Asset.loraIds[]` — Phase 2 LoRA 挂载点
 - `Asset.model3dUrl / gaussianUrl` — Phase 3 3D 一致性

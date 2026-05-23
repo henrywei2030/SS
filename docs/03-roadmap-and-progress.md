@@ -4,21 +4,30 @@
 
 ---
 
-## 📊 当前进度速览（2026-05-22)
+## 📊 当前进度速览(2026-05-24,十一收工后)
 
 | Phase | 状态 | 完成度 |
 |---|---|---|
-| **W1 基础设施**（10 子任务）| ✅ 完成 | 10/10 |
-| **W2 应用层**（7 子任务）| ✅ 完成 | 7/7 |
+| **W1 基础设施**(10 子任务) | ✅ 完成 | 10/10 |
+| **W2 应用层**(7 子任务) | ✅ 完成 | 7/7 |
 | **UI 系统升级** | ✅ 完成 | 双主题 + Logo + Cursor 风格 |
 | **W3 分镜工坊** | ✅ 完成 | 100%(W3.0-W3.7 + 3 轮 audit + W3.1.followup 软锁) |
 | **W4 美术工作台** | ✅ 完成 | 100%(W4-MM.0-W4-MM.9 + 6 轮 audit + mock ImageProvider) |
-| **W5 抽卡引擎** | 🚧 启动 | W5.0 数据底座完成 |
-| **W6-W8** | 📋 排期 | 0% |
-| **Phase 2** | 📋 待启动 | 数据模型与接口已预留 |
+| **W5 抽卡引擎** | 🚧 90% | W5.0-W5.4 ✅(数据底座 + token 化 + AIGC 工作台 + Seedance Mock 抽卡 + 历史 + 集数总览);W5.5 BullMQ worker / W5.6 素材库 pending |
+| **W6 数据洞察** | ✅ MVP 完成 | insightsRouter 3 procs + KPI/日趋势/kind 分布/模型分布/Top10 group |
+| **W7 后台三件套** | ✅ MVP 完成 | admin/prompts(版本树+回滚)/ admin/styles(create+delete)/ admin/presets(4 类 framing+angle+movement+lighting)/ admin/bindings |
+| **W8 团队实战** | 📋 待启动 | 等 W5.5 真接 Seedance + 配 API Key |
+| **Phase 2** | 📋 待启动 | 数据模型 + 接口 + 15+ hook 字段已预留 |
 | **Phase 3** | 🔮 远期 | Schema 字段已预留 |
 
-**整体可升级性评级：A**（详见 `PROGRESS.md` 中 W1-W2 审计记录）
+**整体可升级性评级:A**(详见 `PROGRESS.md` 中 11 次收工 + 11 轮 audit 共 36 项 P0/P1/P2 修复记录)
+
+### 收工 / audit 累计
+
+- **11 次收工**,29+7 项 P1/P2 audit 全清(ADR-24 8 项护城河外部验证)
+- **18 个 migration apply**(最新 ADR-23 Shot 首尾帧字段预留)
+- **17 ADR 已落定**(ADR-22 Mastra over LangGraph 取代 ADR-01)
+- **110 单测全过零回归**(60 core + 25 api + 14 episode-lock + 11 script-extract)
 
 ---
 
@@ -215,10 +224,10 @@
 - 三阶段合规
 - 多平台规则库
 
-### P2.4 多 Agent 评审 + LangGraph
+### P2.4 多 Agent 评审 + Mastra（ADR-22 撤销原 LangGraph）
 - Critic + Defender + Judge 对抗评分
-- 用 LangGraph StateGraph 编排
-- 可观测推理链
+- 用 Mastra workflow + supervisor 编排（TS 全栈,跟 BullMQ/Cost Ledger 同进程）
+- 可观测推理链（GenerationAttempt + OperationLog 已有,无需 LangSmith）
 
 ### P2.5 Stripe + 支付宝
 - 订阅 + 按量计费
@@ -264,7 +273,7 @@
 
 | 风险 | 影响 | 缓解 |
 |---|---|---|
-| 多 Agent token 爆炸 | 高 | LangGraph 显式状态机 + Token Budget + Critic 早停 |
+| 多 Agent token 爆炸 | 高 | Mastra workflow 显式 step + Token Budget(Cost Ledger 守门) + Critic 早停 |
 | Provider API 涨价 / 不可用 | 高 | LiteLLM Adapter + 3 Provider 备份 + 本地开源托底 |
 | 3D 一致性效果不达标 | 中 | 先 LoRA + 三视图保底，3D 为加分项 |
 | 真人脸 / IP 侵权 | 极高 | Compliance Sentinel + 数据水印 + 法律险 |

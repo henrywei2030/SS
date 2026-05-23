@@ -15,6 +15,8 @@
  * 真接入时把"如何加一个新视频 Provider"流程在 packages/adapters/provider/index.ts
  * 的 constructVideoProvider 处有详细注释,**aigcRouter / generateVideo 接口不变**。
  */
+import { ProviderError } from '@ss/shared';
+
 import type {
   CallContext,
   IVideoProvider,
@@ -23,12 +25,40 @@ import type {
   VideoResult,
 } from './types.js';
 
+export type MockVideoFailureMode =
+  | 'timeout'
+  | 'censored'
+  | 'quality'
+  | 'rate_limit'
+  | 'server_error'
+  | 'compliance_required';
+
 export interface MockVideoProviderOpts {
   providerId: string;
   /** 单位:CNY/秒 — mock 默认 0 */
   unitPriceCny: number;
   /** Mock"思考"耗时 ms(默认 800),让 UI loading 可见 */
   fakeLatencyMs?: number;
+  /**
+   * 改进意见 P0-7:失败注入(默认 0 始终成功)
+   * 配合 W5.5 BullMQ worker 验证重试 / dead-letter / SSE 错误推送
+   */
+  failureRate?: number;
+  /** 默认 ['timeout', 'rate_limit', 'server_error'] */
+  failureModes?: MockVideoFailureMode[];
+}
+
+const VIDEO_FAILURE_MESSAGES: Record<MockVideoFailureMode, string> = {
+  timeout: 'Mock failure: video provider task timeout after 5min',
+  censored: 'Mock failure: prompt rejected by safety filter',
+  quality: 'Mock failure: output quality below threshold (real provider returns blurry/glitched video)',
+  rate_limit: 'Mock failure: provider rate limit exceeded, retry after 60s',
+  server_error: 'Mock failure: provider server 5xx error',
+  compliance_required: 'Mock failure: character lacks compliance approval (real Seedance face check fails)',
+};
+
+function pickRandom<T>(arr: readonly T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)]!;
 }
 
 /**
@@ -66,6 +96,14 @@ export class MockVideoProvider implements IVideoProvider {
     // 模拟异步延迟,让 UI loading 可见
     const latency = this.opts.fakeLatencyMs ?? 800;
     await new Promise((r) => setTimeout(r, latency));
+
+    // 改进意见 P0-7:失败注入
+    const failureRate = this.opts.failureRate ?? 0;
+    if (failureRate > 0 && Math.random() < failureRate) {
+      const modes = this.opts.failureModes ?? (['timeout', 'rate_limit', 'server_error'] as MockVideoFailureMode[]);
+      const mode = pickRandom(modes);
+      throw new ProviderError(this.info.id, `[mock:${mode}] ${VIDEO_FAILURE_MESSAGES[mode]}`);
+    }
 
     const videoUrl = SAMPLE_VIDEOS[req.aspectRatio] ?? FALLBACK_VIDEO;
     const { width, height } = sizeFromAspect(req.aspectRatio);

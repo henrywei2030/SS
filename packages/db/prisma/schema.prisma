@@ -346,6 +346,11 @@ model Shot {
   // 跟 admin.preset.list 同源(PRESET_KINDS),UI 下拉框 + LLM 生成分镜时填值
   movement       String? // 运镜（与 admin.preset movement 联动）
   lighting       String? // 光线（与 admin.preset lighting 联动）
+  // ADR-23(2026-05-24):预留 first/last frame 字段
+  // Seedance 2.0 / Veo 3.1 / Wan 2.6 / Pika 2.0 已全部支持 FLF2V(first-last-frame to video)
+  // Phase 1 不用,Phase 2 升级 I2V/FLF2V 时启用 — 零成本预留
+  startFrameMediaId String? // → MediaItem.id,生成视频时作为首帧约束
+  endFrameMediaId   String? // → MediaItem.id,生成视频时作为尾帧约束
   content        String  @db.Text // 镜头内容描述
   prompt         String  @db.Text // 视频提示词（含 @ 资产 + 台词 + OS）
   promptCompiled String? @db.Text // 编译后真实下发到模型的 prompt（snapshot）
@@ -376,6 +381,9 @@ model Shot {
   assets      ShotAssetRef[]
   assetUsages AssetUsageBinding[]
   attempts    GenerationAttempt[]
+  // ADR-23:首尾帧 MediaItem 引用(Phase 2 用),onDelete: SetNull 防 media 删除影响 shot
+  startFrame  MediaItem?          @relation("ShotStartFrame", fields: [startFrameMediaId], references: [id], onDelete: SetNull)
+  endFrame    MediaItem?          @relation("ShotEndFrame",   fields: [endFrameMediaId],   references: [id], onDelete: SetNull)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -387,6 +395,9 @@ model Shot {
   @@index([groupId])
   @@index([status])
   @@index([priority])
+  // ADR-23:Phase 2 真用时按 mediaId 反向查 shot 引用,加索引避免全表扫
+  @@index([startFrameMediaId])
+  @@index([endFrameMediaId])
   @@map("shots")
 }
 
@@ -769,6 +780,9 @@ model MediaItem {
   project  Project?    @relation(fields: [projectId], references: [id], onDelete: Cascade)
   parent   MediaItem?  @relation("MediaVersion", fields: [parentId], references: [id])
   variants MediaItem[] @relation("MediaVersion")
+  // ADR-23:首尾帧反向关系(Phase 2 用)
+  shotsAsStartFrame Shot[] @relation("ShotStartFrame")
+  shotsAsEndFrame   Shot[] @relation("ShotEndFrame")
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

@@ -26,8 +26,8 @@
 └─────────────────────────────────────────────────────────────────────┘
                                   ↕
 ┌─────────────────────────────────────────────────────────────────────┐
-│ ④ AI AGENT ORCHESTRATION LAYER (Phase 2 引入)                       │
-│   LangGraph · CrewAI · Multi-Agent · Human Gates                     │
+│ ④ AI AGENT ORCHESTRATION LAYER (Phase 2 引入,ADR-22 选 Mastra)      │
+│   Mastra · supervisor 模式 · MCP · Human Gates                       │
 │   Director / Asset / Shot / Editor / Critic / Compliance Agent      │
 │   + Cost Guardian (跨 Agent 预算护栏)                                │
 └─────────────────────────────────────────────────────────────────────┘
@@ -286,7 +286,7 @@ stateDiagram-v2
 | 队列 | BullMQ | + Temporal（长流程） |
 | 存储 | MinIO（本地） | R2 / OSS / S3 |
 | 协作 | Y.js + Hocuspocus | — |
-| Agent | 无（同步调用） | LangGraph + CrewAI |
+| Agent | 无（同步调用） | Mastra（ADR-22） |
 | Provider | Seedance + Claude（已接） | + LiteLLM 多模型 |
 | Auth | 本地 JWT | Clerk / WorkOS |
 | i18n | next-intl + CN/EN | + JP/KR/TH/ES |

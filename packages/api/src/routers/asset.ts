@@ -44,9 +44,11 @@ async function loadAssetWithAccess(ctx: Context, assetId: string) {
 
 // ---------------------------------------------------------------------------
 // PromptEdit — 资产文本字段训练集采集
+// 训练字段从 @ss/shared 拉,跟 storyboard.ts 同源
 // ---------------------------------------------------------------------------
 
-const TRAINABLE_ASSET_FIELDS = new Set(['name', 'description', 'prompt']);
+import { TRAINABLE_TEXT_FIELDS as TRAINABLE_TEXT_FIELD_LIST } from '@ss/shared';
+const TRAINABLE_ASSET_FIELDS = new Set<string>(TRAINABLE_TEXT_FIELD_LIST);
 
 async function recordAssetEdit(
   ctx: Context,
