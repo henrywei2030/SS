@@ -8,6 +8,7 @@ import { ZodError } from 'zod';
 import { SsError } from '@ss/shared';
 
 import type { Context } from './context.js';
+import { checkRateLimit, type RateLimitOpts } from './middleware/rate-limit.js';
 
 // ---------------------------------------------------------------------------
 // tRPC 实例
@@ -94,6 +95,20 @@ const wrapErrors = t.middleware(async ({ next }) => {
     throw e;
   }
 });
+
+/**
+ * W7 audit R8 P0:Rate limit 中间件工厂(用同一个 t 实例确保类型匹配)
+ *
+ * 用法:
+ *   protectedProcedure.use(rateLimit({ key: (ctx) => `login:${ctx.ip}`, max: 5, windowMs: 60_000 }))
+ *
+ * 因为 t 必须从 trpc.ts 这个文件里取(初始化的 t 实例),工厂导出,逻辑 delegate 到 rate-limit.ts
+ */
+export const rateLimit = (opts: RateLimitOpts) =>
+  t.middleware(({ ctx, next }) => {
+    checkRateLimit(ctx, opts);
+    return next();
+  });
 
 // ---------------------------------------------------------------------------
 // 导出 router / procedure

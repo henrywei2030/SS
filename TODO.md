@@ -1,6 +1,6 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-05-23(九收工 · W5.1 token 化重写 + W5.2 v0 AIGC 工作台)
+> 最后更新:2026-05-23(十收工 · W5/W6/W7 全交付 + 10 轮全栈 audit 24 项修)
 > 仓库:https://github.com/henrywei2030/SS
 
 ---
@@ -13,11 +13,18 @@
 - [x] **D1 migration 已跑**(Win-laptop · 九收工)— `20260523103000_audit_p0_assetusage_partial_unique` 应用 — 2026-05-23
 - [x] **W5.1 schema + compileShotVideoPrompt token 化重写**(Win-laptop · 九收工)— AssetUsageBinding 加 shotGroupId+refSlotIdx / video.ts 重写 4 个 API(tokenFor / autoTagPromptWithReferences / compileShotGroupVideoPrompt / kindFromUsage)/ 19→39 单测 / migration `20260523113000_w5_1_assetusage_shotgroup_refslot` — 2026-05-23
 - [x] **W5.2 v0 AIGC 单集工作台**(Win-laptop · 九收工)— aigc router 7 procedures + UI 左列表 + 右详情 4 区 + 自动匹配 / 自动 @ 可用 — 2026-05-23
-- [ ] **W5.2.1** 工作台 v1 — 4 个按钮补:关联素材 / 上传素材 / 编辑提示词 / 删除 binding
-- [ ] **W5.3** AIGC 集数总览页(5 集卡片网格 + 状态筛选 + 进度统计 + 创建集数)
-- [ ] **W5.4** Seedance 抽卡 router + 视频预览(HTML5 video 标签) + GenerationAttempt(action=VIDEO)
-- [ ] **W5.2+** — Seedance 抽卡 router + 自动 @ 资产匹配(W1.6 auto-match 已就绪)
-- [ ] **W5.3** — BullMQ video-gen worker + 实时进度推送(SSE)+ providerJobId 轮询
+- [x] **W5.2.1** 工作台 v1(十收工前已完成)— 关联素材 / 删除 binding / 编辑提示词 ✓;上传素材走 /art workaround
+- [x] **W5.3** AIGC 集数总览页(十收工前已完成)— 5 集卡片 + 状态筛选 + 进度统计 + 创建集数 + project-overview nav 入口
+- [x] **W5.4** Seedance 抽卡 router + Mock 兜底 + 视频预览(十收工前已完成)
+- [x] **W5 P2 收尾**(L3 ADR / providerJobId unique / a11y / window.prompt→dialog)— 十收工前已完成
+- [x] **W6.1 + W6.3 数据洞察 MVP**(十收工)— insightsRouter 3 procs + /insights 页(KPI / 日 cost 趋势 / kind 分布 / 模型分布 / Top10 group)+ 4 轮 audit P0 11 项修
+- [x] **W7 后台三件套 MVP**(十收工)— admin/prompts(版本树 + 一键回滚)+ admin/styles(create/delete + kind 可选)+ admin/presets(4 类 + 默认值 fallback)
+- [x] **10 轮全栈 audit + 24 项修**(十收工)— W7 内部 3 轮 / 跨模块 3 轮 / 底层优化 4 轮;详见 PROGRESS
+- [ ] **W5.5** BullMQ video-gen worker(异步队列 + SSE 进度 + providerJobId 轮询)— 真接 Seedance 时必修
+- [ ] **W5.6** 素材库(Media Vault)— /media 上传 / 搜索 / 收藏 / 批量,Phase 2 / W6+
+- [ ] **Shot schema 加 movement + lighting 字段** — W7 预设 4 类目前 movement/lighting 没存的地方
+- [ ] **R9 Decimal.js 引入 cost ledger** — ledger.ts + insights.ts + aigc.ts + base.ts 多文件,大额累加精度
+- [ ] **R7 aigc-workspace memoization** — 1235 行 0 个 memo,大改
 
 - [ ] **跨设备协作工作流验证**(多端)
   - [x] 家里 Mac Studio `git pull` + 登录同一 Project + 说 `开工,在 mac-studio` 验证接续 — 2026-05-23

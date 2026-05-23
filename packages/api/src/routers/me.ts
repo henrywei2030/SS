@@ -4,6 +4,11 @@
 import { z } from 'zod';
 
 import { router, protectedProcedure } from '../trpc.js';
+import {
+  PRESET_KINDS,
+  PRESET_KIND_LABELS,
+  loadPresetValues,
+} from './admin.js';
 
 export const meRouter = router({
   /** 当前会话 */
@@ -41,5 +46,23 @@ export const meRouter = router({
         updatedAt: true,
       },
     });
+  }),
+
+  /**
+   * W7 audit R6:公开预设 endpoint(任何登录用户可调,业务侧 W3 storyboard / W5 aigc 用)
+   * 跟 admin.preset.list 同源数据,只是 protectedProcedure 让普通用户也能拉
+   */
+  presets: protectedProcedure.query(async ({ ctx }) => {
+    return Promise.all(
+      PRESET_KINDS.map(async (kind) => {
+        const { values, isDefault } = await loadPresetValues(ctx.prisma, kind);
+        return {
+          kind,
+          label: PRESET_KIND_LABELS[kind],
+          values,
+          isDefault,
+        };
+      }),
+    );
   }),
 });

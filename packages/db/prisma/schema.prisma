@@ -453,6 +453,13 @@ model AssetUsageBinding {
   // W5.1:在 ShotGroup 内的稳定序号(1/2/3...),用于 UI 显示"图片N"/"音频N",
   // 视频提示词里的 @图片N / @音频N token 引用同一编号。
   // null 表示该 binding 还没分配 slot(蓝图阶段 / 历史数据)。
+  //
+  // ⚠️ L3(W5 P2 设计决策):槽位"只增不复用"
+  //   autoMatch / bindAssetToGroup 用 `max(refSlotIdx) + 1` 续号,删 binding 后空缺不复用。
+  //   例:绑了 1/2/3 → 删 2 → 下次新绑得 4,UI 显示 "@图片1 / @图片3 / @图片4"(跳号)。
+  //   原因:复用空号会让历史 video attempts 的 inputJson.references 引用错位 — token "@图片2"
+  //   今天指向 A,明天复用后指向 B,审计 / 重抽都会乱套。
+  //   接受跳号 trade-off,前端 UI 不显示绝对编号(只显示资产名 + token),用户无感。
   refSlotIdx Int?
 
   asset     Asset      @relation(fields: [assetId], references: [id], onDelete: Cascade)
@@ -477,6 +484,9 @@ model AssetUsageBinding {
   @@index([shotId])
   @@index([projectId])
   @@index([shotGroupId, refSlotIdx]) // W5.1 UI:按 group 列出 bindings 时按 slot 排序
+  // ⚠️ W5 audit S1:refSlotIdx 在同 shotGroup 内必须唯一(防 @图片1 重复)
+  // 改为 partial unique index(WHERE shotGroupId IS NOT NULL AND refSlotIdx IS NOT NULL AND deletedAt IS NULL)
+  // 见 migration `20260523150000_w5_audit_refslot_unique`。Prisma schema 不写 @@unique 避免 migrate dev 试图改成普通 unique。
   @@map("asset_usage_bindings")
 }
 
@@ -557,6 +567,7 @@ model ShotGroup {
   episode  Episode             @relation(fields: [episodeId], references: [id], onDelete: Cascade)
   shots    Shot[]
   bindings AssetUsageBinding[] // W5.1:group 级资产绑定(AIGC 生成段引用)
+  attempts GenerationAttempt[] // W5.4:group 级视频生成尝试
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -799,14 +810,15 @@ enum MediaSource {
 // =============================================================================
 
 model GenerationAttempt {
-  id        String  @id @default(cuid())
-  shotId    String? // 可能 null（资产生成、剧本分析）
-  assetId   String?
-  projectId String
-  episodeId String?
+  id          String  @id @default(cuid())
+  shotId      String? // 可能 null（资产生成、剧本分析）
+  shotGroupId String? // W5.4:AIGC 视频生成绑到 ShotGroup(1-8 这种生成段)
+  assetId     String?
+  projectId   String
+  episodeId   String?
 
   // 调用信息
-  providerId     String // 'seedance-2.0' / 'nano-banana-pro' / ...
+  providerId     String // 'seedance-2.0' / 'kling-1.5' / 'happyhorse-pro' / 'local-mock' / ...
   modelId        String
   action         GenerationAction // VIDEO / IMAGE / TEXT / AUDIO
   inputJson      Json // 编译后 prompt + refAssets snapshot
@@ -816,6 +828,9 @@ model GenerationAttempt {
 
   // W5.0:异步 Provider(Seedance 等)create→poll 模式的任务 ID。
   // 客户端轮询 / W5.3 BullMQ worker 用它回查 Provider 任务状态。
+  //
+  // W5 P2:(providerId, providerJobId) partial unique — 防 webhook / poll retry
+  // 多次回写同 jobId 产生重复 SUCCESS。见 migration 20260523180000_w5_p2_providerjob_unique。
   providerJobId  String?
 
   // 计费
@@ -854,10 +869,14 @@ model GenerationAttempt {
 
   user      User             @relation("AttemptCreatedBy", fields: [createdBy], references: [id])
   shot      Shot?            @relation(fields: [shotId], references: [id], onDelete: Cascade)
+  // W1-W5 audit 三轮 F1:改 SetNull,防未来误硬删 ShotGroup 抹掉 attempt 审计链路。
+  // archiveGroup 走软删,不触发 FK,所以这里 SetNull 跟当前行为一致 + 防硬删兜底。
+  shotGroup ShotGroup?       @relation(fields: [shotGroupId], references: [id], onDelete: SetNull)
   costEntry CostLedgerEntry?
 
   @@index([projectId])
   @@index([shotId])
+  @@index([shotGroupId, action, status]) // W5.4:listVideoTakes 用
   @@index([providerId, status])
   @@index([createdBy, createdAt])
   @@map("generation_attempts")
@@ -1137,7 +1156,15 @@ model SystemSetting {
   id          String   @id @default(cuid())
   key         String   @unique
   value       String   @db.Text
-  category    String   @default("general") // 'general' | 'security' | 'branding' | 'feature_flag'
+  category    String   @default("general")
+  // W7 audit R3:实际使用的 category 字典(请保持同步):
+  //   'general'        — 通用业务参数(storyboard.maxDurationS / shot.video.* 等)
+  //   'security'       — 安全 / 认证开关(auth.allowSignup 等)
+  //   'branding'       — 品牌(system.brand.* 等)
+  //   'feature_flag'   — 功能开关(asset.compliance.requireForVideo 等)
+  //   'model_binding'  — 模型用途绑定(binding.* — W3 加,见 admin.binding)
+  //   'preset'         — UI 预设字典(preset.framing/angle/movement/lighting — W7 加,见 admin.preset)
+  // 新增 category 必须在此注释 + 在 admin.system 端通过 zod enum 校验
   description String?
   isSecret    Boolean  @default(false)
   updatedBy   String?

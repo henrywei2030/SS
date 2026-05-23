@@ -5,6 +5,90 @@
 
 ---
 
+## 2026-05-23(周六,win-laptop · 十次收工)— W5/W6/W7 全交付 + 10 轮全栈 audit 24 项修
+
+**完成 — 巨量产出**
+
+### W5 收尾(P2 4 项)
+- ✅ L3:refSlotIdx 跳号 ADR 注释(schema 字段注释解释"只增不复用"trade-off)
+- ✅ providerJobId 加 partial unique 索引(防 webhook/poll retry 双写,migration `20260523180000_w5_p2_providerjob_unique`)
+- ✅ a11y:hover-only 按钮改 opacity + focus-visible + aria-label
+- ✅ window.prompt/confirm → PromptDialog/ConfirmDialog(role + aria + Enter/Escape + autoFocus)
+
+### W6 数据洞察 MVP(W6.1 + W6.3 + 4 轮 audit)
+- ✅ `insightsRouter`(3 procs):getProjectOverview / getModelDistribution / getTopShotGroupsByGachaRate
+- ✅ `/projects/[id]/insights` 单页:4 KPI 卡 + 日 cost 趋势(CSS bar)+ kind 分布 + 模型分布 + Top10 group 表
+- ✅ project-overview 加 nav 入口(`--color-mod-analytics`)
+- ✅ **4 轮 audit 11 P0 + 5 P1 全修**:
+  - Top10 加 rejected:false 过滤 + episode.deletedAt 过滤(防 NOT_FOUND)
+  - days 默认对齐 30(原 Top10 全期错位)
+  - 成本(¥)从 ledger,计数从 GenerationAttempt(单一来源跟 aigc 对齐,seedance 失败写多 ledger 不影响计数)
+  - successCostCny 字段独立(KPI"成功 ¥"算法错修)
+  - costByDay UTC 时区(跨设备分桶不偏)
+  - costByKind whitelist(image/video/text/audio/compliance/analysis/other)+ 未知 prefix warn
+  - Top10 attemptSuccessRate 命名消除跟 gachaRatio(时长口径)歧义
+  - UI:3 useQuery error 状态 + 模型分布显 providerId/modelId + Top10 thead sticky + a11y(tab role + 色弱图标)+ formatCny 极小值 "<¥0.01"
+
+### W7 后台三件套 MVP
+- ✅ **admin/prompts** — 左:7 类分组列表 + 版本数 badge / 右:编辑器(描述 + 正文 textarea + 改动备注)+ 历史版本 dialog(版本列表 + 一键回滚 + diff)
+- ✅ **admin/styles** — 内置 + 自定义卡片 / 编辑器(name + character/scene/prop 三段 + 禁用词)+ 新建 dialog;内置拒改名/拒删
+- ✅ **admin/presets** — 4 tab(景别/机位/运镜/光线)+ 增删/上下移/序号重排/恢复默认
+- ✅ Router 增强:`admin.prompt`(getById + listVersions + restoreVersion);`admin.style`(create + delete + name 校验);新 `admin.preset`(list + set + resetToDefault)
+
+### 10 轮全栈 audit + 24 项修复
+**Batch 1(R1-R6)W7 内部 + 跨模块**:
+- R1 versionTag 用 UUID 取代 `${Date.now()}`(防并发撞 unique)
+- R1 content + description + modelHint 加 maxLength
+- R2 invalidate 覆盖草稿守卫(lastSyncedTemplateId/Kind ref + dirty 检测)
+- R2 useQuery isError 处理(3 admin 页 + 重试)
+- R2 3 处 window.confirm → ConfirmDialog
+- R3 SystemSetting category 6 种文档化(general/security/branding/feature_flag/model_binding/preset)
+- 🔥 **R4 prompt 模板 100% dead UI → DB-driven**:loadPromptTemplate helper(packages/core/shared)+ 3 LLM 入口(asset/breakdown / storyboard/generate / script/analyze)接 DB + hardcoded fallback;seed 补 script_analysis_main 模板
+- 🔥 **R5 slug 硬编码 + kind=CUSTOM 强制**:slug 黑名单(ai_real/anim_3d/anim_2d)+ kind 可选(4 个 enum)+ 错误 meta.target 清晰
+- 🔥 **R6 预设 100% dead UI → 半活**:抽 loadPresetValues helper + `me.presets` 公开 endpoint(普通用户可调)+ W3 edit-dialog `PresetField`(input + datalist 拉 presets,自定义值兼容)
+- R5 W3 storyboard 给 LLM 加 propPrompt(W4/W5 之前修过 video.ts 同问题,W3 这次补)
+
+**Batch 2(R7-R10)底层优化**:
+- R7 asset.batchCreate → createManyAndReturn(~50× 加速)
+- R7 性能 P0:aigc-workspace 1235 行 0 memoization / seedance 5min 同步阻塞 / 0 dynamic import — 已记 TODO,大改留下次
+- R8 P0 **CSRF Origin 校验 middleware**(POST 校验,GET 放行,dev / NEXT_PUBLIC_APP_URL 白名单)
+- R8 P0 **Rate limit middleware**:auth.login(5/min/IP)+ aigc.generateVideo(10/min/user)+ storyboard.generateForEpisode(5/min/user)
+- R8 P0 **GenerationAttempt.inputJson 脱敏**:`sanitize-prompt` helper(preview 200 字 + sha256 hash 替明文 prompt;references strip name/mediaUrl 留 idx+kind+assetId)
+- R8 P1 admin.system.listSettings 过滤 isSecret(value 脱敏成"••••(secret)")
+- R9 TRPCError 加 cause(asset breakdown / asset generateImage / script analyze / aigc generateVideo)
+- R9 `g.videoTakes!` 非空断言守卫(IIFE 解构)
+- R10 抽 `assertProjectAccess` 公共 helper(5 router 字面相同复制 → 集中 middleware/access.ts)
+- R10 抽 ConfirmDialog/PromptDialog 公共组件(components/ui/confirm-dialog.tsx)
+- R10 formatCny 统一(insights 用 utils 而非自实现)
+- R10 prompt-compiler.ts 死代码删
+
+### 文档同步
+- ✅ TODO.md:13 项已完成勾选 + 5 项剩余明确列出
+- ✅ PROGRESS.md(本条)
+- ✅ docs/05-tech-decisions.md:ADR-21 W5 升级接口已存 + 本次 schema/middleware 决策注释化在 admin.ts / events.ts / 各 helper
+
+**质量**
+- 7 包 typecheck 全绿
+- 60 core + 25 api 单测全过(零回归)
+- 工作区 28 modified + 17 new + 1 deleted + +2980 / -493 lines
+
+**进行中**
+- 🚧 W5.5 BullMQ 异步 worker(真接 Seedance 必修,Mock 阶段不阻塞)
+- 🚧 R9 Decimal.js cost ledger 精度(大额累加 IEEE-754,涉及 4 文件)
+- 🚧 R7 aigc-workspace memoization(1235 行,需拆 sub-component)
+- 🚧 Shot schema 加 movement/lighting(W7 这 2 类预设没存的地方)
+
+**问题 / 待决策**
+- ❓ W6 是否要做"成员/工作报告"(原 W6.4),需新表 schema,W7 末或 Phase 2?
+- ❓ Tauri 打包(原 W7)— web 实战不需要,延后?
+- ❓ EN 文案 review(原 W7)— i18n 抽词大工程,Phase 2?
+
+**下次接着做**
+- 📌 选择:① W8 实战准备(种子数据 + 操作日志页 + 5 人 onboarding SOP)/ ② 继续修剩余 4 项 audit / ③ 配真 API Key 跑 e2e 业务验证
+- 📌 重传 Project 知识库 4 份(TODO / PROGRESS / docs/04 / docs/05)
+
+---
+
 ## 2026-05-23(周六,win-laptop · 九次收工)— W5.1 token 化重写 + W5.2 v0 AIGC 工作台
 
 **完成**

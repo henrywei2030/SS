@@ -177,6 +177,17 @@ async function main() {
       content: '生成一张 360° 全景图，要求：\n1. 等距圆柱投影（equirectangular），2:1 宽高比\n2. 无人物，纯空间\n3. 灯光与剧情时段一致（白天/黄昏/夜晚）\n4. 主要朝向标注：北/南/东/西墙各有何摆设',
       varsJson: {},
     },
+    {
+      // W7 audit R4:剧本 8 维分析 — 之前 hardcoded,这里入 DB,admin 可改
+      category: PromptCategory.SCRIPT_STORYBOARD,
+      slug: 'script_analysis_main',
+      versionTag: 'v1',
+      name: '剧本 8 维分析',
+      description: '生成 hook/suspense/twist/climax/conflict/dialogue/pace/urgency + 曲线 + 制作计划',
+      content:
+        '你是经验丰富的短剧编剧 + 制作人。任务:为一集剧本输出 8 维评分(hook/suspense/twist/climax/conflict/dialogue/pace/urgency 各 0-10)+ overall + summary + highlights + issues + curve(每集 8-15 点)+ productionPlan(每镜 priority S/A/B/C)。输出严格 JSON,不要 markdown 包裹。',
+      varsJson: {},
+    },
   ];
 
   for (const t of templates) {

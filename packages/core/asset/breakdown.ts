@@ -14,6 +14,8 @@
 import { getTextProvider } from '@ss/adapters/provider';
 import type { CallContext } from '@ss/adapters/provider';
 
+import { loadPromptTemplate } from '../shared/load-prompt.js';
+
 // ---------------------------------------------------------------------------
 // 类型
 // ---------------------------------------------------------------------------
@@ -136,9 +138,12 @@ export async function breakdownAssets(
 
   const userPrompt = buildUserPrompt(input);
 
+  // W7 audit R4:从 DB PromptTemplate 拉(admin 可编辑),失败 fallback 到 hardcoded SYSTEM_PROMPT
+  const systemPrompt = await loadPromptTemplate('asset_step_base', SYSTEM_PROMPT);
+
   const result = await provider.generate(
     {
-      system: SYSTEM_PROMPT,
+      system: systemPrompt,
       prompt: userPrompt,
       maxTokens: 4096,
       temperature: 0.2,

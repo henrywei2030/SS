@@ -7,6 +7,8 @@
 import { getTextProvider } from '@ss/adapters/provider';
 import type { CallContext } from '@ss/adapters/provider';
 
+import { loadPromptTemplate } from '../shared/load-prompt.js';
+
 export interface AnalysisInput {
   scriptText: string;
   episodeNumber: number;
@@ -101,9 +103,12 @@ curve 点数：每集 8-15 个，覆盖完整时间线。`;
 
 export async function analyzeScript(input: AnalysisInput): Promise<AnalysisResult> {
   const provider = await getTextProvider(input.modelId ?? 'claude-sonnet-4-5');
+  // W7 audit R4:DB-driven prompt(admin 可编辑),失败 fallback hardcoded
+  const systemPrompt = await loadPromptTemplate('script_analysis_main', SYSTEM_PROMPT);
+
   const result = await provider.generate(
     {
-      system: SYSTEM_PROMPT,
+      system: systemPrompt,
       prompt: `请分析以下第 ${input.episodeNumber} 集剧本：\n\n${input.scriptText}`,
       maxTokens: 4096,
       temperature: 0.2,

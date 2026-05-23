@@ -48,22 +48,8 @@ async function assertEpisodeNotGenerating(
 // 通用：项目访问
 // ---------------------------------------------------------------------------
 
-async function assertProjectAccess(
-  ctx: Context,
-  projectId: string,
-  userId: string,
-): Promise<void> {
-  const p = await ctx.prisma.project.findFirst({
-    where: {
-      id: projectId,
-      deletedAt: null,
-      OR: [{ ownerId: userId }, { members: { some: { userId } } }],
-    },
-  });
-  if (!p) {
-    throw new TRPCError({ code: 'FORBIDDEN', message: '无项目访问权限' });
-  }
-}
+// W7+ audit R10:assertProjectAccess 抽到 middleware/access.ts
+import { assertProjectAccess } from '../middleware/access.js';
 
 async function loadScriptWithAccess(ctx: Context, scriptId: string) {
   if (!ctx.user) throw new TRPCError({ code: 'UNAUTHORIZED' });
@@ -71,7 +57,7 @@ async function loadScriptWithAccess(ctx: Context, scriptId: string) {
     where: { id: scriptId, deletedAt: null },
   });
   if (!script) throw new TRPCError({ code: 'NOT_FOUND', message: '剧本不存在' });
-  await assertProjectAccess(ctx, script.projectId, ctx.user.id);
+  await assertProjectAccess(ctx, script.projectId);
   return script;
 }
 
@@ -170,7 +156,7 @@ export const scriptRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, input.projectId);
       await assertEpisodeNotGenerating(ctx, input.projectId, input.episodeNumber);
 
       // 1. upsert Episode
@@ -245,7 +231,7 @@ export const scriptRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, input.projectId);
       await assertEpisodeNotGenerating(ctx, input.projectId, input.episodeNumber);
 
       // 1. base64 → Buffer → 按格式提取纯文本
@@ -345,7 +331,7 @@ export const scriptRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, input.projectId);
       return ctx.prisma.script.findMany({
         where: {
           projectId: input.projectId,
@@ -377,7 +363,7 @@ export const scriptRouter = router({
         where: { id: input.episodeId, deletedAt: null },
       });
       if (!ep) throw new TRPCError({ code: 'NOT_FOUND', message: '集不存在' });
-      await assertProjectAccess(ctx, ep.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, ep.projectId);
 
       return ctx.prisma.script.findMany({
         where: { episodeId: input.episodeId, deletedAt: null },
@@ -424,7 +410,7 @@ export const scriptRouter = router({
   latestProjectAnalysis: protectedProcedure
     .input(z.object({ projectId: z.string().cuid() }))
     .query(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, input.projectId);
       return ctx.prisma.scriptAnalysis.findFirst({
         where: { projectId: input.projectId, scope: 'PROJECT' },
         orderBy: { createdAt: 'desc' },
@@ -452,7 +438,7 @@ export const scriptRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, input.projectId);
       // [W6] 这里要 enqueue 一个异步任务。当前返回 placeholder。
       void input.episodeIds;
       void input.modelId;
@@ -563,7 +549,7 @@ export const scriptRouter = router({
         include: { episode: true },
       });
       if (!script) throw new TRPCError({ code: 'NOT_FOUND' });
-      await assertProjectAccess(ctx, script.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, script.projectId);
 
       const { analyzeScript } = await import('@ss/core/script');
 
@@ -670,6 +656,7 @@ export const scriptRouter = router({
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
           message: errMsg || '剧本分析失败',
+          cause: e, // W7 audit R9
         });
       }
     }),

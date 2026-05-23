@@ -13,6 +13,13 @@
  * 命名规范：`{domain}.{action}` 全小写，名词在前
  *   ✓ storyboard.published
  *   ✗ publishStoryboard
+ *
+ * ⚠️ 启用状态(W1-W5 audit 三轮 E2):
+ *   Phase 1(W5.4)阶段,**只有 `GENERATION_COMPLETED`(kind=video)**真的被 publish
+ *   (在 packages/api/src/routers/aigc.ts:generateVideo onSuccess)。
+ *   其它所有 topic 定义齐全但 **router 端尚未 publish** — 订阅方不会收到。
+ *   全量启用排在 W6 剪辑模块 + W5.5 BullMQ worker 一起落地。
+ *   接手人:加 publish 时跟着这里的 PayloadMap 类型走,跨包订阅自动得到类型 hint。
  */
 
 // ============================================================================
@@ -158,16 +165,45 @@ export interface EventPayload {
     complianceId?: string;
   };
 
-  [EVENTS.GENERATION_QUEUED]: { attemptId: string; shotId: string; providerId: string };
-  [EVENTS.GENERATION_STARTED]: { attemptId: string };
-  [EVENTS.GENERATION_COMPLETED]: {
+  [EVENTS.GENERATION_QUEUED]: {
     attemptId: string;
-    shotId: string;
-    mediaItemId: string;
-    durationS: number;
-    costCny: number;
+    /** W3 shot-level 抽卡(图片 candidate)/ null = W5 group-level 视频抽卡 */
+    shotId: string | null;
+    shotGroupId?: string | null; // W5.4 加
+    providerId: string;
   };
-  [EVENTS.GENERATION_FAILED]: { attemptId: string; shotId: string; error: string };
+  [EVENTS.GENERATION_STARTED]: { attemptId: string };
+  /**
+   * W1-W5 audit 三轮 E1:payload 改 union 兼容 W3 shot 级(图片)和 W5 group 级(视频)。
+   * `kind` 区分:'image' 时 shotId/mediaItemId 必填;'video' 时 shotGroupId/videoUrl 必填。
+   */
+  [EVENTS.GENERATION_COMPLETED]:
+    | {
+        kind: 'image';
+        attemptId: string;
+        shotId: string;
+        mediaItemId: string;
+        durationS?: number;
+        costCny: number;
+      }
+    | {
+        kind: 'video';
+        attemptId: string;
+        shotGroupId: string;
+        episodeId: string | null;
+        projectId: string;
+        providerId: string;
+        mediaId: string;
+        videoUrl: string;
+        durationS: number;
+        costCny: number;
+      };
+  [EVENTS.GENERATION_FAILED]: {
+    attemptId: string;
+    shotId?: string | null;
+    shotGroupId?: string | null;
+    error: string;
+  };
   [EVENTS.GENERATION_ADOPTED]: { attemptId: string; adoptedBy: string };
   [EVENTS.GENERATION_REJECTED]: { attemptId: string; rejectedBy: string };
   [EVENTS.GENERATION_AUTO_SALVAGED]: {

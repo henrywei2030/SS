@@ -13,6 +13,8 @@
  *   - 与 packages/adapters/provider 的 TextProvider 接口对齐
  */
 import { getTextProvider } from '@ss/adapters/provider';
+
+import { loadPromptTemplate } from '../shared/load-prompt.js';
 import type { CallContext } from '@ss/adapters/provider';
 
 import type { ParsedScene } from '../script/parse.js';
@@ -33,6 +35,8 @@ export interface GenerateStoryboardInput {
   stylePrompt?: {
     scenePrompt?: string | null;
     characterPrompt?: string | null;
+    // W7 audit R5:propPrompt 之前漏传(W4/W5 拼接公式都读三段,W3 LLM 输入只读 2 段)
+    propPrompt?: string | null;
     forbiddenWords?: string[] | null;
   };
   /** 已知角色资产名单,用于 @ 引用提示 */
@@ -121,9 +125,12 @@ export async function generateStoryboard(
 
   const userPrompt = buildUserPrompt(input);
 
+  // W7 audit R4:DB-driven prompt(admin 可编辑),失败 fallback hardcoded
+  const systemPrompt = await loadPromptTemplate('storyboard_main', SYSTEM_PROMPT);
+
   const result = await provider.generate(
     {
-      system: SYSTEM_PROMPT,
+      system: systemPrompt,
       prompt: userPrompt,
       maxTokens: 4096,
       temperature: 0.3,
@@ -176,12 +183,14 @@ function buildUserPrompt(input: GenerateStoryboardInput): string {
     })
     .join('\n');
 
-  // 完整风格段:scenePrompt(场景质感)+ characterPrompt(人物风格)+ forbiddenWords
+  // 完整风格段:scene/character/prop 三段 prompt + forbiddenWords
+  // W7 audit R5:补 propPrompt(原漏传,跟 W4/W5 拼接公式对齐)
   // 让生成的镜头 prompt 直接继承全剧统一风格
   const styleBlock = stylePrompt
     ? [
         stylePrompt.scenePrompt ? `场景风格: ${stylePrompt.scenePrompt}` : null,
         stylePrompt.characterPrompt ? `人物风格: ${stylePrompt.characterPrompt}` : null,
+        stylePrompt.propPrompt ? `道具风格: ${stylePrompt.propPrompt}` : null,
         stylePrompt.forbiddenWords && stylePrompt.forbiddenWords.length > 0
           ? `禁止: ${stylePrompt.forbiddenWords.join('、')}`
           : null,

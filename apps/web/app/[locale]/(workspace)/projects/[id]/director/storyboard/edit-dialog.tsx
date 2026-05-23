@@ -89,24 +89,24 @@ export function ShotEditDialog({
 
         <div className="flex flex-col gap-3">
           <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-1.5">
-              <Label htmlFor="framing">景别</Label>
-              <Input
-                id="framing"
-                value={framing}
-                onChange={(e) => setFraming(e.target.value)}
-                placeholder="特写 / 近景 / 中景 / 全景"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="angle">角度</Label>
-              <Input
-                id="angle"
-                value={angle}
-                onChange={(e) => setAngle(e.target.value)}
-                placeholder="平视 0° / 俯视 30° / 仰视 15° / 侧拍 45°"
-              />
-            </div>
+            {/* W7 audit R6:景别 / 角度 改 Select(datalist 模式),拉 me.presets,
+                兼容自定义值(用户仍可输入预设外的字符串,作训练数据) */}
+            <PresetField
+              id="framing"
+              label="景别"
+              kind="framing"
+              value={framing}
+              onChange={setFraming}
+              placeholder="特写 / 近景 / 中景"
+            />
+            <PresetField
+              id="angle"
+              label="角度"
+              kind="angle"
+              value={angle}
+              onChange={setAngle}
+              placeholder="平视 / 过肩 / 俯角"
+            />
           </div>
 
           <div className="grid gap-1.5">
@@ -274,5 +274,49 @@ export function GroupEditDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// W7 audit R6:PresetField — input + datalist 模式
+// 业务侧拉 me.presets 提供下拉选项,但仍允许自定义输入(用户输预设外字符串作训练数据)
+// ---------------------------------------------------------------------------
+
+function PresetField({
+  id,
+  label,
+  kind,
+  value,
+  onChange,
+  placeholder,
+}: {
+  id: string;
+  label: string;
+  kind: 'framing' | 'angle' | 'movement' | 'lighting';
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}): React.ReactElement {
+  const { data: presets } = trpc.me.presets.useQuery(undefined, {
+    staleTime: 5 * 60 * 1000,
+  });
+  const options = presets?.find((p) => p.kind === kind)?.values ?? [];
+
+  return (
+    <div className="grid gap-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <Input
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        list={`preset-${kind}`}
+      />
+      <datalist id={`preset-${kind}`}>
+        {options.map((opt) => (
+          <option key={opt} value={opt} />
+        ))}
+      </datalist>
+    </div>
   );
 }

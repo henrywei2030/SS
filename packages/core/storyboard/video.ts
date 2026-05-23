@@ -63,8 +63,12 @@ export interface VideoReference {
   kind: ReferenceKind;
   assetId: string;
   name: string;
-  /** Seedance 拿这个作 refImageUrls / refAudioUrls */
-  mediaUrl: string;
+  /**
+   * Seedance 拿这个作 refImageUrls / refAudioUrls。
+   * null 表示 binding 在但主图缺失(资产没有 portraitMediaId / sceneMainMediaId 等)—
+   * compile 时会进 warnings.missingMedia,UI 提示用户去美术工作台补图,且不送给 Seedance。
+   */
+  mediaUrl: string | null;
 }
 
 export interface CompileShotGroupVideoPromptInput {
@@ -120,6 +124,8 @@ export interface CompiledShotGroupVideoPrompt {
     unusedReferences: number[];
     /** text 里用了 @图片N / @音频N 但 references 没提供 — Seedance 会拿不到参考 */
     unknownTokens: string[];
+    /** binding 在但主图缺失(W5 audit W1)— refSlotIdx 列表,UI 提示"图片N 缺主图,去美术工作台补" */
+    missingMedia: Array<{ refSlotIdx: number; kind: ReferenceKind; assetName: string }>;
   };
 }
 
@@ -130,70 +136,66 @@ const DEFAULT_ASPECT_RATIO = '9:16';
 // ---------------------------------------------------------------------------
 
 /**
- * 在 text 中找 binding 的 name / alias 首次出现位置,紧跟其后插入 @图片N(或 @音频N)token。
+ * 在 text 中找 binding 的 name / alias **每一次出现位置**,紧跟其后插入 @图片N / @音频N token。
  *
- * 规则:
- *   - 已有 @图片N 紧随同一 binding 的 name 后 → 不重复插入
- *   - 没找到 name / alias → 该 binding 跳过(也会进 warnings,但本函数仅负责 text,不返 warnings)
- *   - 同 binding 在 text 中多次出现 → 只在第一次出现处插
- *   - 多 binding 共享同 name(罕见,如 "陆萌萌" 出现两次但绑两个不同变体)→ 第一个 binding 占第一处,第二个占第二处
+ * 规则(W5 audit T1 修):
+ *   - 标**所有**出现(产品截图证实:同一段提示词里 "陆萌萌@图片2" 重复多次)
+ *   - 已有正确 token 紧跟某次 name 出现 → 该次跳过(已标)
+ *   - 已有错 token(例 text 有 @图片5 但本 binding 是 #2)→ 不动 text,留给 compile 报 warning
+ *   - 找不到 name / alias 任一处 → 该 binding 静默跳过(compile 时会进 unusedReferences)
  *
- * 不会动:
- *   - 已有但绑错了的 token(例 text 有 @图片5 但只有 4 个 binding)→ 留给 compile 报 warning
- *   - text 中的标点和换行 → 严格按字符位置插入
+ * 多 binding 共享同 name(罕见,变体场景):
+ *   - 第一个 binding 标全部出现 → 第二个 binding 来时所有 name 后已有 token → 跳过
+ *   - 这是设计妥协:同名变体只能用 alias 区分或人工手编
  */
 export function autoTagPromptWithReferences(
   text: string,
   bindings: AutoTagBinding[],
 ): string {
   if (!text || bindings.length === 0) return text;
-
-  // 同 binding 在 text 中可能出现多次,我们只插第一次 — 用 occurrenceCursor 跟踪每个 name 已用到第几次
-  const occurrenceCursor: Map<string, number> = new Map();
   let result = text;
 
   for (const b of bindings) {
-    const expectedToken = tokenFor(b.kind, b.refSlotIdx);
+    const token = tokenFor(b.kind, b.refSlotIdx);
     const candidates = [b.name, ...(b.aliases ?? [])].filter(
       (s) => s && s.length > 0,
     );
 
     for (const cand of candidates) {
-      const cursor = occurrenceCursor.get(cand) ?? 0;
-      const insertPos = findNthOccurrenceEnd(result, cand, cursor + 1);
-      if (insertPos < 0) continue;
-
-      // 检查 insertPos 后是否已经紧跟 @图片N / @音频N — 已有则跳过
-      const trailing = result.slice(insertPos, insertPos + 12);
-      if (/^@(图片|音频)\d+/.test(trailing)) {
-        occurrenceCursor.set(cand, cursor + 1);
-        break; // 已标过,该 binding 完成
-      }
-
-      result =
-        result.slice(0, insertPos) + expectedToken + result.slice(insertPos);
-      occurrenceCursor.set(cand, cursor + 1);
-      break; // 该 binding 标完,跳出 candidates 循环
+      result = tagAllOccurrences(result, cand, token);
     }
   }
 
   return result;
 }
 
-/** 找 needle 在 haystack 中第 n 次出现的"末尾索引"(用于在词后插 token);找不到返 -1 */
-function findNthOccurrenceEnd(
+/**
+ * 在 haystack 中找 needle 的所有出现,每处紧跟其后插 token。
+ * 已紧跟 @图片N / @音频N 的 occurrence 跳过(避免重复 + 不覆盖手编)。
+ */
+function tagAllOccurrences(
   haystack: string,
   needle: string,
-  n: number,
-): number {
-  if (!needle) return -1;
+  token: string,
+): string {
+  if (!needle) return haystack;
   let from = 0;
-  for (let i = 0; i < n; i++) {
-    const idx = haystack.indexOf(needle, from);
-    if (idx < 0) return -1;
-    from = idx + needle.length;
+  let result = haystack;
+  while (from <= result.length) {
+    const idx = result.indexOf(needle, from);
+    if (idx < 0) break;
+    const insertPos = idx + needle.length;
+    const trailing = result.slice(insertPos, insertPos + 12);
+    const existing = trailing.match(/^@(图片|音频)\d+/);
+    if (existing) {
+      // 已标(可能是本 binding 或其他 binding),跳过
+      from = insertPos + existing[0].length;
+      continue;
+    }
+    result = result.slice(0, insertPos) + token + result.slice(insertPos);
+    from = insertPos + token.length;
   }
-  return from;
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -254,10 +256,25 @@ export function compileShotGroupVideoPrompt(
   const outRefs: CompiledShotGroupVideoPrompt['references'] = [];
   const unusedReferences: number[] = [];
   const unknownTokens: string[] = [];
+  const missingMedia: CompiledShotGroupVideoPrompt['warnings']['missingMedia'] = [];
 
   for (const r of input.references) {
     const key = `${r.kind}:${r.refSlotIdx}`;
-    if (usedTokenKeys.has(key)) {
+    const isUsed = usedTokenKeys.has(key);
+
+    // W5 audit W1:mediaUrl 缺失先报 missingMedia,无论是否被 text 引用
+    if (!r.mediaUrl) {
+      missingMedia.push({
+        refSlotIdx: r.refSlotIdx,
+        kind: r.kind,
+        assetName: r.name,
+      });
+      // 同时,如果 text 没引用,也算 unused;但缺图本身是更严重的问题,优先标 missingMedia
+      if (!isUsed) unusedReferences.push(r.refSlotIdx);
+      continue;
+    }
+
+    if (isUsed) {
       outRefs.push({
         refSlotIdx: r.refSlotIdx,
         token: tokenFor(r.kind, r.refSlotIdx),
@@ -291,7 +308,7 @@ export function compileShotGroupVideoPrompt(
     aspectRatio,
     durationS,
     parts: { stylePart, textPart, durationPart, extraPart },
-    warnings: { unusedReferences, unknownTokens },
+    warnings: { unusedReferences, unknownTokens, missingMedia },
   };
 }
 

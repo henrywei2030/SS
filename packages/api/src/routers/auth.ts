@@ -6,10 +6,19 @@ import { z } from 'zod';
 
 import { getAuthAdapter } from '@ss/adapters/auth';
 
-import { router, publicProcedure, protectedProcedure } from '../trpc.js';
+import { router, publicProcedure, protectedProcedure, rateLimit } from '../trpc.js';
 
 export const authRouter = router({
+  // W7 audit R8 P0:auth.login 加 rate limit(防撞密码),per-IP 5 次 / 60s
   login: publicProcedure
+    .use(
+      rateLimit({
+        key: (ctx) => `login:${ctx.ip ?? 'no-ip'}`,
+        max: 5,
+        windowMs: 60_000,
+        message: '登录过快(每分钟最多 5 次),请稍候再试',
+      }),
+    )
     .input(
       z.object({
         identifier: z.string().min(1, '请输入邮箱或用户名'),

@@ -29,6 +29,15 @@
 > - 重建 partial functional unique 含 shotGroupId 维度(`COALESCE(sceneId,'') + COALESCE(shotGroupId,'') + COALESCE(shotId,'') + WHERE deletedAt IS NULL`)— migration `20260523113000_w5_1_assetusage_shotgroup_refslot`。
 > - **`ShotGroup`** 加 `bindings AssetUsageBinding[]` 反向关系。
 > - **AssetUsageType 不扩**:音频用既有 SOUND_BG / SOUND_VOICE / THEME 三个值,compile 时用 `kindFromUsage()` 派生 IMAGE/AUDIO 而不是存独立字段。
+>
+> 2026-05-23 (十收工) 更新(W5 audit3 + W6 + W7 + 10 轮 audit):
+> - **`generation_attempts.shotGroupId`** FK 改 SetNull(W5 audit3,防硬删 ShotGroup 抹审计;migration `20260523170000_w5_audit3_attempt_shotgroup_setnull`)
+> - **`generation_attempts.providerJobId`** 加 partial unique `(providerId, providerJobId) WHERE providerJobId IS NOT NULL`(W5 P2,防 W5.5 BullMQ webhook/retry 双写;migration `20260523180000_w5_p2_providerjob_unique`)
+> - **`asset_usage_bindings` partial unique 含 shotGroupId+refSlotIdx**(W5 audit S1,防同 group 内编号撞车;migration `20260523150000_w5_audit_refslot_unique`)
+> - **`SystemSetting.category`** 字典文档化为 6 种(原 schema 注释只列 4):`general / security / branding / feature_flag / model_binding / preset`(W7 加 preset)
+> - **`PromptTemplate` 业务接入**:loadPromptTemplate helper 让 3 个 LLM 入口(asset/breakdown / storyboard/generate / script/analyze)从 DB 拉,fallback 到 hardcoded;seed 补 `script_analysis_main` 模板。Admin 改完实时生效(无缓存)
+> - **`me.presets` 公开 endpoint**:让 W3 storyboard 编辑分镜(framing/angle)能拉 admin/presets 的预设字典(datalist 模式,自定义值兼容)
+> - **`generation_attempts.inputJson` 脱敏**:`sanitize-prompt` helper 将 prompt 明文改为 preview(200 字)+ sha256 hash;references 仅留 idx+kind+assetId(剥 name+mediaUrl);防 DBA / 备份泄露 / listVideoTakes 越权拿原文
 
 | 领域 | 表 | 用途 |
 |---|---|---|

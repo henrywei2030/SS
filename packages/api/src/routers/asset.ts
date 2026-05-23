@@ -29,22 +29,8 @@ import { logOperation } from '../middleware/audit.js';
 // 通用
 // ---------------------------------------------------------------------------
 
-async function assertProjectAccess(
-  ctx: Context,
-  projectId: string,
-  userId: string,
-): Promise<void> {
-  const p = await ctx.prisma.project.findFirst({
-    where: {
-      id: projectId,
-      deletedAt: null,
-      OR: [{ ownerId: userId }, { members: { some: { userId } } }],
-    },
-  });
-  if (!p) {
-    throw new TRPCError({ code: 'FORBIDDEN', message: '无项目访问权限' });
-  }
-}
+// W7+ audit R10:assertProjectAccess 抽到 middleware/access.ts(原 5 router 各一份)
+import { assertProjectAccess } from '../middleware/access.js';
 
 async function loadAssetWithAccess(ctx: Context, assetId: string) {
   if (!ctx.user) throw new TRPCError({ code: 'UNAUTHORIZED' });
@@ -52,7 +38,7 @@ async function loadAssetWithAccess(ctx: Context, assetId: string) {
     where: { id: assetId, deletedAt: null },
   });
   if (!asset) throw new TRPCError({ code: 'NOT_FOUND', message: '资产不存在' });
-  await assertProjectAccess(ctx, asset.projectId, ctx.user.id);
+  await assertProjectAccess(ctx, asset.projectId);
   return asset;
 }
 
@@ -248,7 +234,7 @@ export const assetRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, input.projectId);
       const assets = await ctx.prisma.asset.findMany({
         where: {
           projectId: input.projectId,
@@ -339,7 +325,7 @@ export const assetRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, input.projectId);
 
       // 同项目同名重复检测(防分镜 @ 匹配混乱)
       const dup = await ctx.prisma.asset.findFirst({
@@ -369,7 +355,7 @@ export const assetRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, input.projectId);
 
       // 先查同项目已有 name 集合,跳过重名
       const existing = await ctx.prisma.asset.findMany({
@@ -378,20 +364,22 @@ export const assetRouter = router({
       });
       const existingNames = new Set(existing.map((a) => a.name));
 
-      const created: Array<{ id: string; name: string; type: string }> = [];
-      const skipped: string[] = [];
-
-      for (const draft of input.drafts) {
-        if (existingNames.has(draft.name)) {
-          skipped.push(draft.name);
-          continue;
-        }
-        const asset = await ctx.prisma.asset.create({
-          data: { projectId: input.projectId, ...draft },
-        });
-        created.push({ id: asset.id, name: asset.name, type: asset.type });
-        existingNames.add(draft.name);
-      }
+      // W7 audit R7:从串行 create N 次改 createManyAndReturn,~50× 加速
+      const toCreate = input.drafts.filter((d) => {
+        if (existingNames.has(d.name)) return false;
+        existingNames.add(d.name);
+        return true;
+      });
+      const skipped: string[] = input.drafts
+        .filter((d) => !toCreate.some((c) => c.name === d.name))
+        .map((d) => d.name);
+      const created =
+        toCreate.length > 0
+          ? await ctx.prisma.asset.createManyAndReturn({
+              data: toCreate.map((d) => ({ projectId: input.projectId, ...d })),
+              select: { id: true, name: true, type: true },
+            })
+          : [];
 
       await logOperation(ctx, 'asset.batchCreate', 'asset', input.projectId, null, {
         projectId: input.projectId,
@@ -541,7 +529,7 @@ export const assetRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, input.projectId);
 
       // 取剧本 — 优先 scriptId,其次 episodeId 的 isCurrent,最后整剧 isCurrent
       const script = input.scriptId
@@ -657,6 +645,7 @@ export const assetRouter = router({
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
           message: errMsg || '资产拆解失败',
+          cause: e, // W7 audit R9
         });
       }
 
@@ -887,6 +876,7 @@ export const assetRouter = router({
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
           message: `图像生成失败: ${errMsg}`,
+          cause: e, // W7 audit R9
         });
       }
       const finishedAt = new Date();
@@ -1197,7 +1187,7 @@ export const assetRouter = router({
         });
         if (!media) throw new TRPCError({ code: 'NOT_FOUND', message: 'MediaItem 不存在' });
         if (media.projectId) {
-          await assertProjectAccess(ctx, media.projectId, ctx.user.id);
+          await assertProjectAccess(ctx, media.projectId);
         }
 
         return ctx.prisma.$transaction(async (tx) => {
@@ -1234,7 +1224,7 @@ export const assetRouter = router({
         where: { id: input.attemptId! },
       });
       if (!attempt) throw new TRPCError({ code: 'NOT_FOUND' });
-      await assertProjectAccess(ctx, attempt.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, attempt.projectId);
 
       const updated = await ctx.prisma.generationAttempt.update({
         where: { id: input.attemptId! },
@@ -1313,7 +1303,7 @@ export const assetRouter = router({
         where: { id: input.episodeId, deletedAt: null },
       });
       if (!ep) throw new TRPCError({ code: 'NOT_FOUND', message: '集不存在' });
-      await assertProjectAccess(ctx, ep.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, ep.projectId);
 
       const bindings = await ctx.prisma.assetUsageBinding.findMany({
         where: { episodeId: ep.id, deletedAt: null },
@@ -1430,7 +1420,7 @@ export const assetRouter = router({
         where: { id: input.bindingId },
       });
       if (!binding) throw new TRPCError({ code: 'NOT_FOUND' });
-      await assertProjectAccess(ctx, binding.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, binding.projectId);
 
       await ctx.prisma.assetUsageBinding.update({
         where: { id: input.bindingId },
@@ -1451,7 +1441,7 @@ export const assetRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, input.projectId);
       return ctx.prisma.asset.findMany({
         where: {
           projectId: input.projectId,
@@ -1466,7 +1456,7 @@ export const assetRouter = router({
   listArchetypeKeys: protectedProcedure
     .input(z.object({ projectId: z.string().cuid() }))
     .query(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, input.projectId);
       const rows = await ctx.prisma.asset.findMany({
         where: {
           projectId: input.projectId,
@@ -1511,7 +1501,7 @@ export const assetRouter = router({
         where: { id: input.episodeId, deletedAt: null },
       });
       if (!ep) throw new TRPCError({ code: 'NOT_FOUND', message: '集不存在' });
-      await assertProjectAccess(ctx, ep.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, ep.projectId);
 
       const scenes = await ctx.prisma.scene.findMany({
         where: { episodeId: ep.id, deletedAt: null },
@@ -1582,7 +1572,7 @@ export const assetRouter = router({
   auditProject: protectedProcedure
     .input(z.object({ projectId: z.string().cuid() }))
     .query(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, input.projectId);
 
       // (a) 只查本项目下的 scene(经 episode.projectId 过滤,DB 层完成,避免拉全表 + 跨租户信息泄漏)
       const projectScenes = await ctx.prisma.scene.findMany({

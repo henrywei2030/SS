@@ -95,12 +95,13 @@ describe('autoTagPromptWithReferences', () => {
     expect(result).toBe('背景响起轻柔音乐@音频1');
   });
 
-  it('name 在 text 中出现多次 → 只标第一次', () => {
+  it('name 在 text 中出现多次 → 全部标(W5 audit T1)', () => {
+    // 产品截图证实:同一段提示词里 "陆萌萌@图片2" 重复多次(中景/特写/俯拍 都有)
     const result = autoTagPromptWithReferences(
       '陆乘走进咖啡馆,陆乘看到李婉,陆乘笑了',
       [{ refSlotIdx: 2, kind: 'IMAGE', name: '陆乘' }],
     );
-    expect(result).toBe('陆乘@图片2走进咖啡馆,陆乘看到李婉,陆乘笑了');
+    expect(result).toBe('陆乘@图片2走进咖啡馆,陆乘@图片2看到李婉,陆乘@图片2笑了');
   });
 
   it('已有正确 token 紧跟 name 后 → 不重复插入', () => {
@@ -151,13 +152,31 @@ describe('autoTagPromptWithReferences', () => {
     expect(result).toBe('陆乘@图片2走进咖啡馆,背景音乐@音频1响起');
   });
 
-  it('同 name 两个 binding(变体)→ 第一个占第一处,第二个占第二处', () => {
-    // 极少见但实际可能(同名多变体),验证不会两个 binding 都钉到第一次出现
+  it('同 name 两个 binding(变体)→ 第一个 binding 标全部,第二个 binding 跳过(W5 audit T1)', () => {
+    // 同名变体场景:只能用 alias 区分,否则两个 binding 都用 name 时,
+    // 第一个 binding 已经把所有 "陆乘" 都标了,第二个 binding 来时全部已 tagged 跳过
     const result = autoTagPromptWithReferences('陆乘问陆乘:你是谁?', [
       { refSlotIdx: 2, kind: 'IMAGE', name: '陆乘' },
       { refSlotIdx: 3, kind: 'IMAGE', name: '陆乘' },
     ]);
-    expect(result).toBe('陆乘@图片2问陆乘@图片3:你是谁?');
+    expect(result).toBe('陆乘@图片2问陆乘@图片2:你是谁?');
+  });
+
+  it('两个 binding 用不同 alias 区分变体 → 各自标各自的出现', () => {
+    const result = autoTagPromptWithReferences('阿乘问乘哥:你是谁?', [
+      { refSlotIdx: 2, kind: 'IMAGE', name: '陆乘', aliases: ['阿乘'] },
+      { refSlotIdx: 3, kind: 'IMAGE', name: '陆乘-成年', aliases: ['乘哥'] },
+    ]);
+    expect(result).toBe('阿乘@图片2问乘哥@图片3:你是谁?');
+  });
+
+  it('已有正确 token 跟在某次出现后 → 该次跳过,其他次仍补标', () => {
+    // text 里第二次 "陆乘" 后已经有 @图片2(用户手编),其他两次未标
+    const result = autoTagPromptWithReferences(
+      '陆乘走进咖啡馆,陆乘@图片2看到李婉,陆乘笑了',
+      [{ refSlotIdx: 2, kind: 'IMAGE', name: '陆乘' }],
+    );
+    expect(result).toBe('陆乘@图片2走进咖啡馆,陆乘@图片2看到李婉,陆乘@图片2笑了');
   });
 });
 
@@ -285,6 +304,36 @@ describe('compileShotGroupVideoPrompt — warnings', () => {
     });
 
     expect(result.warnings.unknownTokens).toEqual(['@图片5']);
+  });
+
+  it('reference 缺图(mediaUrl=null)被 text 引用 → 进 missingMedia,不进 outputRefs(W5 audit W1)', () => {
+    const result = compileShotGroupVideoPrompt({
+      text: '陆乘@图片2 走进咖啡馆@图片1',
+      durationS: 5,
+      references: [
+        { refSlotIdx: 1, kind: 'IMAGE', assetId: 's', name: '咖啡馆', mediaUrl: 'https://cdn/s.png' },
+        { refSlotIdx: 2, kind: 'IMAGE', assetId: 'l', name: '陆乘', mediaUrl: null },
+      ],
+    });
+    expect(result.references).toHaveLength(1);
+    expect(result.references[0]?.refSlotIdx).toBe(1);
+    expect(result.warnings.missingMedia).toEqual([
+      { refSlotIdx: 2, kind: 'IMAGE', assetName: '陆乘' },
+    ]);
+    expect(result.warnings.unknownTokens).toEqual([]);
+  });
+
+  it('reference 缺图 AND text 没用 → missingMedia + unusedReferences 都报', () => {
+    const result = compileShotGroupVideoPrompt({
+      text: '只有 @图片1',
+      durationS: 5,
+      references: [
+        { refSlotIdx: 1, kind: 'IMAGE', assetId: 'a', name: 'A', mediaUrl: 'a' },
+        { refSlotIdx: 2, kind: 'IMAGE', assetId: 'b', name: 'B', mediaUrl: null },
+      ],
+    });
+    expect(result.warnings.missingMedia.map((m) => m.refSlotIdx)).toEqual([2]);
+    expect(result.warnings.unusedReferences).toEqual([2]);
   });
 });
 

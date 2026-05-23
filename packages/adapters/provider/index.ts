@@ -14,12 +14,14 @@ export * from './types.js';
 export { BaseProvider } from './base.js';
 export { SeedanceProvider } from './seedance.js';
 export { ClaudeTextProvider } from './claude.js';
+export { MockVideoProvider } from './mock-video.js';
 
 import { prisma } from '@ss/db';
 
 import { decryptSecret, encryptSecret, maskSecret } from '../src/crypto.js';
 import { SeedanceProvider } from './seedance.js';
 import { ClaudeTextProvider } from './claude.js';
+import { MockVideoProvider } from './mock-video.js';
 import type {
   IVideoProvider,
   IImageProvider,
@@ -101,11 +103,37 @@ async function loadConfig(providerId: string): Promise<ResolvedConfig> {
 // 公开 API：按需取 Provider
 // ---------------------------------------------------------------------------
 
+/**
+ * 获取视频 Provider(W5.4 多 provider 开放架构)
+ *
+ * 选择优先级:
+ *   1. ProviderConfig 表里有这条记录且 isActive=true → 用真 Provider(SeedanceProvider 等)
+ *   2. 没记录 / 无 key / inactive → fallback 到 MockVideoProvider(返公开样片,让 UI 跑通)
+ *
+ * 加新厂商(Kling / HappyHorse / 本地模型)流程:
+ *   1. 写 `packages/adapters/provider/<name>.ts` 实现 IVideoProvider 接口
+ *   2. 在 `constructVideoProvider` 加 `if (cfg.providerId.startsWith('xxx-')) return new XxxProvider(...)`
+ *   3. seed.ts 加 ProviderConfig 一行(displayName / unitPriceCny / apiUrl 等)
+ *   4. /admin/providers 录入 API Key
+ *   5. SystemSetting `binding.shot.video.providerId` 切到 'xxx-...'(或前端 input 覆盖)
+ *
+ * aigcRouter / generateVideo 接口不变,业务层无感知。
+ */
 export async function getVideoProvider(id: string): Promise<IVideoProvider> {
-  const cfg = await loadConfig(id);
+  const cfg = await loadConfig(id).catch(() => null);
+
+  // W5.4:配置缺失 / 无 key / inactive → fallback Mock,让 UI 端到端可演示
+  if (!cfg) {
+    const cacheKey = `${id}-mock-noconfig`;
+    const hit = cache.video.get(id);
+    if (hit && hit.cacheKey === cacheKey) return hit.instance;
+    const instance = new MockVideoProvider({ providerId: id, unitPriceCny: 0 });
+    cache.video.set(id, { instance, cacheKey });
+    return instance;
+  }
+
   const hit = cache.video.get(id);
   if (hit && hit.cacheKey === cfg.cacheKey) return hit.instance;
-
   const instance = constructVideoProvider(cfg);
   cache.video.set(id, { instance, cacheKey: cfg.cacheKey });
   return instance;
@@ -167,6 +195,38 @@ export async function getComplianceProvider(id: string): Promise<IComplianceProv
 // 构造器：把 ResolvedConfig 映射到具体 Provider 类
 // ---------------------------------------------------------------------------
 
+/**
+ * 视频 Provider 构造器 — switch 模式,每加一个厂商加一个 if 分支
+ *
+ * Convention:providerId 用厂商前缀(`seedance-` / `kling-` / `happyhorse-` / `local-`)
+ * 区分,后缀是模型版本(`seedance-2.0` / `kling-1.5` / `happyhorse-pro` / `local-mistral-vlm`)
+ *
+ * 例:接入 Kling
+ *   ```ts
+ *   if (cfg.providerId.startsWith('kling')) {
+ *     return new KlingProvider({
+ *       apiUrl: cfg.apiUrl || 'https://api.kling.com/v1',
+ *       apiKey: cfg.apiKey,
+ *       defaultModel: cfg.providerId,
+ *       maxDuration: Number(cfg.defaultParams.maxDuration ?? 10),
+ *       unitPriceCny: cfg.unitPriceCny,
+ *     });
+ *   }
+ *   ```
+ *
+ * 例:接入本地模型(无 key,跑 localhost)
+ *   ```ts
+ *   if (cfg.providerId.startsWith('local-')) {
+ *     return new LocalVideoProvider({
+ *       apiUrl: cfg.apiUrl || 'http://localhost:8000',
+ *       defaultModel: cfg.providerId,
+ *       unitPriceCny: 0,  // 本地无 token 成本
+ *     });
+ *   }
+ *   ```
+ *
+ * 完全找不到匹配 → 返 MockVideoProvider 兜底(而不是抛错),让 dev 环境永远可用。
+ */
 function constructVideoProvider(cfg: ResolvedConfig): IVideoProvider {
   if (cfg.providerId.startsWith('seedance')) {
     return new SeedanceProvider({
@@ -178,7 +238,14 @@ function constructVideoProvider(cfg: ResolvedConfig): IVideoProvider {
       unitPriceCny: cfg.unitPriceCny,
     });
   }
-  throw new Error(`No video provider class for: ${cfg.providerId}`);
+  // TODO Phase 2:Kling / HappyHorse / 本地模型按上述注释模板接入
+  console.warn(
+    `[providers] no concrete class for ${cfg.providerId}, falling back to MockVideoProvider`,
+  );
+  return new MockVideoProvider({
+    providerId: cfg.providerId,
+    unitPriceCny: cfg.unitPriceCny,
+  });
 }
 
 // ---------------------------------------------------------------------------

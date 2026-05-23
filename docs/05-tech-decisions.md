@@ -401,6 +401,86 @@ bus.publish<EventOf<typeof EVENTS.GENERATION_COMPLETED>>(EVENTS.GENERATION_COMPL
 
 ---
 
+## ADR-21 · W5 后期升级接口预留(Phase 2/3 接手指南)
+**日期**:2026-05-23 · **状态**:📋 已规划
+
+W5.0-W5.4 是 MVP,以下是 Phase 2+ 升级接口的设计预留 — 在不破坏现有 API 的前提下加新能力。
+
+### 1. UsableRange:部分可用片段标记(原 04AIGC.md §11.4)
+**场景**:一个 15s 抽卡视频里只有 5s-10s 可剪,其他是废片。
+**升级接入**:
+- 新表 `usable_ranges`:`id / takeId (→ generationAttempt.id) / startSec / endSec / linkedShotIds[] / note / score / createdBy`
+- 新 mutation `aigc.markUsableRange(takeId, range)` / `aigc.listRanges(takeId)`
+- UI:在视频预览下方加时间轴 + 框选保存可用区间
+- **不动现有**:GenerationAttempt.adopted/rejected 单字段保留,新功能叠加
+
+### 2. EditDelivery:送剪辑模块(W6 启动时)
+**场景**:用户在 AIGC 工作台选定可用片段,push 到 W6 剪辑模块时间轴。
+**升级接入**:
+- 新表 `edit_deliveries`:`id / episodeId / shotGroupId / takeId / rangeId? / usageType (main_shot/insert/b_roll/transition/backup) / editSlotId? / status (delivered/accepted/rejected) / deliveredBy / deliveredAt / note`
+- 新 mutation `aigc.deliverToEdit({takeId, rangeId, usageType})` / `edit.acceptDelivery / rejectDelivery`
+- EventBus topic `EDIT_DELIVERY_CREATED`(events.ts 顶部加,与 EDIT_TIMELINE_UPDATED 平级)
+- **不动现有**:不修 GenerationAttempt,只新增表
+
+### 3. 失败原因标签(GenerationAttempt.issueTags)
+**场景**:用户审核标"人物串脸 + 手部错误",数据驱动优化。
+**升级接入**:
+- GenerationAttempt 加 `issueTags Json @default("[]")` 字段(migration 1 行 alter)
+- 标签字典见 04AIGC.md §11.6(人物 / 场景 / 动作 / 情绪 / 道具 / 镜头 / 连续性 / 技术 / 台词 / 可剪性 等 10 类)
+- UI:rejectVideoTake dialog 加 tag multiselect
+- **不动现有**:errorMsg / rejected 单字段保留兼容
+
+### 4. IVideoProvider capability flags
+**场景**:不同厂商支持的功能不同(Seedance 支持 firstFrameImage,Kling 不支持),UI 应按 capability gate 功能。
+**升级接入**:
+- `ProviderInfo` 加 `capabilities?: { supportsFirstFrame?: boolean; supportsLastFrame?: boolean; supportsAudio?: boolean; supportsBatch?: boolean; maxRefImages?: number; supportedDurations?: number[] }`
+- SeedanceProvider / KlingProvider 等在 constructor 内填充
+- UI 在生成面板按 capabilities 显隐控件(如 "首帧图" 输入框)
+- **不动现有**:ProviderInfo 顶层字段不动,只新增可选字段
+
+### 5. W5.5 BullMQ 异步化(取代当前同步阻塞)
+**场景**:Mock provider 200ms 返,真 provider(Seedance)5-60s — 同步阻塞 tRPC 会超时。
+**升级接入**:
+- 新 package `packages/workers/video-gen-worker`(BullMQ + Redis)
+- `aigc.generateVideo` 拆两步:① 创建 attempt(status=QUEUED)+ enqueue → 立即返;② worker 拉队列调 provider → 更新 attempt(SUCCESS/FAILED)+ publish event
+- 前端 `aigc.listVideoTakes` 已能展示 RUNNING/QUEUED 状态,UI 不动
+- 客户端轮询 / SSE 接 EventBus 推 UI 实时更新
+- `providerJobId` 字段已铺路(W5.0 加的),supports webhook 回调
+- **不动现有**:Mock provider 同步路径保留(dev/测试用 W5.4 当前 mock-video.ts)
+
+### 6. 复杂度评分 + 备用镜头建议(04AIGC.md §16.3 + §21.8)
+**场景**:LLM 预估"这个生成段太复杂(人物多 + 动作复杂 + 文字多),建议拆分"。
+**升级接入**:
+- 纯函数 `packages/core/storyboard/complexity.ts(prompt, references) → { score: 1-10, factors: ['人物多','道具多',...], suggestions: ['拆成 X / Y'] }`
+- aigc router 加 query `aigc.estimateComplexity(groupId)` 调上面函数
+- UI 在生成按钮旁加"复杂度评分"小芯片
+- **不动现有**:纯计算,不动 schema 也不动现有 router
+
+### 7. shotGroup composition 灵活性(已部分预留)
+**场景**:用户不只想要 W3 默认的连续 shot 合并,而是任意 shot 组合(shot 3 + shot 7 + shot 12)。
+**当前状态**:
+- ShotGroup.shots 已是多对多语义(Shot.groupId)— 一个 shot 属于一个 group,group 可挑任意 shot
+- 缺的是 UI:跨 shot 拖拽到 group 的交互
+- W5 已提供 createEmptyGroup + renameGroup + archiveGroup,基础够用
+**升级接入**:
+- 在 storyboardRouter 加 `moveShotsToGroup(shotIds[], groupId)` 已经存在(W3.5 split/merge 的能力)
+- AIGC 工作台 UI 加"管理 shots"按钮,跳到 storyboard tab 完成 — 不在 AIGC 模块重做合并/拆分
+
+### 8. 协作锁(多人编辑同 group 时)
+**场景**:两个 AIGC 操作员同时改同 group 的 prompt 或 binding。
+**升级接入**:
+- ShotGroup 加 `lockedBy String?` + `lockedAt DateTime?`(已有类似 Asset 的 lockedAt 模式)
+- mutation 之前 check `lockedBy === ctx.user.id || stale`,否则 CONFLICT
+- 60s 心跳续约,断开自动释放
+- **不动现有**:加字段而非新表
+
+### 实施优先级
+1. 立即可做(无新表):#3 issueTags / #4 capabilities / #6 复杂度
+2. W5 收尾后第一波:#1 UsableRange / #8 协作锁
+3. W6 启动联动:#2 EditDelivery / #5 BullMQ
+
+---
+
 ## 撤销决策的流程
 
 如果某个 ADR 被推翻：

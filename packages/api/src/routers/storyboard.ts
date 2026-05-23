@@ -17,7 +17,7 @@ import { generateStoryboard, mergeShots, type MergeableShot } from '@ss/core/sto
 import { parseScriptText } from '@ss/core/script';
 import { EVENTS } from '@ss/shared/events';
 
-import { router, protectedProcedure } from '../trpc.js';
+import { router, protectedProcedure, rateLimit } from '../trpc.js';
 import type { Context } from '../context.js';
 import { logOperation } from '../middleware/audit.js';
 import {
@@ -30,22 +30,8 @@ import {
 // 通用：项目访问校验
 // ---------------------------------------------------------------------------
 
-async function assertProjectAccess(
-  ctx: Context,
-  projectId: string,
-  userId: string,
-): Promise<void> {
-  const p = await ctx.prisma.project.findFirst({
-    where: {
-      id: projectId,
-      deletedAt: null,
-      OR: [{ ownerId: userId }, { members: { some: { userId } } }],
-    },
-  });
-  if (!p) {
-    throw new TRPCError({ code: 'FORBIDDEN', message: '无项目访问权限' });
-  }
-}
+// W7+ audit R10:assertProjectAccess 抽到 middleware/access.ts
+import { assertProjectAccess } from '../middleware/access.js';
 
 async function loadEpisodeOrThrow(ctx: Context, episodeId: string) {
   if (!ctx.user) {
@@ -55,7 +41,7 @@ async function loadEpisodeOrThrow(ctx: Context, episodeId: string) {
     where: { id: episodeId, deletedAt: null },
   });
   if (!ep) throw new TRPCError({ code: 'NOT_FOUND', message: '集不存在' });
-  await assertProjectAccess(ctx, ep.projectId, ctx.user.id);
+  await assertProjectAccess(ctx, ep.projectId);
   return ep;
 }
 
@@ -166,7 +152,7 @@ export const storyboardRouter = router({
   listEpisodes: protectedProcedure
     .input(z.object({ projectId: z.string().cuid() }))
     .query(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, input.projectId);
       const episodes = await ctx.prisma.episode.findMany({
         where: { projectId: input.projectId, deletedAt: null },
         orderBy: { number: 'asc' },
@@ -346,7 +332,7 @@ export const storyboardRouter = router({
       if (!before || !before.episode) {
         throw new TRPCError({ code: 'NOT_FOUND', message: '分镜不存在' });
       }
-      await assertProjectAccess(ctx, before.episode.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, before.episode.projectId);
 
       const after = await ctx.prisma.shot.update({
         where: { id: input.shotId },
@@ -411,7 +397,7 @@ export const storyboardRouter = router({
       if (!shot || !shot.episode) {
         throw new TRPCError({ code: 'NOT_FOUND' });
       }
-      await assertProjectAccess(ctx, shot.episode.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, shot.episode.projectId);
 
       // 联动清理 W4 AssetUsageBinding 指向本 shot 的引用,防止悬空 binding
       const now = new Date();
@@ -574,7 +560,7 @@ export const storyboardRouter = router({
       if (!group || !group.episode) {
         throw new TRPCError({ code: 'NOT_FOUND', message: '合并组不存在或已删除' });
       }
-      await assertProjectAccess(ctx, group.episode.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, group.episode.projectId);
 
       await ctx.prisma.$transaction([
         ctx.prisma.shotGroup.update({
@@ -619,7 +605,7 @@ export const storyboardRouter = router({
       if (!before || !before.episode) {
         throw new TRPCError({ code: 'NOT_FOUND' });
       }
-      await assertProjectAccess(ctx, before.episode.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, before.episode.projectId);
 
       const after = await ctx.prisma.shotGroup.update({
         where: { id: input.groupId },
@@ -671,6 +657,15 @@ export const storyboardRouter = router({
    *   5. 触发 EVENTS.STORYBOARD_GENERATED
    */
   generateForEpisode: protectedProcedure
+    // W7 audit R8 P0:per-user 5 次 / 60s — 整集 LLM 调用最贵,严控
+    .use(
+      rateLimit({
+        key: (ctx) => `storyboard.generateForEpisode:${ctx.user?.id ?? 'anon'}`,
+        max: 5,
+        windowMs: 60_000,
+        message: '整集分镜生成过快(每分钟最多 5 次)',
+      }),
+    )
     .input(
       z.object({
         episodeId: z.string().cuid(),
@@ -769,6 +764,8 @@ export const storyboardRouter = router({
         ? {
             scenePrompt: project.style.scenePrompt,
             characterPrompt: project.style.characterPrompt,
+            // W7 audit R5:补 propPrompt(原漏传,W4/W5 拼接公式 3 段全读)
+            propPrompt: project.style.propPrompt,
             forbiddenWords: project.style.forbiddenWords,
           }
         : undefined;

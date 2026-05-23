@@ -9,6 +9,7 @@ import {
   Scissors,
   ChevronRight,
   Users,
+  BarChart3,
 } from 'lucide-react';
 import * as React from 'react';
 
@@ -113,6 +114,13 @@ export function ProjectOverview({ projectId }: { projectId: string }): React.Rea
               subtitle="素材整理 · 时间线 · 导出交付"
               colorVar="--color-mod-edit"
               comingSoon
+            />
+            <WorkbenchRow
+              href={`/${params.locale}/projects/${projectId}/insights`}
+              icon={BarChart3}
+              title="数据洞察"
+              subtitle="成本 / 抽卡率 / 模型分布"
+              colorVar="--color-mod-analytics"
             />
           </div>
         </div>

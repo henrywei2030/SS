@@ -9,6 +9,7 @@
  *   - admin.user      全局用户管理
  */
 import { TRPCError } from '@trpc/server';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import {
@@ -120,13 +121,14 @@ const providerRouter = router({
 
 const styleRouter = router({
   list: adminProcedure.query(async ({ ctx }) => {
-    return ctx.prisma.styleProfile.findMany({ orderBy: { name: 'asc' } });
+    return ctx.prisma.styleProfile.findMany({ orderBy: [{ isBuiltIn: 'desc' }, { name: 'asc' }] });
   }),
 
   update: adminProcedure
     .input(
       z.object({
         id: z.string().cuid(),
+        name: z.string().min(1).max(100).optional(),
         characterPrompt: z.string().optional(),
         scenePrompt: z.string().optional(),
         propPrompt: z.string().optional(),
@@ -136,9 +138,88 @@ const styleRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
       const before = await ctx.prisma.styleProfile.findUnique({ where: { id } });
+      if (!before) throw new TRPCError({ code: 'NOT_FOUND' });
+      // 内置风格 slug 不能改名(避免破坏代码里的硬引用)
+      if (before.isBuiltIn && data.name && data.name !== before.name) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '内置风格不能改名' });
+      }
       const updated = await ctx.prisma.styleProfile.update({ where: { id }, data });
       await logOperation(ctx, 'style.update', 'style', id, before, updated);
       return updated;
+    }),
+
+  /** W7:新建自定义风格 — W7 audit R5:加 slug 内置黑名单防业务硬编码 fallback 失效 */
+  create: adminProcedure
+    .input(
+      z.object({
+        name: z.string().min(1).max(100),
+        slug: z
+          .string()
+          .min(2)
+          .max(50)
+          .regex(/^[a-z0-9_]+$/, 'slug 只允许小写字母 / 数字 / 下划线'),
+        characterPrompt: z.string().max(5000).default(''),
+        scenePrompt: z.string().max(5000).default(''),
+        propPrompt: z.string().max(5000).default(''),
+        forbiddenWords: z.array(z.string().max(50)).max(50).default([]),
+        // W7 audit R5:让用户可选 kind(原强制 CUSTOM,导致 ANIM_2D 变体无法显示)
+        kind: z.enum(['CUSTOM', 'AI_REAL', 'ANIM_3D', 'ANIM_2D']).default('CUSTOM'),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      // W7 audit R5:slug 内置黑名单 — 业务侧(asset/breakdown / storyboard/generate)对这 3 个 slug
+      // 做 hardcoded 短语注入,自定义 slug 跟内置撞会让 fallback 返 slug 原文,LLM 输出无意义字符串
+      const BUILTIN_SLUGS = new Set(['ai_real', 'anim_3d', 'anim_2d']);
+      if (BUILTIN_SLUGS.has(input.slug)) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: `slug "${input.slug}" 是内置风格保留名,请用其他 slug(如 "${input.slug}_custom")`,
+        });
+      }
+      const created = await ctx.prisma.styleProfile
+        .create({
+          data: {
+            ...input,
+            isBuiltIn: false,
+          },
+        })
+        .catch((e: unknown) => {
+          if (typeof e === 'object' && e && 'code' in e && (e as { code: string }).code === 'P2002') {
+            // W7 audit R1:读 meta.target 区分是哪个字段撞 unique
+            const target =
+              (e as { meta?: { target?: string[] } }).meta?.target?.join(',') ?? 'unknown';
+            throw new TRPCError({
+              code: 'CONFLICT',
+              message: `字段 ${target} 已存在(可能 slug 撞了已有风格)`,
+            });
+          }
+          throw e;
+        });
+      await logOperation(ctx, 'style.create', 'style', created.id, null, created);
+      return created;
+    }),
+
+  /** W7:删除自定义风格(内置不能删) */
+  delete: adminProcedure
+    .input(z.object({ id: z.string().cuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const before = await ctx.prisma.styleProfile.findUnique({ where: { id: input.id } });
+      if (!before) throw new TRPCError({ code: 'NOT_FOUND' });
+      if (before.isBuiltIn) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '内置风格不能删除' });
+      }
+      // 检查引用:有 Project / Asset 用该风格则拒
+      const projectCount = await ctx.prisma.project.count({ where: { styleId: input.id } });
+      const assetCount = await ctx.prisma.asset.count({ where: { styleId: input.id } });
+      if (projectCount > 0 || assetCount > 0) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: `还有 ${projectCount} 个项目 / ${assetCount} 个资产引用,先迁移后再删`,
+        });
+      }
+      await ctx.prisma.styleProfile.delete({ where: { id: input.id } });
+      await logOperation(ctx, 'style.delete', 'style', before.id, before, null);
+      return { id: input.id };
     }),
 });
 
@@ -150,38 +231,223 @@ const promptRouter = router({
   list: adminProcedure.query(async ({ ctx }) => {
     return ctx.prisma.promptTemplate.findMany({
       orderBy: [{ category: 'asc' }, { slug: 'asc' }],
+      include: { _count: { select: { versions: true } } },
     });
   }),
+
+  /** W7:单模板详情(含 vars 元信息) */
+  getById: adminProcedure
+    .input(z.object({ id: z.string().cuid() }))
+    .query(async ({ ctx, input }) => {
+      const t = await ctx.prisma.promptTemplate.findUnique({
+        where: { id: input.id },
+        include: { _count: { select: { versions: true } } },
+      });
+      if (!t) throw new TRPCError({ code: 'NOT_FOUND' });
+      return t;
+    }),
 
   update: adminProcedure
     .input(
       z.object({
         id: z.string().cuid(),
-        content: z.string().min(1),
-        description: z.string().optional(),
-        modelHint: z.string().optional(),
+        // W7 audit R1:content 加上限 50KB,防误写超大 payload
+        content: z.string().min(1).max(50_000, 'content 最长 50KB'),
+        description: z.string().max(500).optional(),
+        modelHint: z.string().max(100).optional(),
+        changeLog: z.string().max(500).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { id, ...data } = input;
+      const { id, changeLog, ...data } = input;
       const before = await ctx.prisma.promptTemplate.findUnique({ where: { id } });
       if (!before) throw new TRPCError({ code: 'NOT_FOUND' });
 
-      // 同时存历史版本
-      await ctx.prisma.promptTemplateVersion.create({
-        data: {
-          templateId: id,
-          versionTag: `v${Date.now()}`,
-          content: before.content,
-          varsJson: before.varsJson ?? {},
-          changeLog: 'auto-saved before edit',
-          createdBy: ctx.user.id,
-        },
+      // content 没变就不写版本,避免空版本噪声
+      const contentChanged = before.content !== input.content;
+      const updated = await ctx.prisma.$transaction(async (tx) => {
+        if (contentChanged) {
+          await tx.promptTemplateVersion.create({
+            data: {
+              templateId: id,
+              versionTag: `v${Date.now()}-${randomUUID().slice(0, 8)}`,
+              content: before.content,
+              varsJson: before.varsJson ?? {},
+              changeLog: changeLog ?? 'auto-saved before edit',
+              createdBy: ctx.user.id,
+            },
+          });
+        }
+        return tx.promptTemplate.update({ where: { id }, data });
       });
-
-      const updated = await ctx.prisma.promptTemplate.update({ where: { id }, data });
       await logOperation(ctx, 'prompt.update', 'prompt', id, before, updated);
       return updated;
+    }),
+
+  /** W7:列出某模板的版本历史(倒序) */
+  listVersions: adminProcedure
+    .input(z.object({ templateId: z.string().cuid() }))
+    .query(async ({ ctx, input }) => {
+      return ctx.prisma.promptTemplateVersion.findMany({
+        where: { templateId: input.templateId },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          versionTag: true,
+          content: true,
+          changeLog: true,
+          createdAt: true,
+          createdBy: true,
+        },
+      });
+    }),
+
+  /** W7:回滚到指定版本(当前 content 先存为新版本,然后用历史版本替换) */
+  restoreVersion: adminProcedure
+    .input(
+      z.object({
+        templateId: z.string().cuid(),
+        versionId: z.string().cuid(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const [current, version] = await Promise.all([
+        ctx.prisma.promptTemplate.findUnique({ where: { id: input.templateId } }),
+        ctx.prisma.promptTemplateVersion.findUnique({ where: { id: input.versionId } }),
+      ]);
+      if (!current) throw new TRPCError({ code: 'NOT_FOUND', message: '模板不存在' });
+      if (!version || version.templateId !== input.templateId) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '版本不属于该模板' });
+      }
+      const restored = await ctx.prisma.$transaction(async (tx) => {
+        // 先归档当前 content
+        await tx.promptTemplateVersion.create({
+          data: {
+            templateId: input.templateId,
+            versionTag: `v${Date.now()}-${randomUUID().slice(0, 8)}`,
+            content: current.content,
+            varsJson: current.varsJson ?? {},
+            changeLog: `回滚前自动归档 (恢复到 ${version.versionTag})`,
+            createdBy: ctx.user.id,
+          },
+        });
+        return tx.promptTemplate.update({
+          where: { id: input.templateId },
+          data: { content: version.content, varsJson: version.varsJson ?? {} },
+        });
+      });
+      await logOperation(ctx, 'prompt.restoreVersion', 'prompt', input.templateId, current, {
+        ...restored,
+        restoredFromVersionId: input.versionId,
+      });
+      return restored;
+    }),
+});
+
+// ---------------------------------------------------------------------------
+// admin.preset — W7:景别 / 机位 / 运镜 / 光线 预设
+//
+// 存 SystemSetting key `preset.<kind>` value JSON 数组(string[])
+// 给分镜工坊编辑分镜时下拉框 + AIGC 抽卡时按预设组合 prompt
+// ---------------------------------------------------------------------------
+
+// W7 audit R6:常量 export 出去,me.listPresets / 业务 router 可复用
+export const PRESET_KINDS = ['framing', 'angle', 'movement', 'lighting'] as const;
+export type PresetKind = (typeof PRESET_KINDS)[number];
+
+export const PRESET_KIND_LABELS: Record<PresetKind, string> = {
+  framing: '景别',
+  angle: '机位',
+  movement: '运镜',
+  lighting: '光线',
+};
+
+/** 默认 fallback 值(seed 没装时兜底) */
+export const PRESET_DEFAULTS: Record<PresetKind, string[]> = {
+  framing: ['大全景', '全景', '中景', '近景', '特写', '大特写'],
+  angle: ['平视', '俯角', '仰角', '过肩', '正面', '侧面', '背面'],
+  movement: ['固定', '推', '拉', '摇', '移', '跟', '升降', '甩'],
+  lighting: ['自然光', '硬光', '柔光', '逆光', '侧光', '低调', '高调', '冷调', '暖调'],
+};
+
+/** 加载某 kind 的预设(SystemSetting preset.<kind> JSON 数组 优先,fallback DEFAULTS) */
+export async function loadPresetValues(
+  prismaClient: { systemSetting: { findUnique: (args: { where: { key: string } }) => Promise<{ value: string } | null> } },
+  kind: PresetKind,
+): Promise<{ values: string[]; isDefault: boolean }> {
+  const row = await prismaClient.systemSetting.findUnique({
+    where: { key: `preset.${kind}` },
+  });
+  if (row?.value) {
+    try {
+      const parsed = JSON.parse(row.value);
+      if (Array.isArray(parsed) && parsed.every((s) => typeof s === 'string')) {
+        return { values: parsed, isDefault: false };
+      }
+    } catch {
+      // 损坏 JSON → fallback
+    }
+  }
+  return { values: PRESET_DEFAULTS[kind], isDefault: true };
+}
+
+const presetRouter = router({
+  list: adminProcedure.query(async ({ ctx }) => {
+    return Promise.all(
+      PRESET_KINDS.map(async (kind) => {
+        const { values, isDefault } = await loadPresetValues(ctx.prisma, kind);
+        return {
+          kind,
+          label: PRESET_KIND_LABELS[kind],
+          values,
+          isDefault,
+        };
+      }),
+    );
+  }),
+
+  set: adminProcedure
+    .input(
+      z.object({
+        kind: z.enum(PRESET_KINDS),
+        values: z.array(z.string().min(1).max(50)).min(1).max(50),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const key = `preset.${input.kind}`;
+      const dedup = Array.from(new Set(input.values.map((s) => s.trim()).filter(Boolean)));
+      if (dedup.length === 0) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '至少一个非空值' });
+      }
+      const before = await ctx.prisma.systemSetting.findUnique({ where: { key } });
+      const setting = await ctx.prisma.systemSetting.upsert({
+        where: { key },
+        create: {
+          key,
+          value: JSON.stringify(dedup),
+          category: 'preset',
+          description: `${PRESET_KIND_LABELS[input.kind]} 预设列表`,
+          updatedBy: ctx.user.id,
+        },
+        update: {
+          value: JSON.stringify(dedup),
+          updatedBy: ctx.user.id,
+        },
+      });
+      await logOperation(ctx, 'preset.set', 'systemSetting', setting.id, before, setting);
+      return { kind: input.kind, values: dedup };
+    }),
+
+  /** 恢复某 kind 的默认值(删 SystemSetting 行,list 会 fallback 到 PRESET_DEFAULTS) */
+  resetToDefault: adminProcedure
+    .input(z.object({ kind: z.enum(PRESET_KINDS) }))
+    .mutation(async ({ ctx, input }) => {
+      const key = `preset.${input.kind}`;
+      const before = await ctx.prisma.systemSetting.findUnique({ where: { key } });
+      if (!before) return { kind: input.kind, alreadyDefault: true };
+      await ctx.prisma.systemSetting.delete({ where: { key } });
+      await logOperation(ctx, 'preset.resetToDefault', 'systemSetting', before.id, before, null);
+      return { kind: input.kind, alreadyDefault: false };
     }),
 });
 
@@ -193,10 +459,15 @@ const systemRouter = router({
   listSettings: adminProcedure
     .input(z.object({ category: z.string().optional() }).optional())
     .query(async ({ ctx, input }) => {
-      return ctx.prisma.systemSetting.findMany({
+      const rows = await ctx.prisma.systemSetting.findMany({
         where: input?.category ? { category: input.category } : {},
         orderBy: { key: 'asc' },
       });
+      // W7 audit R8 P1:isSecret 行的 value 脱敏(双重防御,即便 admin 也只看 mask)
+      // 真正读 secret value 走专门 revealSetting endpoint(暂未实现,Phase 2 + 二次确认)
+      return rows.map((r) =>
+        r.isSecret ? { ...r, value: '••••••(secret,通过 revealSetting 取明文)' } : r,
+      );
     }),
 
   setSetting: adminProcedure
@@ -393,6 +664,7 @@ export const adminRouter = router({
   provider: providerRouter,
   style: styleRouter,
   prompt: promptRouter,
+  preset: presetRouter,
   system: systemRouter,
   binding: bindingRouter,
   episode: episodeRouter,

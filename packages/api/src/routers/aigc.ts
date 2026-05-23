@@ -11,6 +11,8 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
+import { getEventBus } from '@ss/adapters/eventbus';
+import { getVideoProvider } from '@ss/adapters/provider';
 import { autoMatchAssets, type MatchableAsset } from '@ss/core/generation';
 import {
   autoTagPromptWithReferences,
@@ -19,50 +21,104 @@ import {
   type AutoTagBinding,
   type VideoReference,
 } from '@ss/core/storyboard';
+import { EVENTS } from '@ss/shared/events';
 
-import { router, protectedProcedure } from '../trpc.js';
+import { router, protectedProcedure, rateLimit } from '../trpc.js';
 import type { Context } from '../context.js';
 import { logOperation } from '../middleware/audit.js';
+import { isEpisodeLockedNow } from '../utils/episode-lock.js';
+import {
+  sanitizePromptForLedger,
+  sanitizeReferencesForLedger,
+} from '../utils/sanitize-prompt.js';
 
-// ---------------------------------------------------------------------------
-// 通用访问校验(与 storyboard.ts 一致)
-// ---------------------------------------------------------------------------
-
-async function assertProjectAccess(
-  ctx: Context,
-  projectId: string,
-  userId: string,
-): Promise<void> {
-  const p = await ctx.prisma.project.findFirst({
+// W5.4:视频生成相关 SystemSetting 读取
+async function getVideoBindings(ctx: Context): Promise<{
+  providerId: string;
+  maxDurationS: number;
+  defaultAspectRatio: '9:16' | '16:9' | '1:1';
+  dailyBudgetCny: number;
+}> {
+  const settings = await ctx.prisma.systemSetting.findMany({
     where: {
-      id: projectId,
-      deletedAt: null,
-      OR: [{ ownerId: userId }, { members: { some: { userId } } }],
+      key: {
+        in: [
+          'binding.shot.video.providerId',
+          'shot.video.maxDurationS',
+          'shot.video.defaultAspectRatio',
+          'shot.video.dailyBudgetCny',
+        ],
+      },
     },
   });
-  if (!p) {
-    throw new TRPCError({ code: 'FORBIDDEN', message: '无项目访问权限' });
-  }
+  const map = new Map(settings.map((s) => [s.key, s.value]));
+  const rawAr = map.get('shot.video.defaultAspectRatio') ?? '9:16';
+  const ar: '9:16' | '16:9' | '1:1' =
+    rawAr === '16:9' ? '16:9' : rawAr === '1:1' ? '1:1' : '9:16';
+  return {
+    providerId: map.get('binding.shot.video.providerId') ?? 'seedance-2.0',
+    maxDurationS: Number(map.get('shot.video.maxDurationS') ?? '10'),
+    defaultAspectRatio: ar,
+    dailyBudgetCny: Number(map.get('shot.video.dailyBudgetCny') ?? '500'),
+  };
 }
 
-async function loadEpisodeOrThrow(ctx: Context, episodeId: string) {
+// ---------------------------------------------------------------------------
+// 通用访问校验 — 抽到 ../middleware/access.ts(W7+ audit R10)
+// ---------------------------------------------------------------------------
+
+import { assertProjectAccess } from '../middleware/access.js';
+
+async function loadEpisodeOrThrow(
+  ctx: Context,
+  episodeId: string,
+  opts: { skipLockCheck?: boolean } = {},
+) {
   if (!ctx.user) throw new TRPCError({ code: 'UNAUTHORIZED' });
   const ep = await ctx.prisma.episode.findFirst({
     where: { id: episodeId, deletedAt: null },
   });
   if (!ep) throw new TRPCError({ code: 'NOT_FOUND', message: '集不存在' });
-  await assertProjectAccess(ctx, ep.projectId, ctx.user.id);
+  await assertProjectAccess(ctx, ep.projectId);
+  // W1-W5 audit 三轮 L1:写操作必须先确认 episode 没在 fresh GENERATING
+  if (!opts.skipLockCheck && isEpisodeLockedNow(ep)) {
+    throw new TRPCError({
+      code: 'CONFLICT',
+      message: '本集正在生成分镜中,请等导演侧完成后再操作 AIGC 工作台',
+    });
+  }
   return ep;
 }
 
-async function loadGroupOrThrow(ctx: Context, groupId: string) {
+/**
+ * loadGroupOrThrow 选项:
+ *   - allowArchived:true 时允许返回 deletedAt!=null 的 group(只读路径用,如 listVideoTakes 历史回溯)
+ *   - skipLockCheck:true 时不抛 GENERATING(only for 只读 query;mutation 必须 false)
+ */
+async function loadGroupOrThrow(
+  ctx: Context,
+  groupId: string,
+  opts: { allowArchived?: boolean; skipLockCheck?: boolean } = {},
+) {
   if (!ctx.user) throw new TRPCError({ code: 'UNAUTHORIZED' });
   const grp = await ctx.prisma.shotGroup.findFirst({
-    where: { id: groupId, deletedAt: null },
+    where: {
+      id: groupId,
+      ...(opts.allowArchived ? {} : { deletedAt: null }),
+      episode: { deletedAt: null },
+    },
     include: { episode: true },
   });
   if (!grp) throw new TRPCError({ code: 'NOT_FOUND', message: '生成段不存在' });
-  await assertProjectAccess(ctx, grp.episode.projectId, ctx.user.id);
+  await assertProjectAccess(ctx, grp.episode.projectId);
+  // W1-W5 audit 三轮 L1:导演 generateForEpisode 跑时(Episode.status=GENERATING fresh),
+  // AIGC 这边写入会基于"被覆盖前快照",拒绝。
+  if (!opts.skipLockCheck && isEpisodeLockedNow(grp.episode)) {
+    throw new TRPCError({
+      code: 'CONFLICT',
+      message: '本集正在生成分镜中,请等导演侧完成后再操作 AIGC 工作台',
+    });
+  }
   return grp;
 }
 
@@ -80,7 +136,7 @@ export const aigcRouter = router({
   listEpisodes: protectedProcedure
     .input(z.object({ projectId: z.string().cuid() }))
     .query(async ({ ctx, input }) => {
-      await assertProjectAccess(ctx, input.projectId, ctx.user.id);
+      await assertProjectAccess(ctx, input.projectId);
 
       const episodes = await ctx.prisma.episode.findMany({
         where: { projectId: input.projectId, deletedAt: null },
@@ -94,16 +150,42 @@ export const aigcRouter = router({
         },
       });
 
-      // 每集的"已生成视频候选"数量(GenerationAttempt action=VIDEO success 的 outputMediaIds 求和)
-      // MVP:先返 0,等 W5.4 接 Seedance 后实装
+      // W5.4:统计每集的已生成视频(GenerationAttempt VIDEO SUCCESS) + 已完成 group(至少一个非废片 SUCCESS)
+      // W1-W5 audit 三轮 L6:过滤已归档 group(archiveGroup 软删后不算进进度)
+      const episodeIds = episodes.map((e) => e.id);
+      const successAttempts = episodeIds.length
+        ? await ctx.prisma.generationAttempt.findMany({
+            where: {
+              episodeId: { in: episodeIds },
+              action: 'VIDEO',
+              status: 'SUCCESS',
+              rejected: false,
+              shotGroupId: { not: null },
+              shotGroup: { deletedAt: null },
+            },
+            select: { episodeId: true, shotGroupId: true },
+          })
+        : [];
+      const takeCountByEp = new Map<string, number>();
+      const completedGroupSetByEp = new Map<string, Set<string>>();
+      for (const a of successAttempts) {
+        if (!a.episodeId) continue;
+        takeCountByEp.set(a.episodeId, (takeCountByEp.get(a.episodeId) ?? 0) + 1);
+        if (a.shotGroupId) {
+          const s = completedGroupSetByEp.get(a.episodeId) ?? new Set<string>();
+          s.add(a.shotGroupId);
+          completedGroupSetByEp.set(a.episodeId, s);
+        }
+      }
+
       return episodes.map((e) => ({
         id: e.id,
         number: e.number,
         title: e.title,
         status: e.status,
         totalGroups: e._count.shotGroups,
-        completedGroups: 0, // TODO W5.4:已确认 takes 的 group 数
-        generatedTakeCount: 0, // TODO W5.4
+        completedGroups: completedGroupSetByEp.get(e.id)?.size ?? 0,
+        generatedTakeCount: takeCountByEp.get(e.id) ?? 0,
         publishedAt: e.publishedAt,
         updatedAt: e.updatedAt,
       }));
@@ -118,7 +200,7 @@ export const aigcRouter = router({
   listGroups: protectedProcedure
     .input(z.object({ episodeId: z.string().cuid() }))
     .query(async ({ ctx, input }) => {
-      const ep = await loadEpisodeOrThrow(ctx, input.episodeId);
+      const ep = await loadEpisodeOrThrow(ctx, input.episodeId, { skipLockCheck: true });
 
       const groups = await ctx.prisma.shotGroup.findMany({
         where: { episodeId: ep.id, deletedAt: null },
@@ -133,17 +215,45 @@ export const aigcRouter = router({
         },
       });
 
-      return groups.map((g) => ({
-        id: g.id,
-        number: g.number, // "1-8" / "9-18"
-        positionIdx: g.positionIdx,
-        durationS: g.durationS,
-        status: g.status,
-        publishedAt: g.publishedAt,
-        shotCount: g._count.shots,
-        bindingCount: g._count.bindings,
-        hasPrompt: g.prompt.trim().length > 0,
-      }));
+      // W5 完善 L1:按 group 聚合 SUCCESS 视频 attempt 数(左列表显示"已抽卡 N")
+      // 注:groups 已过滤 deletedAt,这里 attempts 默认就只关联到这些(W1-W5 audit 三轮 L6 一致)
+      const groupIds = groups.map((g) => g.id);
+      const videoAttempts = groupIds.length
+        ? await ctx.prisma.generationAttempt.groupBy({
+            by: ['shotGroupId', 'status'],
+            where: {
+              shotGroupId: { in: groupIds },
+              action: 'VIDEO',
+              rejected: false,
+            },
+            _count: { _all: true },
+          })
+        : [];
+      const takeStats = new Map<string, { success: number; failed: number; running: number }>();
+      for (const r of videoAttempts) {
+        if (!r.shotGroupId) continue;
+        const s = takeStats.get(r.shotGroupId) ?? { success: 0, failed: 0, running: 0 };
+        if (r.status === 'SUCCESS') s.success += r._count._all;
+        else if (r.status === 'FAILED') s.failed += r._count._all;
+        else if (r.status === 'RUNNING' || r.status === 'QUEUED') s.running += r._count._all;
+        takeStats.set(r.shotGroupId, s);
+      }
+
+      return groups.map((g) => {
+        const ts = takeStats.get(g.id) ?? { success: 0, failed: 0, running: 0 };
+        return {
+          id: g.id,
+          number: g.number, // free-form label,"1-8" 只是 W3 默认,可重命名为"陆乘·开场"等
+          positionIdx: g.positionIdx,
+          durationS: g.durationS,
+          status: g.status,
+          publishedAt: g.publishedAt,
+          shotCount: g._count.shots,
+          bindingCount: g._count.bindings,
+          hasPrompt: g.prompt.trim().length > 0,
+          videoTakes: ts,
+        };
+      });
     }),
 
   /**
@@ -153,7 +263,7 @@ export const aigcRouter = router({
   getGroupDetail: protectedProcedure
     .input(z.object({ groupId: z.string().cuid() }))
     .query(async ({ ctx, input }) => {
-      const grp = await loadGroupOrThrow(ctx, input.groupId);
+      const grp = await loadGroupOrThrow(ctx, input.groupId, { skipLockCheck: true });
 
       // 1. 组内 shots(按 positionIdx 排序)
       const shots = await ctx.prisma.shot.findMany({
@@ -297,67 +407,74 @@ export const aigcRouter = router({
         return { created: 0, skipped: 0, matches: [] };
       }
 
-      // 4. 已有 bindings 查重(避免重复创建)
-      const existing = await ctx.prisma.assetUsageBinding.findMany({
-        where: { shotGroupId: grp.id, deletedAt: null },
-        select: { assetId: true, usageType: true, refSlotIdx: true },
-      });
-      const existingKey = new Set(
-        existing.map((e) => `${e.assetId}:${e.usageType}`),
-      );
-      const existingImageSlots = existing
-        .filter((e) => !['SOUND_BG', 'SOUND_VOICE', 'THEME'].includes(e.usageType))
-        .map((e) => e.refSlotIdx ?? 0);
-      const existingAudioSlots = existing
-        .filter((e) => ['SOUND_BG', 'SOUND_VOICE', 'THEME'].includes(e.usageType))
-        .map((e) => e.refSlotIdx ?? 0);
-      let nextImageIdx = Math.max(0, ...existingImageSlots) + 1;
-      let nextAudioIdx = Math.max(0, ...existingAudioSlots) + 1;
+      // 4. W5 audit R1:全部写入在事务里 + advisory lock,防两个用户同时点"自动匹配"
+      //    导致 refSlotIdx 双分配(partial unique 会拦,但拦到第二个用户那边抛 P2002 体验差)
+      const result = await ctx.prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(
+          `SELECT pg_advisory_xact_lock(hashtext('aigc_match:' || $1)::bigint)`,
+          grp.id,
+        );
 
-      // 5. 按 (type=SCENE 优先, 然后 CHARACTER, 然后 PROP) 重排,稳定 refSlotIdx
-      const typeOrder: Record<string, number> = { SCENE: 0, CHARACTER: 1, PROP: 2 };
-      const sortedMatches = [...matches].sort((a, b) => {
-        const ta = typeOrder[a.type] ?? 9;
-        const tb = typeOrder[b.type] ?? 9;
-        if (ta !== tb) return ta - tb;
-        return a.position - b.position;
-      });
+        // 锁内 re-read 现有 bindings 查重 + 算 next slot
+        const existing = await tx.assetUsageBinding.findMany({
+          where: { shotGroupId: grp.id, deletedAt: null },
+          select: { assetId: true, usageType: true, refSlotIdx: true },
+        });
+        const existingKey = new Set(
+          existing.map((e) => `${e.assetId}:${e.usageType}`),
+        );
+        const existingImageSlots = existing
+          .filter((e) => !['SOUND_BG', 'SOUND_VOICE', 'THEME'].includes(e.usageType))
+          .map((e) => e.refSlotIdx ?? 0);
+        let nextImageIdx = Math.max(0, ...existingImageSlots) + 1;
 
-      const created: Array<{
-        bindingId: string;
-        assetId: string;
-        assetName: string;
-        refSlotIdx: number;
-      }> = [];
-      const skipped: string[] = [];
+        // 5. 按 (type=SCENE 优先, 然后 CHARACTER, 然后 PROP) 重排,稳定 refSlotIdx
+        const typeOrder: Record<string, number> = { SCENE: 0, CHARACTER: 1, PROP: 2 };
+        const sortedMatches = [...matches].sort((a, b) => {
+          const ta = typeOrder[a.type] ?? 9;
+          const tb = typeOrder[b.type] ?? 9;
+          if (ta !== tb) return ta - tb;
+          return a.position - b.position;
+        });
 
-      for (const m of sortedMatches) {
-        const usageType = m.type === 'SCENE' ? 'ENVIRONMENT' : 'APPEAR';
-        const key = `${m.assetId}:${usageType}`;
-        if (existingKey.has(key)) {
-          skipped.push(m.assetName);
-          continue;
-        }
-        const refSlotIdx = nextImageIdx++;
-        const binding = await ctx.prisma.assetUsageBinding.create({
-          data: {
+        const created: Array<{
+          bindingId: string;
+          assetId: string;
+          assetName: string;
+          refSlotIdx: number;
+        }> = [];
+        const skipped: string[] = [];
+
+        for (const m of sortedMatches) {
+          const usageType = m.type === 'SCENE' ? 'ENVIRONMENT' : 'APPEAR';
+          const key = `${m.assetId}:${usageType}`;
+          if (existingKey.has(key)) {
+            skipped.push(m.assetName);
+            continue;
+          }
+          const refSlotIdx = nextImageIdx++;
+          const binding = await tx.assetUsageBinding.create({
+            data: {
+              assetId: m.assetId,
+              projectId: grp.episode.projectId,
+              episodeId: grp.episodeId,
+              shotGroupId: grp.id,
+              usageType,
+              refSlotIdx,
+              note: `auto-match: ${m.refKind} @${m.matchedTerm}`,
+            },
+          });
+          existingKey.add(key);
+          created.push({
+            bindingId: binding.id,
             assetId: m.assetId,
-            projectId: grp.episode.projectId,
-            episodeId: grp.episodeId,
-            shotGroupId: grp.id,
-            usageType,
+            assetName: m.assetName,
             refSlotIdx,
-            note: `auto-match: ${m.refKind} @${m.matchedTerm}`,
-          },
-        });
-        existingKey.add(key);
-        created.push({
-          bindingId: binding.id,
-          assetId: m.assetId,
-          assetName: m.assetName,
-          refSlotIdx,
-        });
-      }
+          });
+        }
+
+        return { created, skipped };
+      });
 
       await logOperation(
         ctx,
@@ -369,12 +486,16 @@ export const aigcRouter = router({
           groupNumber: grp.number,
           episodeId: grp.episodeId,
           projectId: grp.episode.projectId,
-          createdCount: created.length,
-          skippedCount: skipped.length,
+          createdCount: result.created.length,
+          skippedCount: result.skipped.length,
         },
       );
 
-      return { created: created.length, skipped: skipped.length, matches: created };
+      return {
+        created: result.created.length,
+        skipped: result.skipped.length,
+        matches: result.created,
+      };
     }),
 
   /**
@@ -468,13 +589,14 @@ export const aigcRouter = router({
       z.object({
         groupId: z.string().cuid(),
         durationS: z.number().min(1).max(15).optional(),
-        aspectRatio: z.string().max(20).optional(),
+        // W1-W5 audit 三轮 P2-13:aspectRatio 改 enum 与 generateVideo 一致
+        aspectRatio: z.enum(['9:16', '16:9', '1:1']).optional(),
         extraInstruction: z.string().max(500).optional(),
         extraNegative: z.array(z.string().max(50)).max(20).optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
-      const grp = await loadGroupOrThrow(ctx, input.groupId);
+      const grp = await loadGroupOrThrow(ctx, input.groupId, { skipLockCheck: true });
 
       // 取 group 风格(project 默认 style)
       const project = await ctx.prisma.project.findUnique({
@@ -521,27 +643,25 @@ export const aigcRouter = router({
           : [];
       const mediaMap = new Map(medias.map((m) => [m.id, m.cdnUrl]));
 
-      const references: VideoReference[] = bindings
-        .map((b) => {
-          const kind = kindFromUsage(b.usageType);
-          let chosen: string | null = null;
-          if (kind === 'AUDIO') chosen = b.asset.voiceMediaId;
-          else if (b.asset.type === 'CHARACTER')
-            chosen = b.asset.portraitMediaId ?? b.asset.mainMediaId;
-          else if (b.asset.type === 'SCENE')
-            chosen = b.asset.sceneMainMediaId ?? b.asset.mainMediaId;
-          else chosen = b.asset.mainMediaId;
-          const url = chosen ? mediaMap.get(chosen) : null;
-          if (!url) return null; // 缺图就跳过,会进 warnings
-          return {
-            refSlotIdx: b.refSlotIdx!,
-            kind,
-            assetId: b.asset.id,
-            name: b.asset.name,
-            mediaUrl: url,
-          };
-        })
-        .filter((r): r is VideoReference => r !== null);
+      // W5 audit W1:缺图也保留 reference(mediaUrl=null),由 compile 报 missingMedia
+      const references: VideoReference[] = bindings.map((b) => {
+        const kind = kindFromUsage(b.usageType);
+        let chosen: string | null = null;
+        if (kind === 'AUDIO') chosen = b.asset.voiceMediaId;
+        else if (b.asset.type === 'CHARACTER')
+          chosen = b.asset.portraitMediaId ?? b.asset.mainMediaId;
+        else if (b.asset.type === 'SCENE')
+          chosen = b.asset.sceneMainMediaId ?? b.asset.mainMediaId;
+        else chosen = b.asset.mainMediaId;
+        const url = chosen ? (mediaMap.get(chosen) ?? null) : null;
+        return {
+          refSlotIdx: b.refSlotIdx!,
+          kind,
+          assetId: b.asset.id,
+          name: b.asset.name,
+          mediaUrl: url,
+        };
+      });
 
       const compiled = compileShotGroupVideoPrompt({
         text: grp.prompt,
@@ -561,5 +681,863 @@ export const aigcRouter = router({
       });
 
       return compiled;
+    }),
+
+  // ============================== W5.2.1 手动 binding ==============================
+
+  /**
+   * 列出项目可关联的资产(给"关联素材"弹窗用)— 已绑到本 group 的标 alreadyBound
+   */
+  listAvailableAssets: protectedProcedure
+    .input(
+      z.object({
+        groupId: z.string().cuid(),
+        type: z.enum(['CHARACTER', 'SCENE', 'PROP', 'STYLE_REFERENCE']).optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const grp = await loadGroupOrThrow(ctx, input.groupId, { skipLockCheck: true });
+      const [assets, bindings] = await Promise.all([
+        ctx.prisma.asset.findMany({
+          where: {
+            projectId: grp.episode.projectId,
+            deletedAt: null,
+            ...(input.type && { type: input.type }),
+          },
+          orderBy: [{ type: 'asc' }, { name: 'asc' }],
+          select: {
+            id: true,
+            type: true,
+            name: true,
+            alias: true,
+            description: true,
+            portraitMediaId: true,
+            sceneMainMediaId: true,
+            mainMediaId: true,
+            voiceMediaId: true,
+            maturity: true,
+            complianceStatus: true,
+          },
+        }),
+        ctx.prisma.assetUsageBinding.findMany({
+          where: { shotGroupId: grp.id, deletedAt: null },
+          select: { assetId: true },
+        }),
+      ]);
+      const boundSet = new Set(bindings.map((b) => b.assetId));
+      // 一次性查所有相关 media,UI 卡片显示缩略
+      const mediaIds = new Set<string>();
+      for (const a of assets) {
+        for (const id of [a.portraitMediaId, a.sceneMainMediaId, a.mainMediaId, a.voiceMediaId]) {
+          if (id) mediaIds.add(id);
+        }
+      }
+      const medias =
+        mediaIds.size > 0
+          ? await ctx.prisma.mediaItem.findMany({
+              where: { id: { in: Array.from(mediaIds) } },
+              select: { id: true, cdnUrl: true },
+            })
+          : [];
+      const mediaMap = new Map(medias.map((m) => [m.id, m.cdnUrl]));
+      return assets.map((a) => {
+        const thumb = a.portraitMediaId
+          ? mediaMap.get(a.portraitMediaId)
+          : a.sceneMainMediaId
+            ? mediaMap.get(a.sceneMainMediaId)
+            : a.mainMediaId
+              ? mediaMap.get(a.mainMediaId)
+              : null;
+        return {
+          id: a.id,
+          type: a.type,
+          name: a.name,
+          alias: a.alias,
+          description: a.description,
+          maturity: a.maturity,
+          complianceStatus: a.complianceStatus,
+          thumbnailUrl: thumb ?? null,
+          alreadyBound: boundSet.has(a.id),
+        };
+      });
+    }),
+
+  /**
+   * 手动 binding 资产到 group(W5.2.1)— 续 refSlotIdx,跟 autoMatch 用同 advisory lock
+   * usageType 默认按 asset.type 推导(CHARACTER→APPEAR / SCENE→ENVIRONMENT / PROP→APPEAR)
+   */
+  bindAssetToGroup: protectedProcedure
+    .input(
+      z.object({
+        groupId: z.string().cuid(),
+        assetId: z.string().cuid(),
+        usageType: z
+          .enum([
+            'APPEAR',
+            'SPEAK',
+            'HOLD',
+            'WEAR',
+            'ENVIRONMENT',
+            'BACKGROUND',
+            'SOUND_BG',
+            'SOUND_VOICE',
+            'THEME',
+            'REFERENCE',
+          ])
+          .optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const grp = await loadGroupOrThrow(ctx, input.groupId);
+
+      // 校验 asset 属于同项目(防越权)
+      const asset = await ctx.prisma.asset.findFirst({
+        where: {
+          id: input.assetId,
+          projectId: grp.episode.projectId,
+          deletedAt: null,
+        },
+        select: { id: true, type: true, name: true },
+      });
+      if (!asset) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '资产不存在或不属于本项目' });
+      }
+
+      const usageType =
+        input.usageType ??
+        (asset.type === 'SCENE' ? 'ENVIRONMENT' : 'APPEAR');
+
+      const binding = await ctx.prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(
+          `SELECT pg_advisory_xact_lock(hashtext('aigc_match:' || $1)::bigint)`,
+          grp.id,
+        );
+
+        const existing = await tx.assetUsageBinding.findFirst({
+          where: {
+            shotGroupId: grp.id,
+            assetId: input.assetId,
+            usageType,
+            deletedAt: null,
+          },
+        });
+        if (existing) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: `资产 "${asset.name}" 已用 ${usageType} 关联到本生成段`,
+          });
+        }
+
+        // 续 refSlotIdx — IMAGE 类 / AUDIO 类各自一个计数器
+        const isAudio = ['SOUND_BG', 'SOUND_VOICE', 'THEME'].includes(usageType);
+        const slotPool = await tx.assetUsageBinding.findMany({
+          where: {
+            shotGroupId: grp.id,
+            deletedAt: null,
+            usageType: isAudio
+              ? { in: ['SOUND_BG', 'SOUND_VOICE', 'THEME'] }
+              : { notIn: ['SOUND_BG', 'SOUND_VOICE', 'THEME'] },
+          },
+          select: { refSlotIdx: true },
+        });
+        const nextIdx =
+          Math.max(0, ...slotPool.map((s) => s.refSlotIdx ?? 0)) + 1;
+
+        return tx.assetUsageBinding.create({
+          data: {
+            assetId: input.assetId,
+            projectId: grp.episode.projectId,
+            episodeId: grp.episodeId,
+            shotGroupId: grp.id,
+            usageType,
+            refSlotIdx: nextIdx,
+            note: 'manual',
+          },
+        });
+      });
+
+      await logOperation(ctx, 'aigc.bindAsset', 'shotGroup', grp.id, null, {
+        bindingId: binding.id,
+        assetId: input.assetId,
+        assetName: asset.name,
+        usageType,
+        refSlotIdx: binding.refSlotIdx,
+        groupNumber: grp.number,
+        projectId: grp.episode.projectId,
+      });
+
+      return binding;
+    }),
+
+  /**
+   * 删除 binding(软删,保留审计)— W1-W5 audit 三轮 L1+L2:加 lock check + 幂等
+   */
+  unbindAsset: protectedProcedure
+    .input(z.object({ bindingId: z.string().cuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const binding = await ctx.prisma.assetUsageBinding.findFirst({
+        where: { id: input.bindingId, deletedAt: null },
+        include: {
+          asset: { select: { name: true } },
+          episode: {
+            select: { id: true, projectId: true, deletedAt: true, status: true, generatingStartedAt: true },
+          },
+        },
+      });
+      if (!binding || binding.episode.deletedAt) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'binding 不存在' });
+      }
+      await assertProjectAccess(ctx, binding.episode.projectId);
+      if (isEpisodeLockedNow(binding.episode)) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: '本集正在生成分镜中,请等导演侧完成后再操作 AIGC 工作台',
+        });
+      }
+
+      // W1-W5 audit 三轮 L2:幂等 — updateMany 配合 deletedAt:null 守卫,
+      // count=0 表示已被另一并发请求软删了,返 200 OK 而不是再写审计
+      const result = await ctx.prisma.assetUsageBinding.updateMany({
+        where: { id: binding.id, deletedAt: null },
+        data: { deletedAt: new Date() },
+      });
+      if (result.count === 0) {
+        return { id: binding.id, alreadyUnbound: true };
+      }
+
+      await logOperation(ctx, 'aigc.unbindAsset', 'assetUsageBinding', binding.id, binding, {
+        deletedAt: new Date(),
+        assetName: binding.asset.name,
+        projectId: binding.episode.projectId,
+      });
+
+      return { id: binding.id, alreadyUnbound: false };
+    }),
+
+  // ============================== W5.4 视频生成 ==============================
+
+  /**
+   * 生成视频(W5.4)— 调用视频 Provider(Seedance / Kling / HappyHorse / 本地 / Mock 兜底)
+   *
+   * Provider 选择优先级:input.providerOverride > SystemSetting.binding.shot.video.providerId
+   * 真 provider 没配置 / 无 key → MockVideoProvider 自动兜底(返公开样片,UI 端到端可演示)
+   */
+  generateVideo: protectedProcedure
+    // W7 audit R8 P0:per-user 10 次 / 60s — 防同用户无限烧 LLM 钱
+    .use(
+      rateLimit({
+        key: (ctx) => `aigc.generateVideo:${ctx.user?.id ?? 'anon'}`,
+        max: 10,
+        windowMs: 60_000,
+        message: '视频抽卡过快(每分钟最多 10 次)— 请等等再试',
+      }),
+    )
+    .input(
+      z.object({
+        groupId: z.string().cuid(),
+        durationS: z.number().min(1).max(15).optional(),
+        aspectRatio: z.enum(['9:16', '16:9', '1:1']).optional(),
+        providerOverride: z.string().max(100).optional(),
+        extraInstruction: z.string().max(500).optional(),
+        extraNegative: z.array(z.string().max(50)).max(20).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const grp = await loadGroupOrThrow(ctx, input.groupId);
+      const bindings = await getVideoBindings(ctx);
+
+      const providerId = input.providerOverride ?? bindings.providerId;
+      const aspectRatio = input.aspectRatio ?? bindings.defaultAspectRatio;
+      const durationS = Math.min(
+        input.durationS ?? grp.durationS ?? 5,
+        bindings.maxDurationS,
+      );
+
+      // W1-W5 audit 三轮 G1:advisory lock 串行同 group 的并发生成,
+      // 防双击 / React 双 invoke / 客户端 retry 重复抽卡扣费
+      await ctx.prisma.$executeRawUnsafe(
+        `SELECT pg_advisory_xact_lock(hashtext('aigc_video:' || $1)::bigint)`,
+        grp.id,
+      );
+      // 锁内查"是否已有 RUNNING attempt",有的话直接拒,不创建新 attempt
+      const inflight = await ctx.prisma.generationAttempt.findFirst({
+        where: {
+          shotGroupId: grp.id,
+          action: 'VIDEO',
+          status: { in: ['QUEUED', 'RUNNING'] },
+        },
+        select: { id: true, providerId: true, startedAt: true },
+      });
+      if (inflight) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: `本生成段已有进行中的视频任务(provider=${inflight.providerId})— 等完成或失败后再点`,
+        });
+      }
+
+      // 提前 fetch provider 实例(estimateCost 用 + 后续 generate 用,Mock 兜底始终可用)
+      const provider = await getVideoProvider(providerId);
+
+      // W1-W5 audit 三轮 B1:每日预算护栏 — 用 provider.estimateCost(req) 真实预估,
+      // 不再写死 seedance 系数,Mock 也按 mock 真单价 estimate(默认 0,但若管理员 unitPriceCny>0 会拦)
+      if (bindings.dailyBudgetCny > 0) {
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const todaySpent = await ctx.prisma.costLedgerEntry.aggregate({
+          where: {
+            projectId: grp.episode.projectId,
+            action: 'video.generate',
+            success: true,
+            createdAt: { gte: todayStart },
+          },
+          _sum: { costCny: true },
+        });
+        const spent = Number(todaySpent._sum.costCny ?? 0);
+        const estimate = provider.estimateCost({
+          prompt: '',
+          durationS,
+          aspectRatio,
+        });
+        if (spent + estimate > bindings.dailyBudgetCny) {
+          throw new TRPCError({
+            code: 'TOO_MANY_REQUESTS',
+            message: `今日视频预算已用 ${spent.toFixed(2)}¥ / 上限 ${bindings.dailyBudgetCny}¥,本次预估 ${estimate.toFixed(2)}¥ 会超限`,
+          });
+        }
+      }
+
+      // 1. 取项目风格 + bindings + media,编译 prompt
+      const project = await ctx.prisma.project.findUnique({
+        where: { id: grp.episode.projectId },
+        include: { style: true },
+      });
+
+      const dbBindings = await ctx.prisma.assetUsageBinding.findMany({
+        where: { shotGroupId: grp.id, deletedAt: null, refSlotIdx: { not: null } },
+        orderBy: { refSlotIdx: 'asc' },
+        include: {
+          asset: {
+            select: {
+              id: true,
+              name: true,
+              type: true,
+              portraitMediaId: true,
+              sceneMainMediaId: true,
+              mainMediaId: true,
+              voiceMediaId: true,
+            },
+          },
+        },
+      });
+
+      const mediaIds = new Set<string>();
+      for (const b of dbBindings) {
+        for (const id of [
+          b.asset.portraitMediaId,
+          b.asset.sceneMainMediaId,
+          b.asset.mainMediaId,
+          b.asset.voiceMediaId,
+        ]) {
+          if (id) mediaIds.add(id);
+        }
+      }
+      const medias =
+        mediaIds.size > 0
+          ? await ctx.prisma.mediaItem.findMany({
+              where: { id: { in: Array.from(mediaIds) } },
+              select: { id: true, cdnUrl: true },
+            })
+          : [];
+      const mediaMap = new Map(medias.map((m) => [m.id, m.cdnUrl]));
+
+      const refs: VideoReference[] = dbBindings.map((b) => {
+        const kind = kindFromUsage(b.usageType);
+        let chosen: string | null = null;
+        if (kind === 'AUDIO') chosen = b.asset.voiceMediaId;
+        else if (b.asset.type === 'CHARACTER')
+          chosen = b.asset.portraitMediaId ?? b.asset.mainMediaId;
+        else if (b.asset.type === 'SCENE')
+          chosen = b.asset.sceneMainMediaId ?? b.asset.mainMediaId;
+        else chosen = b.asset.mainMediaId;
+        return {
+          refSlotIdx: b.refSlotIdx!,
+          kind,
+          assetId: b.asset.id,
+          name: b.asset.name,
+          mediaUrl: chosen ? (mediaMap.get(chosen) ?? null) : null,
+        };
+      });
+
+      const compiled = compileShotGroupVideoPrompt({
+        text: grp.prompt,
+        durationS,
+        references: refs,
+        style: project?.style
+          ? {
+              characterPrompt: project.style.characterPrompt,
+              scenePrompt: project.style.scenePrompt,
+              propPrompt: project.style.propPrompt,
+              forbiddenWords: project.style.forbiddenWords,
+            }
+          : null,
+        aspectRatio,
+        extraInstruction: input.extraInstruction,
+        extraNegative: input.extraNegative,
+      });
+
+      // 2. 提示词缺图 / 未关联 token 阻断 — 让用户先修
+      if (compiled.warnings.missingMedia.length > 0) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `${compiled.warnings.missingMedia
+            .map((m) => `${m.assetName} 缺主图`)
+            .join(' / ')} — 去美术工作台补图后再试`,
+        });
+      }
+      if (compiled.warnings.unknownTokens.length > 0) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `提示词里用了未关联的 token:${compiled.warnings.unknownTokens.join(', ')} — 先关联或删除 token`,
+        });
+      }
+      if (!grp.prompt.trim()) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '提示词为空 — 去导演工作台生成或手编',
+        });
+      }
+
+      // 3. 创建 attempt(status=RUNNING)
+      const startedAt = new Date();
+      const attempt = await ctx.prisma.generationAttempt.create({
+        data: {
+          projectId: grp.episode.projectId,
+          episodeId: grp.episodeId,
+          shotGroupId: grp.id,
+          providerId,
+          modelId: providerId,
+          action: 'VIDEO',
+          // W7 audit R8 P0:inputJson 脱敏 — 不存明文 prompt + 不存资产 name/mediaUrl
+          // 保留 preview/hash/length 便于追溯;references 只留 idx+kind+assetId
+          inputJson: {
+            kind: 'aigc.generateVideo',
+            groupNumber: grp.number,
+            positivePrompt: sanitizePromptForLedger(compiled.positive),
+            negativePrompt: sanitizePromptForLedger(compiled.negative),
+            aspectRatio,
+            durationS,
+            references: sanitizeReferencesForLedger(compiled.references),
+          },
+          outputMediaIds: [],
+          inputUnits: 0,
+          outputUnits: 0,
+          unitPriceCny: '0',
+          costCny: '0',
+          status: 'RUNNING',
+          startedAt,
+          createdBy: ctx.user.id,
+        },
+      });
+
+      // 4. 调 Provider
+      const refImageUrls = compiled.references
+        .filter((r) => r.kind === 'IMAGE')
+        .map((r) => r.mediaUrl);
+
+      try {
+        const result = await provider.generate(
+          {
+            prompt: compiled.positive,
+            durationS,
+            aspectRatio,
+            refImageUrls: refImageUrls.length > 0 ? refImageUrls : undefined,
+          },
+          {
+            userId: ctx.user.id,
+            projectId: grp.episode.projectId,
+            episodeId: grp.episodeId,
+            attemptId: attempt.id,
+          },
+        );
+
+        // 5. 成功:写 MediaItem(VIDEO)+ 更新 attempt
+        const finishedAt = new Date();
+        const safeName = grp.number.replace(/[^a-zA-Z0-9_-]+/g, '_');
+        const { mediaId, updatedAttempt } = await ctx.prisma.$transaction(async (tx) => {
+          const media = await tx.mediaItem.create({
+            data: {
+              projectId: grp.episode.projectId,
+              scope: 'PROJECT',
+              kind: 'VIDEO',
+              filename: `${safeName}-${startedAt.getTime()}.mp4`,
+              mimeType: 'video/mp4',
+              sizeBytes: 0, // Phase 1 不真实下载,sizeBytes 0
+              storageKey: result.videoUrl.startsWith('http')
+                ? `external://${result.videoUrl}`
+                : result.videoUrl,
+              cdnUrl: result.videoUrl,
+              aspectRatio,
+              meta: {
+                width: result.width,
+                height: result.height,
+                durationS: result.durationS,
+                fps: result.fps,
+                providerId,
+                providerJobId: result.providerJobId,
+                thumbnailUrl: result.thumbnailUrl,
+              },
+              source: 'AIGC',
+              sourceRef: attempt.id,
+            },
+          });
+          // W1-W5 audit 三轮 B2:用 provider 自报 unit price 而非反推,
+          // 防 actualDuration ≠ input.durationS 时 ledger 单价列误导审计
+          const unitPrice = provider.info.defaultUnitPriceCny.toFixed(6);
+          const a = await tx.generationAttempt.update({
+            where: { id: attempt.id },
+            data: {
+              status: 'SUCCESS',
+              providerJobId: result.providerJobId,
+              outputMediaId: media.id,
+              outputMediaIds: [media.id],
+              inputUnits: durationS,
+              outputUnits: result.durationS,
+              unitPriceCny: unitPrice,
+              costCny: result.costCny.toFixed(4),
+              finishedAt,
+              durationMs: finishedAt.getTime() - startedAt.getTime(),
+            },
+          });
+          await tx.costLedgerEntry.create({
+            data: {
+              userId: ctx.user.id,
+              projectId: grp.episode.projectId,
+              episodeId: grp.episodeId,
+              attemptId: attempt.id,
+              providerId,
+              modelId: providerId,
+              action: 'video.generate',
+              inputUnits: durationS,
+              outputUnits: result.durationS,
+              unitPriceCny: unitPrice,
+              costCny: result.costCny.toFixed(4),
+              success: true,
+              billingCycle: new Date().toISOString().slice(0, 7),
+            },
+          });
+          return { mediaId: media.id, updatedAttempt: a };
+        });
+
+        await logOperation(ctx, 'aigc.generateVideo', 'shotGroup', grp.id, null, {
+          attemptId: attempt.id,
+          mediaId,
+          providerId,
+          aspectRatio,
+          durationS,
+          cost: result.costCny,
+          projectId: grp.episode.projectId,
+        });
+
+        // W5 完善 E1 + 三轮 E1:发布事件(payload 类型已 union,跟 events.ts 对齐)
+        // W5.5 BullMQ worker 和 W6 剪辑模块挂这里
+        await getEventBus()
+          .publish(
+            EVENTS.GENERATION_COMPLETED,
+            {
+              kind: 'video' as const,
+              attemptId: updatedAttempt.id,
+              shotGroupId: grp.id,
+              episodeId: grp.episodeId,
+              projectId: grp.episode.projectId,
+              providerId,
+              mediaId,
+              videoUrl: result.videoUrl,
+              durationS: result.durationS,
+              costCny: result.costCny,
+            },
+            { publisherId: 'aigc.generateVideo' },
+          )
+          .catch((err) => {
+            console.error('[aigc.generateVideo] event publish failed:', err);
+          });
+
+        return {
+          attemptId: updatedAttempt.id,
+          mediaId,
+          videoUrl: result.videoUrl,
+          thumbnailUrl: result.thumbnailUrl,
+          durationS: result.durationS,
+          width: result.width,
+          height: result.height,
+          providerId,
+          costCny: result.costCny,
+        };
+      } catch (e) {
+        const finishedAt = new Date();
+        const errMsg = e instanceof Error ? e.message : String(e);
+        await ctx.prisma.$transaction(async (tx) => {
+          await tx.generationAttempt.update({
+            where: { id: attempt.id },
+            data: {
+              status: 'FAILED',
+              errorMsg: errMsg,
+              finishedAt,
+              durationMs: finishedAt.getTime() - startedAt.getTime(),
+            },
+          });
+          await tx.costLedgerEntry.create({
+            data: {
+              userId: ctx.user.id,
+              projectId: grp.episode.projectId,
+              episodeId: grp.episodeId,
+              attemptId: attempt.id,
+              providerId,
+              modelId: providerId,
+              action: 'video.generate',
+              inputUnits: durationS,
+              outputUnits: 0,
+              unitPriceCny: '0',
+              costCny: '0',
+              success: false,
+              billingCycle: new Date().toISOString().slice(0, 7),
+            },
+          });
+        });
+        await logOperation(ctx, 'aigc.generateVideo.failed', 'shotGroup', grp.id, null, {
+          attemptId: attempt.id,
+          providerId,
+          error: errMsg,
+          projectId: grp.episode.projectId,
+        });
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: `视频生成失败: ${errMsg}`,
+          cause: e, // W7 audit R9:保留 cause 便于生产追源
+        });
+      }
+    }),
+
+  /**
+   * 列出某 group 的视频生成历史(W5.4)— 含成功 / 失败 / 进行中,按 createdAt 倒序
+   * W1-W5 audit 三轮 A1:allowArchived:true 让归档的 group 也能查历史(配合 archiveGroup "保留审计")
+   */
+  listVideoTakes: protectedProcedure
+    .input(z.object({ groupId: z.string().cuid() }))
+    .query(async ({ ctx, input }) => {
+      const grp = await loadGroupOrThrow(ctx, input.groupId, {
+        skipLockCheck: true,
+        allowArchived: true,
+      });
+      const attempts = await ctx.prisma.generationAttempt.findMany({
+        where: {
+          shotGroupId: grp.id,
+          action: 'VIDEO',
+        },
+        orderBy: { createdAt: 'desc' },
+        include: {
+          costEntry: { select: { costCny: true, success: true } },
+        },
+      });
+      // 一次性查所有 outputMediaId 对应的 MediaItem
+      const mediaIds = attempts
+        .map((a) => a.outputMediaId)
+        .filter((id): id is string => !!id);
+      const medias =
+        mediaIds.length > 0
+          ? await ctx.prisma.mediaItem.findMany({
+              where: { id: { in: mediaIds } },
+              select: {
+                id: true,
+                cdnUrl: true,
+                aspectRatio: true,
+                meta: true,
+              },
+            })
+          : [];
+      const mediaMap = new Map(medias.map((m) => [m.id, m]));
+
+      return attempts.map((a) => {
+        const media = a.outputMediaId ? mediaMap.get(a.outputMediaId) ?? null : null;
+        return {
+          id: a.id,
+          status: a.status,
+          providerId: a.providerId,
+          createdAt: a.createdAt,
+          durationMs: a.durationMs,
+          costCny: a.costCny,
+          errorMsg: a.errorMsg,
+          videoUrl: media?.cdnUrl ?? null,
+          aspectRatio: media?.aspectRatio ?? null,
+          mediaId: media?.id ?? null,
+          rejected: a.rejected,
+        };
+      });
+    }),
+
+  /**
+   * 标记一次视频抽卡为废片(rejected)— 只标 attempt,不删 MediaItem(保留可复用)
+   */
+  rejectVideoTake: protectedProcedure
+    .input(z.object({ attemptId: z.string().cuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const attempt = await ctx.prisma.generationAttempt.findFirst({
+        where: { id: input.attemptId, action: 'VIDEO' },
+        include: { shotGroup: { include: { episode: true } } },
+      });
+      if (!attempt || !attempt.shotGroup) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'video attempt 不存在' });
+      }
+      await assertProjectAccess(ctx, attempt.shotGroup.episode.projectId);
+      // W1-W5 audit 三轮 L1:导演 GENERATING 时拒
+      if (isEpisodeLockedNow(attempt.shotGroup.episode)) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: '本集正在生成分镜中,请等导演侧完成后再操作 AIGC 工作台',
+        });
+      }
+      // W1-W5 audit 三轮 P2-15:幂等(已 rejected 不重复写审计)
+      if (attempt.rejected) {
+        return { id: attempt.id, alreadyRejected: true };
+      }
+      const updated = await ctx.prisma.generationAttempt.update({
+        where: { id: attempt.id },
+        data: {
+          rejected: true,
+          rejectedAt: new Date(),
+          rejectedBy: ctx.user.id,
+        },
+      });
+      await logOperation(ctx, 'aigc.rejectVideoTake', 'generationAttempt', attempt.id, attempt, {
+        ...updated,
+        projectId: attempt.shotGroup.episode.projectId,
+      });
+      return { id: updated.id, alreadyRejected: false };
+    }),
+
+  // ============================== W5 完善 G1:ShotGroup CRUD ==============================
+  // "1-8" 只是 W3 mergeShots 自动产出的 label;实际上 group 是灵活组合概念,
+  // 用户应能:
+  //   - createEmptyGroup:从零建立"陆乘·开场"这种命名 group(还没有 shots,后续手动加)
+  //   - renameGroup:把 "1-8" 改成有意义的 label
+  //   - archiveGroup:软删 group + 级联软删 bindings(attempts 保留审计)
+  // shots 编辑(合并/拆分/移动)仍走 W3 storyboard 工作台,不在 AIGC 模块重做。
+
+  /**
+   * 新建空白生成段(W5 完善 G1)— 续 episode 内 positionIdx,label 由用户给
+   */
+  createEmptyGroup: protectedProcedure
+    .input(
+      z.object({
+        episodeId: z.string().cuid(),
+        label: z.string().min(1).max(100), // ShotGroup.number 字段承载 free-form label
+        prompt: z.string().max(20000).default(''),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const ep = await loadEpisodeOrThrow(ctx, input.episodeId);
+      // W1-W5 audit 三轮 L5:终态 episode(COMPLETED/ARCHIVED)不能再加 group
+      if (ep.status === 'COMPLETED' || ep.status === 'ARCHIVED') {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: `本集状态为 ${ep.status},不能创建生成段(终态)`,
+        });
+      }
+
+      // 用 advisory lock 防并发抢同一 positionIdx(跟 W3 storyboard 一致)
+      const group = await ctx.prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(
+          `SELECT pg_advisory_xact_lock(hashtext('storyboard_group:' || $1)::bigint)`,
+          ep.id,
+        );
+        const last = await tx.shotGroup.findFirst({
+          where: { episodeId: ep.id },
+          orderBy: { positionIdx: 'desc' },
+        });
+        const nextIdx = (last?.positionIdx ?? 0) + 1;
+        return tx.shotGroup.create({
+          data: {
+            episodeId: ep.id,
+            number: input.label,
+            positionIdx: nextIdx,
+            durationS: 0,
+            prompt: input.prompt,
+          },
+        });
+      });
+
+      await logOperation(ctx, 'aigc.createEmptyGroup', 'shotGroup', group.id, null, {
+        episodeId: ep.id,
+        projectId: ep.projectId,
+        label: input.label,
+        positionIdx: group.positionIdx,
+      });
+      return group;
+    }),
+
+  /**
+   * 重命名生成段(W5 完善 G1)— ShotGroup.number 是 free-form label,
+   * 默认 "X-Y" 由 W3 merge 给,用户可改成"陆乘·开场"之类有意义的名
+   */
+  renameGroup: protectedProcedure
+    .input(
+      z.object({
+        groupId: z.string().cuid(),
+        label: z.string().min(1).max(100),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const grp = await loadGroupOrThrow(ctx, input.groupId);
+      if (grp.number === input.label) {
+        return grp;
+      }
+      const updated = await ctx.prisma.shotGroup.update({
+        where: { id: grp.id },
+        data: { number: input.label },
+      });
+      await logOperation(ctx, 'aigc.renameGroup', 'shotGroup', grp.id, grp, {
+        ...updated,
+        projectId: grp.episode.projectId,
+      });
+      return updated;
+    }),
+
+  /**
+   * 归档生成段(W5 完善 G1)— 软删 group + 级联软删 bindings
+   * attempts 保留(审计 + 重新启用时可见历史)
+   */
+  archiveGroup: protectedProcedure
+    .input(z.object({ groupId: z.string().cuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const grp = await loadGroupOrThrow(ctx, input.groupId);
+      // W1-W5 audit 三轮 L4:有进行中 attempt 时不能归档,防 attempt SUCCESS 回写到死引用
+      const inflight = await ctx.prisma.generationAttempt.count({
+        where: {
+          shotGroupId: grp.id,
+          action: 'VIDEO',
+          status: { in: ['QUEUED', 'RUNNING'] },
+        },
+      });
+      if (inflight > 0) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: `本生成段有 ${inflight} 个进行中的视频任务,等完成或失败后再归档`,
+        });
+      }
+      const now = new Date();
+      await ctx.prisma.$transaction([
+        ctx.prisma.shotGroup.update({
+          where: { id: grp.id },
+          data: { deletedAt: now },
+        }),
+        ctx.prisma.assetUsageBinding.updateMany({
+          where: { shotGroupId: grp.id, deletedAt: null },
+          data: { deletedAt: now },
+        }),
+      ]);
+      await logOperation(ctx, 'aigc.archiveGroup', 'shotGroup', grp.id, grp, {
+        archivedAt: now,
+        projectId: grp.episode.projectId,
+      });
+      return { id: grp.id, archivedAt: now };
     }),
 });
