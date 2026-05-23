@@ -4,6 +4,9 @@
  */
 export * from './client.js';
 export * from './enums.js';
+// W1-W5 audit P1 followup(R9):Prisma 既作类型(Prisma.Decimal 类型)也作 value(new Prisma.Decimal()),
+// 必须 value-export 而不能 type-only
+export { Prisma } from '@prisma/client';
 export type {
   User,
   Project,
@@ -13,8 +16,8 @@ export type {
   Script,
   ScriptAnalysis,
   Shot,
-  ShotAssetRef,
   Asset,
+  AssetUsageBinding,
   AssetVersion,
   MediaItem,
   GenerationAttempt,
@@ -27,5 +30,11 @@ export type {
   Invitation,
   Notification,
   WorkReportSnapshot,
-  Prisma,
 } from '@prisma/client';
+
+// W1-W5 audit P2 followup(P2-3):ShotAssetRef 类型已从公共导出移除
+// schema 里 model 还在(@deprecated 标记),W6 schema 升级时一起 drop 表 + enum AssetRefKind。
+// 删除步骤(W6 执行):
+//   1. schema 删 model ShotAssetRef + enum AssetRefKind + Shot.assets + Asset.bindings
+//   2. prisma migrate dev --create-only,人工把 dropTable 改成 IF EXISTS
+//   3. 删 db/src/enums.ts 的 AssetRefKind export

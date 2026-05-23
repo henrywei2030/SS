@@ -26,7 +26,17 @@ export interface CallContext {
   shotId?: string;
   assetId?: string;
   attemptId?: string;
-  /** 是否跳过 Cost Ledger 记账（仅用于内部测试） */
+  /**
+   * 跳过 Provider 内置 Cost Ledger 记账 — 由 router 单点写入。
+   *
+   * W1-W5 audit P1 followup:`asset.generateImage` / `aigc.generateVideo` /
+   * `script.analyze` / `asset.breakdown` / `storyboard.generateForEpisode`
+   * 这 5 个 router 都已经手动写 costLedgerEntry(为了跟 attempt 同事务 + 用真实
+   * outputUnits/inputUnits)。Provider 继承自 BaseProvider 会再写一遍 → 双写。
+   *
+   * 解法:router 调 provider.generate 时传 `skipLedger: true`,Provider 跳过
+   * `BaseProvider.recordLedger`,router 单点写。真接 Seedance / Claude 时这条防双计费。
+   */
   skipLedger?: boolean;
 }
 

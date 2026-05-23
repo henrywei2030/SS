@@ -813,6 +813,10 @@ export const assetRouter = router({
             userId: ctx.user.id,
             projectId: asset.projectId,
             assetId: asset.id,
+            // W1-W5 audit P1 followup:防 ImageProvider 内置 ledger + router 双写。
+            // 真接 NanoBanana / GPT Image 时这条防 cost 翻倍。router 用真实
+            // imageResult.imageUrls.length 算 outputUnits + realUnitPriceCny。
+            skipLedger: true,
           },
         );
       } catch (e) {
@@ -1122,6 +1126,22 @@ export const assetRouter = router({
             message: 'MediaItem 来自其他资产的生成 — 跨资产挪用破坏一致性,请重新为本资产生成',
           });
         }
+        // W1-W5 audit P2 followup(P2-2):校验 attempt.candidateForSlot === input.slot
+        // 防"为 portrait 槽位生成的图被强塞到 three_view 槽位"导致比例 / 视角错配
+        // 仅在 AIGC 来源校验:UPLOAD 没有 candidateForSlot 概念,不校验
+        const sourceAttempt = await ctx.prisma.generationAttempt.findFirst({
+          where: { outputMediaIds: { has: media.id } },
+          select: { candidateForSlot: true },
+        });
+        if (
+          sourceAttempt?.candidateForSlot &&
+          sourceAttempt.candidateForSlot !== input.slot
+        ) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `候选图原为 "${sourceAttempt.candidateForSlot}" 槽位生成,不可塞到 "${input.slot}" 槽位(比例/视角可能不匹配,重新为该槽位生成)`,
+          });
+        }
       } else if (media.source === 'EXTERNAL') {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -1291,6 +1311,45 @@ export const assetRouter = router({
           shot: { select: { id: true, number: true, positionIdx: true } },
         },
         orderBy: [{ episode: { number: 'asc' } }, { createdAt: 'asc' }],
+      });
+    }),
+
+  /**
+   * 按 shotId 列出 binding(W1-W5 audit P1 followup P1-8)
+   *
+   * AIGC 工作台跑 group 级查询,但导演侧编辑单镜时(原 W3 ShotAssetRef 兼容路径)
+   * 需要按 shotId 查 binding。当前 binding 已有 shotId 字段(W4-MM 加),只是没暴露查询端点。
+   */
+  listShotBindings: protectedProcedure
+    .input(z.object({ shotId: z.string().cuid() }))
+    .query(async ({ ctx, input }) => {
+      if (!ctx.user) throw new TRPCError({ code: 'UNAUTHORIZED' });
+      const shot = await ctx.prisma.shot.findFirst({
+        where: { id: input.shotId, deletedAt: null },
+        select: { id: true, episodeId: true, episode: { select: { projectId: true } } },
+      });
+      if (!shot || !shot.episode) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '分镜不存在' });
+      }
+      await assertProjectAccess(ctx, shot.episode.projectId);
+      return ctx.prisma.assetUsageBinding.findMany({
+        where: { shotId: input.shotId, deletedAt: null },
+        include: {
+          asset: {
+            select: {
+              id: true,
+              type: true,
+              name: true,
+              alias: true,
+              maturity: true,
+              complianceStatus: true,
+              portraitMediaId: true,
+              sceneMainMediaId: true,
+              mainMediaId: true,
+            },
+          },
+        },
+        orderBy: [{ createdAt: 'asc' }],
       });
     }),
 
@@ -1706,14 +1765,22 @@ export const assetRouter = router({
    *   3. 提交人脸 → 拿到 complianceId
    *   4. 写回 Asset.complianceId + complianceStatus=APPROVED + complianceCheckedAt
    *   5. 后续视频生成时复用同一 ID 不再扣费
+   *
+   * W1-W5 audit P1 followup(P1-5):读 binding.asset.compliance.providerId,
+   * 即使占位也把 binding 真用上,errorMsg 显示当前 binding 值便于调试。
    */
   complianceCheck: protectedProcedure
     .input(z.object({ assetId: z.string().cuid() }))
-    .mutation(async ({ input }) => {
-      void input;
+    .mutation(async ({ ctx, input }) => {
+      const asset = await loadAssetWithAccess(ctx, input.assetId);
+      const binding = await ctx.prisma.systemSetting.findUnique({
+        where: { key: 'binding.asset.compliance.providerId' },
+        select: { value: true },
+      });
+      const providerId = binding?.value ?? '(未配置)';
       throw new TRPCError({
         code: 'NOT_IMPLEMENTED',
-        message: '资产合规检查(W4.6)尚未上线 — ComplianceProvider 接入待实现',
+        message: `资产合规检查(W4.6)尚未上线 — 当前绑定 provider=${providerId},接入实现待补(asset=${asset.id})`,
       });
     }),
 

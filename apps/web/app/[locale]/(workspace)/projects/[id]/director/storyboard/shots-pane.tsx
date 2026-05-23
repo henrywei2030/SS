@@ -31,6 +31,9 @@ type Shot = {
   number: string;
   framing: string | null;
   angle: string | null;
+  // W7 followup:movement / lighting 4 大预设字段补全
+  movement: string | null;
+  lighting: string | null;
   content: string;
   prompt: string;
   durationS: number;
@@ -485,8 +488,20 @@ function ShotRow({
         </div>
       </td>
       <td className="px-3 py-2 text-xs">
-        <span className="font-medium">{shot.framing}</span>{' '}
-        <span className="text-[hsl(var(--color-muted-foreground))]">{shot.angle}</span>
+        <div className="flex flex-col gap-0.5">
+          <div>
+            <span className="font-medium">{shot.framing}</span>{' '}
+            <span className="text-[hsl(var(--color-muted-foreground))]">{shot.angle}</span>
+          </div>
+          {/* W7 followup:movement / lighting 仅在有值时显示,避免空行干扰 */}
+          {(shot.movement || shot.lighting) && (
+            <div className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
+              {shot.movement && <span>运镜:{shot.movement}</span>}
+              {shot.movement && shot.lighting && <span> · </span>}
+              {shot.lighting && <span>光线:{shot.lighting}</span>}
+            </div>
+          )}
+        </div>
       </td>
       <td className="px-3 py-2 text-xs leading-relaxed">{shot.content}</td>
       <td className="max-w-[400px] px-3 py-2 text-xs leading-relaxed">

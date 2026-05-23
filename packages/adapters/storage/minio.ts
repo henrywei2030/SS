@@ -152,11 +152,17 @@ export class MinioStorageAdapter implements StorageAdapter {
   }
 
   async copyObject(sourceKey: string, destKey: string): Promise<void> {
+    // W1-W7 audit:CopySource 必须 URL 编码(AWS SDK v3 不自动编码),
+    // sourceKey 含空格/中文/`+` 等字符时会让 S3 解析错。保留 `/` 作为目录分隔符。
+    const encodedSource = sourceKey
+      .split('/')
+      .map((seg) => encodeURIComponent(seg))
+      .join('/');
     await this.s3.send(
       new CopyObjectCommand({
         Bucket: this.bucket,
         Key: destKey,
-        CopySource: `${this.bucket}/${sourceKey}`,
+        CopySource: `${this.bucket}/${encodedSource}`,
       }),
     );
   }

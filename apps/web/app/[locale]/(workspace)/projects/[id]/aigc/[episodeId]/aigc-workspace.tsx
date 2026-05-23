@@ -26,23 +26,35 @@ export function AigcWorkspace({
   const { data: groups, refetch: refetchGroups } =
     trpc.aigc.listGroups.useQuery({ episodeId });
 
+  // W1-W5 audit P1 followup(R7):useMemo + useCallback 减少子组件不必要 re-render
+  // 1235 行单组件渲染开销大,GroupDetail / BindAssetDialog 接受 N 个 callback,
+  // parent 每次 re-render 都新建 inline arrow → 破坏后续 React.memo 优化。
   const gFromUrl = searchParams.get('g');
-  const selectedGroupId = gFromUrl ?? initialGroupId ?? groups?.[0]?.id;
+  const selectedGroupId = React.useMemo(
+    () => gFromUrl ?? initialGroupId ?? groups?.[0]?.id,
+    [gFromUrl, initialGroupId, groups],
+  );
 
-  const selectGroup = (id: string): void => {
-    const params = new URLSearchParams(window.location.search);
-    params.set('g', id);
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-  };
+  const selectGroup = React.useCallback(
+    (id: string): void => {
+      const params = new URLSearchParams(window.location.search);
+      params.set('g', id);
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [router, pathname],
+  );
 
-  const invalidateGroup = (groupId: string): void => {
-    // W1-W5 audit 三轮 U1:补 listVideoTakes + listAvailableAssets,防陈旧数据
-    utils.aigc.getGroupDetail.invalidate({ groupId });
-    utils.aigc.previewCompiledPrompt.invalidate({ groupId });
-    utils.aigc.listVideoTakes.invalidate({ groupId });
-    utils.aigc.listAvailableAssets.invalidate({ groupId });
-    void utils.aigc.listGroups.invalidate({ episodeId });
-  };
+  const invalidateGroup = React.useCallback(
+    (groupId: string): void => {
+      // W1-W5 audit 三轮 U1:补 listVideoTakes + listAvailableAssets,防陈旧数据
+      utils.aigc.getGroupDetail.invalidate({ groupId });
+      utils.aigc.previewCompiledPrompt.invalidate({ groupId });
+      utils.aigc.listVideoTakes.invalidate({ groupId });
+      utils.aigc.listAvailableAssets.invalidate({ groupId });
+      void utils.aigc.listGroups.invalidate({ episodeId });
+    },
+    [utils, episodeId],
+  );
 
   const autoMatchMutation = trpc.aigc.autoMatchAssets.useMutation({
     onSuccess: (data) => {
@@ -203,6 +215,54 @@ export function AigcWorkspace({
     onConfirm: () => void;
   } | null>(null);
 
+  // W1-W5 audit P1 followup(R7):传给 GroupDetail 的 N 个 handler 全部 useCallback
+  // 防 parent re-render 时 inline arrow 重建,破坏下游 React.memo
+  const onAutoMatch = React.useCallback(() => {
+    if (selectedGroupId) autoMatchMutation.mutate({ groupId: selectedGroupId });
+  }, [autoMatchMutation, selectedGroupId]);
+
+  const onAutoTag = React.useCallback(() => {
+    if (selectedGroupId) autoTagMutation.mutate({ groupId: selectedGroupId });
+  }, [autoTagMutation, selectedGroupId]);
+
+  const onOpenBindDialog = React.useCallback(() => {
+    setBindDialogOpen(true);
+  }, []);
+
+  const onUnbind = React.useCallback(
+    (bindingId: string) => unbindMutation.mutate({ bindingId }),
+    [unbindMutation],
+  );
+
+  const onSavePrompt = React.useCallback(
+    (prompt: string, diffNote?: string) => {
+      if (selectedGroupId)
+        updatePromptMutation.mutate({ groupId: selectedGroupId, prompt, diffNote });
+    },
+    [updatePromptMutation, selectedGroupId],
+  );
+
+  const onGenerateVideo = React.useCallback(
+    (opts: Parameters<typeof generateVideoMutation.mutate>[0] extends infer T
+      ? T extends { groupId: string }
+        ? Omit<T, 'groupId'>
+        : never
+      : never) => {
+      if (selectedGroupId)
+        generateVideoMutation.mutate({ groupId: selectedGroupId, ...opts });
+    },
+    [generateVideoMutation, selectedGroupId],
+  );
+
+  const onRejectTake = React.useCallback(
+    (attemptId: string) => rejectTakeMutation.mutate({ attemptId }),
+    [rejectTakeMutation],
+  );
+
+  const onAutoSelectConsumed = React.useCallback(() => {
+    setAutoSelectAttemptId(null);
+  }, []);
+
   return (
     <div className="grid h-[calc(100vh-2.75rem)] grid-cols-[280px_1fr] gap-0 bg-[hsl(var(--color-background))]">
       {/* 左:生成段列表 */}
@@ -324,25 +384,21 @@ export function AigcWorkspace({
         {selectedGroupId ? (
           <GroupDetail
             groupId={selectedGroupId}
-            onAutoMatch={() => autoMatchMutation.mutate({ groupId: selectedGroupId })}
+            onAutoMatch={onAutoMatch}
             autoMatchPending={autoMatchMutation.isPending}
-            onAutoTag={() => autoTagMutation.mutate({ groupId: selectedGroupId })}
+            onAutoTag={onAutoTag}
             autoTagPending={autoTagMutation.isPending}
-            onOpenBindDialog={() => setBindDialogOpen(true)}
-            onUnbind={(bindingId) => unbindMutation.mutate({ bindingId })}
+            onOpenBindDialog={onOpenBindDialog}
+            onUnbind={onUnbind}
             unbindPending={unbindMutation.isPending}
-            onSavePrompt={(prompt, diffNote) =>
-              updatePromptMutation.mutate({ groupId: selectedGroupId, prompt, diffNote })
-            }
+            onSavePrompt={onSavePrompt}
             savePromptPending={updatePromptMutation.isPending}
-            onGenerateVideo={(opts) =>
-              generateVideoMutation.mutate({ groupId: selectedGroupId, ...opts })
-            }
+            onGenerateVideo={onGenerateVideo}
             generateVideoPending={generateVideoMutation.isPending}
-            onRejectTake={(attemptId) => rejectTakeMutation.mutate({ attemptId })}
+            onRejectTake={onRejectTake}
             rejectTakePending={rejectTakeMutation.isPending}
             autoSelectAttemptId={autoSelectAttemptId}
-            onAutoSelectConsumed={() => setAutoSelectAttemptId(null)}
+            onAutoSelectConsumed={onAutoSelectConsumed}
           />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-[hsl(var(--color-muted-foreground))]">

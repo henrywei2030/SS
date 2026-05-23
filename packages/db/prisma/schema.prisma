@@ -341,6 +341,11 @@ model Shot {
   number         String // 单镜编号 "1"/"2"/"3"...；合并组的 number 存在 ShotGroup
   framing        String? // 景别（特写/中景/全景...）
   angle          String? // 角度（平视/俯视/仰视 + 度数）
+  // W1-W5 audit P1 followup:W7 4 大预设 framing/angle/movement/lighting 完整落库
+  // movement = 运镜(固定/推/拉/摇/移/跟/升降/甩)、lighting = 光线(自然光/硬光/柔光/逆光...)
+  // 跟 admin.preset.list 同源(PRESET_KINDS),UI 下拉框 + LLM 生成分镜时填值
+  movement       String? // 运镜（与 admin.preset movement 联动）
+  lighting       String? // 光线（与 admin.preset lighting 联动）
   content        String  @db.Text // 镜头内容描述
   prompt         String  @db.Text // 视频提示词（含 @ 资产 + 台词 + OS）
   promptCompiled String? @db.Text // 编译后真实下发到模型的 prompt（snapshot）

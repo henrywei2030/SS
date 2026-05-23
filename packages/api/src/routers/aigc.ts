@@ -13,6 +13,7 @@ import { z } from 'zod';
 
 import { getEventBus } from '@ss/adapters/eventbus';
 import { getVideoProvider } from '@ss/adapters/provider';
+import { Prisma } from '@ss/db';
 import { autoMatchAssets, type MatchableAsset } from '@ss/core/generation';
 import {
   autoTagPromptWithReferences,
@@ -33,11 +34,13 @@ import {
 } from '../utils/sanitize-prompt.js';
 
 // W5.4:视频生成相关 SystemSetting 读取
+// W1-W5 audit P1 followup(P1-5):加 requireForVideo 守卫(原 setting dead,从未被读)
 async function getVideoBindings(ctx: Context): Promise<{
   providerId: string;
   maxDurationS: number;
   defaultAspectRatio: '9:16' | '16:9' | '1:1';
   dailyBudgetCny: number;
+  requireComplianceForVideo: boolean;
 }> {
   const settings = await ctx.prisma.systemSetting.findMany({
     where: {
@@ -47,6 +50,7 @@ async function getVideoBindings(ctx: Context): Promise<{
           'shot.video.maxDurationS',
           'shot.video.defaultAspectRatio',
           'shot.video.dailyBudgetCny',
+          'asset.compliance.requireForVideo',
         ],
       },
     },
@@ -60,6 +64,8 @@ async function getVideoBindings(ctx: Context): Promise<{
     maxDurationS: Number(map.get('shot.video.maxDurationS') ?? '10'),
     defaultAspectRatio: ar,
     dailyBudgetCny: Number(map.get('shot.video.dailyBudgetCny') ?? '500'),
+    requireComplianceForVideo:
+      (map.get('asset.compliance.requireForVideo') ?? 'false') === 'true',
   };
 }
 
@@ -277,6 +283,7 @@ export const aigcRouter = router({
       });
 
       // 2. bindings(按 refSlotIdx 升序,null 排末尾)
+      // W1-W5 audit P1 followup(P1-6):查全 7 槽位 mediaId,让 fallback 链覆盖三视图/侧面/全景等
       const bindings = await ctx.prisma.assetUsageBinding.findMany({
         where: { shotGroupId: grp.id, deletedAt: null },
         orderBy: [{ refSlotIdx: { sort: 'asc', nulls: 'last' } }, { createdAt: 'asc' }],
@@ -290,7 +297,13 @@ export const aigcRouter = router({
               description: true,
               prompt: true,
               portraitMediaId: true,
+              threeViewMediaId: true,
               sceneMainMediaId: true,
+              sceneFrontMediaId: true,
+              sceneLeftMediaId: true,
+              sceneRightMediaId: true,
+              sceneBackMediaId: true,
+              panoramaMediaId: true,
               mainMediaId: true,
               voiceMediaId: true,
               maturity: true,
@@ -304,7 +317,18 @@ export const aigcRouter = router({
       const mediaIds = new Set<string>();
       for (const b of bindings) {
         const a = b.asset;
-        for (const id of [a.portraitMediaId, a.sceneMainMediaId, a.mainMediaId, a.voiceMediaId]) {
+        for (const id of [
+          a.portraitMediaId,
+          a.threeViewMediaId,
+          a.sceneMainMediaId,
+          a.sceneFrontMediaId,
+          a.sceneLeftMediaId,
+          a.sceneRightMediaId,
+          a.sceneBackMediaId,
+          a.panoramaMediaId,
+          a.mainMediaId,
+          a.voiceMediaId,
+        ]) {
           if (id) mediaIds.add(id);
         }
       }
@@ -317,17 +341,27 @@ export const aigcRouter = router({
           : [];
       const mediaMap = new Map(medias.map((m) => [m.id, m]));
 
-      // 4. 选 mediaUrl 的策略:character → portrait,scene → sceneMain or mainMedia,
-      //    prop / 其他 → mainMedia,voice → voiceMedia
+      // 4. 选 mediaUrl 策略(P1-6 audit 后扩展为全 7 槽位 fallback 链):
+      //    AUDIO → voiceMediaId
+      //    CHARACTER → portrait → threeView → main
+      //    SCENE → sceneMain → sceneFront → sceneLeft → sceneRight → sceneBack → panorama → main
+      //    PROP/STYLE → main
       const bindingsWithMedia = bindings.map((b) => {
         const a = b.asset;
         let chosenMediaId: string | null = null;
         if (kindFromUsage(b.usageType) === 'AUDIO') {
           chosenMediaId = a.voiceMediaId;
         } else if (a.type === 'CHARACTER') {
-          chosenMediaId = a.portraitMediaId ?? a.mainMediaId;
+          chosenMediaId = a.portraitMediaId ?? a.threeViewMediaId ?? a.mainMediaId;
         } else if (a.type === 'SCENE') {
-          chosenMediaId = a.sceneMainMediaId ?? a.mainMediaId;
+          chosenMediaId =
+            a.sceneMainMediaId ??
+            a.sceneFrontMediaId ??
+            a.sceneLeftMediaId ??
+            a.sceneRightMediaId ??
+            a.sceneBackMediaId ??
+            a.panoramaMediaId ??
+            a.mainMediaId;
         } else {
           chosenMediaId = a.mainMediaId;
         }
@@ -605,6 +639,7 @@ export const aigcRouter = router({
       });
 
       // 取 bindings + media 给 references
+      // W1-W5 audit P1 followup(P1-6):查全 7 槽位 mediaId,fallback 链覆盖三视图/侧面/全景
       const bindings = await ctx.prisma.assetUsageBinding.findMany({
         where: { shotGroupId: grp.id, deletedAt: null, refSlotIdx: { not: null } },
         orderBy: { refSlotIdx: 'asc' },
@@ -615,7 +650,13 @@ export const aigcRouter = router({
               name: true,
               type: true,
               portraitMediaId: true,
+              threeViewMediaId: true,
               sceneMainMediaId: true,
+              sceneFrontMediaId: true,
+              sceneLeftMediaId: true,
+              sceneRightMediaId: true,
+              sceneBackMediaId: true,
+              panoramaMediaId: true,
               mainMediaId: true,
               voiceMediaId: true,
             },
@@ -627,7 +668,13 @@ export const aigcRouter = router({
       for (const b of bindings) {
         for (const id of [
           b.asset.portraitMediaId,
+          b.asset.threeViewMediaId,
           b.asset.sceneMainMediaId,
+          b.asset.sceneFrontMediaId,
+          b.asset.sceneLeftMediaId,
+          b.asset.sceneRightMediaId,
+          b.asset.sceneBackMediaId,
+          b.asset.panoramaMediaId,
           b.asset.mainMediaId,
           b.asset.voiceMediaId,
         ]) {
@@ -649,9 +696,16 @@ export const aigcRouter = router({
         let chosen: string | null = null;
         if (kind === 'AUDIO') chosen = b.asset.voiceMediaId;
         else if (b.asset.type === 'CHARACTER')
-          chosen = b.asset.portraitMediaId ?? b.asset.mainMediaId;
+          chosen = b.asset.portraitMediaId ?? b.asset.threeViewMediaId ?? b.asset.mainMediaId;
         else if (b.asset.type === 'SCENE')
-          chosen = b.asset.sceneMainMediaId ?? b.asset.mainMediaId;
+          chosen =
+            b.asset.sceneMainMediaId ??
+            b.asset.sceneFrontMediaId ??
+            b.asset.sceneLeftMediaId ??
+            b.asset.sceneRightMediaId ??
+            b.asset.sceneBackMediaId ??
+            b.asset.panoramaMediaId ??
+            b.asset.mainMediaId;
         else chosen = b.asset.mainMediaId;
         const url = chosen ? (mediaMap.get(chosen) ?? null) : null;
         return {
@@ -975,11 +1029,36 @@ export const aigcRouter = router({
         });
       }
 
+      // W1-W5 audit P2 followup(P2-5):接通 system.gacha.max_attempts(原 dead config)
+      // 单 group 累计非 rejected attempt 数(含成功/失败)超 max_attempts 时拒,防失控烧钱
+      const gachaSetting = await ctx.prisma.systemSetting.findUnique({
+        where: { key: 'system.gacha.max_attempts' },
+        select: { value: true },
+      });
+      const gachaMax = Number(gachaSetting?.value ?? '0');
+      if (gachaMax > 0) {
+        const used = await ctx.prisma.generationAttempt.count({
+          where: {
+            shotGroupId: grp.id,
+            action: 'VIDEO',
+            rejected: false,
+            status: { in: ['SUCCESS', 'FAILED'] },
+          },
+        });
+        if (used >= gachaMax) {
+          throw new TRPCError({
+            code: 'TOO_MANY_REQUESTS',
+            message: `本生成段已抽 ${used} 次(上限 ${gachaMax}),把废片标 rejected 或在后台调高 system.gacha.max_attempts 再试`,
+          });
+        }
+      }
+
       // 提前 fetch provider 实例(estimateCost 用 + 后续 generate 用,Mock 兜底始终可用)
       const provider = await getVideoProvider(providerId);
 
       // W1-W5 audit 三轮 B1:每日预算护栏 — 用 provider.estimateCost(req) 真实预估,
       // 不再写死 seedance 系数,Mock 也按 mock 真单价 estimate(默认 0,但若管理员 unitPriceCny>0 会拦)
+      // W1-W5 audit P1 followup(R9):Decimal 比较防大额预算累加 IEEE-754 漂移
       if (bindings.dailyBudgetCny > 0) {
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
@@ -992,16 +1071,19 @@ export const aigcRouter = router({
           },
           _sum: { costCny: true },
         });
-        const spent = Number(todaySpent._sum.costCny ?? 0);
-        const estimate = provider.estimateCost({
-          prompt: '',
-          durationS,
-          aspectRatio,
-        });
-        if (spent + estimate > bindings.dailyBudgetCny) {
+        const spentDec = new Prisma.Decimal(todaySpent._sum.costCny ?? 0);
+        const estimateDec = new Prisma.Decimal(
+          provider.estimateCost({
+            prompt: '',
+            durationS,
+            aspectRatio,
+          }),
+        );
+        const limitDec = new Prisma.Decimal(bindings.dailyBudgetCny);
+        if (spentDec.plus(estimateDec).gt(limitDec)) {
           throw new TRPCError({
             code: 'TOO_MANY_REQUESTS',
-            message: `今日视频预算已用 ${spent.toFixed(2)}¥ / 上限 ${bindings.dailyBudgetCny}¥,本次预估 ${estimate.toFixed(2)}¥ 会超限`,
+            message: `今日视频预算已用 ${spentDec.toFixed(2)}¥ / 上限 ${bindings.dailyBudgetCny}¥,本次预估 ${estimateDec.toFixed(2)}¥ 会超限`,
           });
         }
       }
@@ -1012,6 +1094,7 @@ export const aigcRouter = router({
         include: { style: true },
       });
 
+      // W1-W5 audit P1 followup(P1-6):查全 7 槽位 mediaId
       const dbBindings = await ctx.prisma.assetUsageBinding.findMany({
         where: { shotGroupId: grp.id, deletedAt: null, refSlotIdx: { not: null } },
         orderBy: { refSlotIdx: 'asc' },
@@ -1022,19 +1105,49 @@ export const aigcRouter = router({
               name: true,
               type: true,
               portraitMediaId: true,
+              threeViewMediaId: true,
               sceneMainMediaId: true,
+              sceneFrontMediaId: true,
+              sceneLeftMediaId: true,
+              sceneRightMediaId: true,
+              sceneBackMediaId: true,
+              panoramaMediaId: true,
               mainMediaId: true,
               voiceMediaId: true,
+              complianceStatus: true,
             },
           },
         },
       });
 
+      // W1-W5 audit P1 followup(P1-5):合规守卫 — 若 system 配 requireForVideo,
+      // 引用了任何 CHARACTER 且 complianceStatus !== APPROVED 则拒生成,
+      // 防止把未过合规的人物送给视频模型出片
+      if (bindings.requireComplianceForVideo) {
+        const blockedChars = dbBindings.filter(
+          (b) => b.asset.type === 'CHARACTER' && b.asset.complianceStatus !== 'APPROVED',
+        );
+        if (blockedChars.length > 0) {
+          throw new TRPCError({
+            code: 'PRECONDITION_FAILED',
+            message: `合规未通过的人物不允许生成视频:${blockedChars
+              .map((b) => `${b.asset.name}(${b.asset.complianceStatus})`)
+              .join(', ')} — 在美术工作台完成合规后再试`,
+          });
+        }
+      }
+
       const mediaIds = new Set<string>();
       for (const b of dbBindings) {
         for (const id of [
           b.asset.portraitMediaId,
+          b.asset.threeViewMediaId,
           b.asset.sceneMainMediaId,
+          b.asset.sceneFrontMediaId,
+          b.asset.sceneLeftMediaId,
+          b.asset.sceneRightMediaId,
+          b.asset.sceneBackMediaId,
+          b.asset.panoramaMediaId,
           b.asset.mainMediaId,
           b.asset.voiceMediaId,
         ]) {
@@ -1050,14 +1163,22 @@ export const aigcRouter = router({
           : [];
       const mediaMap = new Map(medias.map((m) => [m.id, m.cdnUrl]));
 
+      // W1-W5 audit P1 followup(P1-6):全 7 槽位 fallback 链
       const refs: VideoReference[] = dbBindings.map((b) => {
         const kind = kindFromUsage(b.usageType);
         let chosen: string | null = null;
         if (kind === 'AUDIO') chosen = b.asset.voiceMediaId;
         else if (b.asset.type === 'CHARACTER')
-          chosen = b.asset.portraitMediaId ?? b.asset.mainMediaId;
+          chosen = b.asset.portraitMediaId ?? b.asset.threeViewMediaId ?? b.asset.mainMediaId;
         else if (b.asset.type === 'SCENE')
-          chosen = b.asset.sceneMainMediaId ?? b.asset.mainMediaId;
+          chosen =
+            b.asset.sceneMainMediaId ??
+            b.asset.sceneFrontMediaId ??
+            b.asset.sceneLeftMediaId ??
+            b.asset.sceneRightMediaId ??
+            b.asset.sceneBackMediaId ??
+            b.asset.panoramaMediaId ??
+            b.asset.mainMediaId;
         else chosen = b.asset.mainMediaId;
         return {
           refSlotIdx: b.refSlotIdx!,
@@ -1157,6 +1278,10 @@ export const aigcRouter = router({
             projectId: grp.episode.projectId,
             episodeId: grp.episodeId,
             attemptId: attempt.id,
+            // W1-W5 audit P1 followup:防 Provider + router 双写 ledger,
+            // 真接 Seedance 时 SeedanceProvider 内有 5 处 recordLedger,会跟下面
+            // tx.costLedgerEntry.create 重复写,导致 cost 翻倍。router 单点写。
+            skipLedger: true,
           },
         );
 

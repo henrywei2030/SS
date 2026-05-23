@@ -25,11 +25,11 @@ export function StylesManager(): React.ReactElement {
     }
   }, [styles, selectedId]);
 
+  // W1-W7 audit:invalidate 已经触发 refetch,不要再手动 refetch(原版双触发浪费一次 RTT)
   const update = trpc.admin.style.update.useMutation({
     onSuccess: () => {
       toast.success('已保存');
-      void refetch();
-      if (selectedId) void utils.admin.style.list.invalidate();
+      void utils.admin.style.list.invalidate();
     },
     onError: (e) => toast.error(`保存失败:${e.message}`),
   });
@@ -38,7 +38,7 @@ export function StylesManager(): React.ReactElement {
     onSuccess: (data) => {
       toast.success('已删除');
       if (selectedId === data.id) setSelectedId(null);
-      void refetch();
+      void utils.admin.style.list.invalidate();
     },
     onError: (e) => toast.error(`删除失败:${e.message}`),
   });
@@ -48,7 +48,7 @@ export function StylesManager(): React.ReactElement {
       toast.success(`已新建:${data.name}`);
       setCreateOpen(false);
       setSelectedId(data.id);
-      void refetch();
+      void utils.admin.style.list.invalidate();
     },
     onError: (e) => toast.error(`新建失败:${e.message}`),
   });

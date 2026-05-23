@@ -111,3 +111,28 @@ export function isEpisodeLockedNow(episode: {
   const staleBefore = new Date(Date.now() - SOFT_LOCK_TTL_MS);
   return episode.generatingStartedAt > staleBefore;
 }
+
+/**
+ * W1-W5 audit P1 followup(P1-3):长任务 stale TTL 动态续约
+ *
+ * 用途:generateForEpisode 跑长剧本(>15 min)时,每处理完一段就调一次,把 generatingStartedAt 续到 now。
+ * 这样 stale 自愈窗口仍保持 15min(防进程崩溃),但任务本身不会被自己挤死(误判 stale 被抢锁)。
+ *
+ * 失败不抛错 — 只 log。续约失败本身不影响业务,顶多让 TTL 提前到期被其他请求接管(那时业务也快完了)。
+ */
+export async function refreshEpisodeLock(
+  prisma: PrismaClient,
+  episodeId: string,
+): Promise<void> {
+  try {
+    await prisma.episode.updateMany({
+      where: { id: episodeId, status: 'GENERATING' },
+      data: { generatingStartedAt: new Date() },
+    });
+  } catch (err) {
+    console.error('[refreshEpisodeLock] failed', {
+      episodeId,
+      err: err instanceof Error ? err.message : err,
+    });
+  }
+}

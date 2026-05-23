@@ -47,6 +47,17 @@ export interface GenerateStoryboardInput {
   defaultShotDurationS?: number;
   /** 单镜最大时长(秒) — 用于裁剪 LLM 返回的过长 durationS,默认 15 */
   maxShotDurationS?: number;
+  /**
+   * W7 followup:预设值清单 — admin.preset 4 大类(framing/angle/movement/lighting)
+   * 传给 LLM 让其在已定义值里选,而不是自由发挥。
+   * router 层从 me.presets / admin.preset.list 取后传入。
+   */
+  presets?: {
+    framing?: string[];
+    angle?: string[];
+    movement?: string[];
+    lighting?: string[];
+  };
 }
 
 export interface GeneratedShot {
@@ -54,6 +65,9 @@ export interface GeneratedShot {
   index: number;
   framing: string; // 景别（特写/近景/中景/全景）
   angle: string; // 角度（平视/俯视/仰视 + 度数；如 "平视 0°"）
+  // W7 followup:LLM 也输出运镜 + 光线(可选),让分镜更完整
+  movement?: string; // 运镜（固定/推/拉/摇/移/跟/升降/甩,跟 admin.preset 联动）
+  lighting?: string; // 光线（自然光/硬光/柔光/逆光/侧光,跟 admin.preset 联动）
   content: string; // 镜头内容（30 字内）
   durationS: number; // 时长
   priority?: 'S' | 'A' | 'B' | 'C';
@@ -76,19 +90,21 @@ export interface GenerateStoryboardResult {
 
 const SYSTEM_PROMPT = `你是经验丰富的短剧分镜师。任务：把单场剧本拆解为视频生成可用的分镜列表。
 
-【输入】你会收到一场剧本（含场号、时段、内外、地点、人物、动作行/对白/旁白）
+【输入】你会收到一场剧本（含场号、时段、内外、地点、人物、动作行/对白/旁白）+ 4 大预设值清单(framing/angle/movement/lighting)
 
 【输出严格 JSON】
 {
   "shots": [
     {
       "index": 1,
-      "framing": "特写" | "近景" | "中景" | "全景",
+      "framing": "特写" | "近景" | "中景" | "全景" | ...,
       "angle": "平视 0°" | "俯视 30°" | "仰视 15°" | "侧拍 45°" | ...,
+      "movement": "固定" | "推" | "拉" | "摇" | "移" | "跟" | "升降" | "甩",
+      "lighting": "自然光" | "硬光" | "柔光" | "逆光" | "侧光" | "低调" | "高调" | "冷调" | "暖调",
       "content": "30 字内描述这一镜的画面内容",
       "durationS": 1-5,
       "priority": "S" | "A" | "B" | "C",
-      "prompt": "视频生成的完整提示词，融合 framing + angle + content + 美术风格 + 台词/OS"
+      "prompt": "视频生成的完整提示词，融合 framing + angle + movement + lighting + content + 美术风格 + 台词/OS"
     }
   ]
 }
@@ -99,6 +115,10 @@ const SYSTEM_PROMPT = `你是经验丰富的短剧分镜师。任务：把单场
 3. 重要表情、道具特写单独成镜
 4. 默认镜头时长 1-3 秒；爽点/反转给 3-5 秒
 5. priority：爽点反转 S；冲突高潮 A；叙事推进 B；过渡 C
+
+【framing/angle/movement/lighting 选值】
+- 4 个字段都**必须**从【可选预设】清单里挑;清单里没有的值用空字符串 "" 不要瞎编
+- movement / lighting 允许 ""(不强求所有镜都有运镜光线设计;固定镜 + 自然光是默认)
 
 【提示词写作】
 - 起手：景别 + 角度 + 主体
@@ -166,7 +186,7 @@ export async function generateStoryboard(
 // ---------------------------------------------------------------------------
 
 function buildUserPrompt(input: GenerateStoryboardInput): string {
-  const { scene, styleSlug, stylePrompt, knownCharacters } = input;
+  const { scene, styleSlug, stylePrompt, knownCharacters, presets } = input;
 
   const lines = scene.lines
     .map((l) => {
@@ -199,6 +219,18 @@ function buildUserPrompt(input: GenerateStoryboardInput): string {
         .join('\n')
     : '';
 
+  // W7 followup:把 4 大预设清单灌给 LLM,让 framing/angle/movement/lighting 在已知值里选
+  const presetBlock = presets
+    ? [
+        presets.framing?.length ? `framing 可选: ${presets.framing.join(' | ')}` : null,
+        presets.angle?.length ? `angle 可选: ${presets.angle.join(' | ')}` : null,
+        presets.movement?.length ? `movement 可选: ${presets.movement.join(' | ')}` : null,
+        presets.lighting?.length ? `lighting 可选: ${presets.lighting.join(' | ')}` : null,
+      ]
+        .filter(Boolean)
+        .join('\n')
+    : '';
+
   const meta = [
     `场号: ${scene.number}`,
     `时段: ${zhTimeOfDay(scene.timeOfDay)}`,
@@ -207,6 +239,7 @@ function buildUserPrompt(input: GenerateStoryboardInput): string {
     scene.characters.length ? `本场人物: ${scene.characters.join('、')}` : null,
     styleSlug ? `美术风格: ${zhStyle(styleSlug)}` : null,
     styleBlock ? `\n【全剧风格规约】\n${styleBlock}` : null,
+    presetBlock ? `\n【可选预设】\n${presetBlock}` : null,
     knownCharacters?.length
       ? `已建档资产: ${knownCharacters.map((c) => `@${c}`).join(' / ')}`
       : null,
@@ -233,6 +266,11 @@ function extractShots(
 
       const framing = typeof r.framing === 'string' ? r.framing : '中景';
       const angle = typeof r.angle === 'string' ? r.angle : '平视 0°';
+      // W7 followup:movement/lighting 都可选,空字符串 "" 视为 undefined(不存)
+      const movement =
+        typeof r.movement === 'string' && r.movement.length > 0 ? r.movement : undefined;
+      const lighting =
+        typeof r.lighting === 'string' && r.lighting.length > 0 ? r.lighting : undefined;
       const content = typeof r.content === 'string' ? r.content : '';
       const prompt = typeof r.prompt === 'string' ? r.prompt : '';
       const durationS =
@@ -251,6 +289,8 @@ function extractShots(
         index: typeof r.index === 'number' ? r.index : i + 1,
         framing,
         angle,
+        movement,
+        lighting,
         content,
         durationS,
         priority,

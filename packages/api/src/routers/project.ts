@@ -76,7 +76,10 @@ export const projectRouter = router({
           members: {
             include: { user: { select: { id: true, displayName: true, avatarUrl: true } } },
           },
+          // W1-W7 audit:episodes 过滤 deletedAt + 内嵌 shots _count 用 where 过滤 shot.deletedAt
+          // 防软删 episode 出现在卡片列表,以及软删 shot 进 episode 进度统计
           episodes: {
+            where: { deletedAt: null },
             orderBy: { number: 'asc' },
             select: {
               id: true,
@@ -84,7 +87,7 @@ export const projectRouter = router({
               title: true,
               status: true,
               publishedAt: true,
-              _count: { select: { shots: true } },
+              _count: { select: { shots: { where: { deletedAt: null } } } },
             },
           },
         },
@@ -93,13 +96,18 @@ export const projectRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: '项目不存在或无权访问' });
       }
 
-      // 统计数字
+      // 统计数字 — W1-W7 audit:episode 也要过滤 deletedAt(原 episode 软删时其下 shot 仍被统计)
       const [shotCount, assetCount, completedShots] = await Promise.all([
-        ctx.prisma.shot.count({ where: { episode: { projectId: project.id }, deletedAt: null } }),
+        ctx.prisma.shot.count({
+          where: {
+            episode: { projectId: project.id, deletedAt: null },
+            deletedAt: null,
+          },
+        }),
         ctx.prisma.asset.count({ where: { projectId: project.id, deletedAt: null } }),
         ctx.prisma.shot.count({
           where: {
-            episode: { projectId: project.id },
+            episode: { projectId: project.id, deletedAt: null },
             deletedAt: null, // 与 shotCount 一致,防 progressPct > 100%
             status: { in: ['ADOPTED', 'IN_EDIT', 'FINAL'] },
           },

@@ -235,11 +235,18 @@ export const scriptRouter = router({
       await assertEpisodeNotGenerating(ctx, input.projectId, input.episodeNumber);
 
       // 1. base64 → Buffer → 按格式提取纯文本
+      // W1-W5 audit P1 followup(P1-5):读 binding.script.docx.parser 传给 extract
       let text: string;
       let format: string;
       try {
         const buffer = Buffer.from(input.fileBase64, 'base64');
-        const extracted = await extractScriptText(buffer, input.filename);
+        const docxParserBinding = await ctx.prisma.systemSetting.findUnique({
+          where: { key: 'binding.script.docx.parser' },
+          select: { value: true },
+        });
+        const extracted = await extractScriptText(buffer, input.filename, {
+          docxParser: docxParserBinding?.value,
+        });
         text = extracted.text;
         format = extracted.format;
       } catch (e) {
@@ -535,12 +542,18 @@ export const scriptRouter = router({
 
   /**
    * 发起分析 — 对指定 scriptId 调 Claude（W2.7 逻辑保留）
+   *
+   * W1-W5 audit P1 followup(P1-4):modelId 优先级
+   *   1. input.modelId(前端显式传)
+   *   2. SystemSetting `binding.script.analysis.modelId`(admin 后台可改)
+   *   3. 'claude-sonnet-4-5' 兜底
+   *  原版直接默认 'claude-sonnet-4-5',绕过 binding,admin 改 binding 不生效。
    */
   analyze: protectedProcedure
     .input(
       z.object({
         scriptId: z.string().cuid(),
-        modelId: z.string().default('claude-sonnet-4-5'),
+        modelId: z.string().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -551,6 +564,16 @@ export const scriptRouter = router({
       if (!script) throw new TRPCError({ code: 'NOT_FOUND' });
       await assertProjectAccess(ctx, script.projectId);
 
+      // P1-4:从 binding 读 modelId(input 优先 > binding > 硬编码兜底)
+      let modelId = input.modelId;
+      if (!modelId) {
+        const binding = await ctx.prisma.systemSetting.findUnique({
+          where: { key: 'binding.script.analysis.modelId' },
+          select: { value: true },
+        });
+        modelId = binding?.value ?? 'claude-sonnet-4-5';
+      }
+
       const { analyzeScript } = await import('@ss/core/script');
 
       // W1-W5 audit P0(B1):写 GenerationAttempt(action=ANALYSIS),回溯 ROI / PromptEdit 用
@@ -559,8 +582,8 @@ export const scriptRouter = router({
         data: {
           projectId: script.projectId,
           episodeId: script.episodeId,
-          providerId: input.modelId,
-          modelId: input.modelId,
+          providerId: modelId,
+          modelId: modelId,
           action: 'ANALYSIS',
           inputJson: {
             kind: 'script.analyze',
@@ -583,7 +606,7 @@ export const scriptRouter = router({
         const result = await analyzeScript({
           scriptText: script.content,
           episodeNumber: script.episode?.number ?? 1,
-          modelId: input.modelId,
+          modelId,
           ctx: {
             userId: ctx.user.id,
             projectId: script.projectId,
@@ -598,7 +621,7 @@ export const scriptRouter = router({
           data: {
             scriptId: input.scriptId,
             episodeId: script.episodeId,
-            modelId: input.modelId,
+            modelId,
             hookScore: result.scores.hookScore,
             suspenseScore: result.scores.suspenseScore,
             twistScore: result.scores.twistScore,

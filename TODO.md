@@ -1,6 +1,6 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-05-23(十收工 · W5/W6/W7 全交付 + 10 轮全栈 audit 24 项修)
+> 最后更新:2026-05-24(十一收工 · W1-W7 全栈深 audit 29 项全清 + Shot schema 联动 LLM/UI/DB)
 > 仓库:https://github.com/henrywei2030/SS
 
 ---
@@ -20,11 +20,14 @@
 - [x] **W6.1 + W6.3 数据洞察 MVP**(十收工)— insightsRouter 3 procs + /insights 页(KPI / 日 cost 趋势 / kind 分布 / 模型分布 / Top10 group)+ 4 轮 audit P0 11 项修
 - [x] **W7 后台三件套 MVP**(十收工)— admin/prompts(版本树 + 一键回滚)+ admin/styles(create/delete + kind 可选)+ admin/presets(4 类 + 默认值 fallback)
 - [x] **10 轮全栈 audit + 24 项修**(十收工)— W7 内部 3 轮 / 跨模块 3 轮 / 底层优化 4 轮;详见 PROGRESS
+- [x] **W1-W5 audit P1 followup 9 项**(十一收工)— publishEpisode TOCTOU + 4 mut 软锁守卫 + stale TTL 续约 + script.analyze binding + 3 条死配置 + VideoRef 7 槽位 fallback + propPrompt(verify) + shotId binding 查询 + Provider↔router ledger 双写补漏 — 2026-05-24
+- [x] **W1-W5 audit P2 followup 6 项**(十一收工)— Scene/Episode 软删级联 + confirmCandidate candidateForSlot 校验 + ShotAssetRef 清理 + maxDurationS 双语义注释化 + 5 条 system.* setting 接通 + EventBus 注释 — 2026-05-24
+- [x] **Shot schema 加 movement/lighting 字段**(十一收工)— schema + migration `20260524000000_w7_followup_shot_movement_lighting` apply + LLM 输出扩展 + storyboard router 落库 + edit-dialog 4 PresetField + shots-pane 显示 — 2026-05-24
+- [x] **R9 Decimal.js 引入 cost ledger**(十一收工)— ledger.ts + insights.ts + aigc.ts + base.ts 用 Prisma.Decimal 累加替 Number 防 IEEE-754 漂移 — 2026-05-24
+- [x] **R7 aigc-workspace memoization**(十一收工)— selectedGroupId useMemo + 8 个 GroupDetail handler useCallback,根除 parent re-render 时 inline arrow 重建 — 2026-05-24
+- [x] **W1-W7 全栈深 audit + 7 项新 bug 修**(十一收工)— admin.style.delete 软删过滤 / project.get 多处 deletedAt / admin.binding.set 拒 inactive provider / auth.signup 软删邮箱永占 P0 / changePassword 强密度+ratelimit / minio.copyObject URL 编码 / styles-manager 重复 refetch — 2026-05-24
 - [ ] **W5.5** BullMQ video-gen worker(异步队列 + SSE 进度 + providerJobId 轮询)— 真接 Seedance 时必修
 - [ ] **W5.6** 素材库(Media Vault)— /media 上传 / 搜索 / 收藏 / 批量,Phase 2 / W6+
-- [ ] **Shot schema 加 movement + lighting 字段** — W7 预设 4 类目前 movement/lighting 没存的地方
-- [ ] **R9 Decimal.js 引入 cost ledger** — ledger.ts + insights.ts + aigc.ts + base.ts 多文件,大额累加精度
-- [ ] **R7 aigc-workspace memoization** — 1235 行 0 个 memo,大改
 
 - [ ] **跨设备协作工作流验证**(多端)
   - [x] 家里 Mac Studio `git pull` + 登录同一 Project + 说 `开工,在 mac-studio` 验证接续 — 2026-05-23
@@ -59,23 +62,9 @@
 ### 📐 W3 / W4 followup(不阻塞下阶段)
 - [x] **Episode.status='GENERATING' 软锁**防 generateForEpisode 重入扣费(W3.1.followup) — 2026-05-22(五收工)
 - [x] **Episode 软锁覆盖到 script.upload/uploadFile**(W1-W5 audit C1)— 2026-05-23(八收工)
-- [ ] **W1-W5 audit P1 followup**(audit 18 项里的 P1 部分 — 下次集中收):
-  - publishEpisode TOCTOU(检查移进事务内 + pg_advisory_xact_lock)
-  - mergeShots/splitGroup/updateShot/deleteShot 加 isEpisodeLockedNow 守卫
-  - stale TTL 15min 对长 LLM 任务动态续约
-  - 真 ImageProvider 接入瞬间 base.ts + router 双写 ledger(需在 ctx 加 skipLedger)
-  - script.analyze modelId 硬编码 fallback,绕过 binding.script.analysis.modelId
-  - asset.compliance.requireForVideo / binding.asset.compliance.providerId / binding.script.docx.parser 三条死配置
-  - VideoAssetRef 加 7 槽位 mediaUrl(W5.1 router 落地前必扩)
-  - compileShotVideoPrompt 不读 style.propPrompt
-  - 缺 shotId → AssetUsageBinding 查询路径(W5.1 router 必加)
-- [ ] **W1-W5 audit P2 followup**(audit 7 项 P2 — 再下次清):
-  - Scene/Episode 软删不级联清 binding
-  - confirmCandidate 不校验 attempt.candidateForSlot === slot
-  - ShotAssetRef 已 deprecated 但仍在 schema(W5 收尾前清)
-  - storyboard.maxDurationS vs shot.video.maxDurationS 命名重复统一
-  - 5 条 system.* setting(brand/locale/gacha/budget warn)从未被读取
-  - EventBus 46 topic 全 dead-letter(events.ts 顶部加注释 Phase 1 未启用)
+- [x] **W1-W5 audit P1 followup 9 项**(十一收工)— 详见上方"进行中" — 2026-05-24
+- [x] **W1-W5 audit P2 followup 6 项**(十一收工)— 详见上方"进行中" — 2026-05-24
+- [x] **W1-W7 全栈深 audit 7 项**(十一收工)— admin.style.delete / project.get / admin.binding.set / auth.signup P0 / changePassword / minio.copyObject / styles-manager — 2026-05-24
 - [ ] **storyboardRouter / assetRouter 集成测试**(mergeShots / splitGroup / confirmCandidate 并发场景 — generate 已覆盖)
 - [ ] parse.ts 边界 case 测试("时间:xxx"误识场景)
 - [ ] PromptEdit 加 Project / Episode / Script `@@index` 反向外键

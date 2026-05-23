@@ -68,11 +68,24 @@ export const authRouter = router({
     return { success: true, userId: ctx.user.id };
   }),
 
+  // W1-W7 audit:防撞旧密码 per-user 5 次/min;newPassword 强度跟 signup 对齐
   changePassword: protectedProcedure
+    .use(
+      rateLimit({
+        key: (ctx) => `changePassword:${ctx.user?.id ?? 'anon'}`,
+        max: 5,
+        windowMs: 60_000,
+        message: '改密码过快(每分钟最多 5 次)',
+      }),
+    )
     .input(
       z.object({
         oldPassword: z.string().min(1),
-        newPassword: z.string().min(8),
+        newPassword: z
+          .string()
+          .min(8, '新密码至少 8 字符')
+          .regex(/[A-Za-z]/, '新密码必须含字母')
+          .regex(/[0-9]/, '新密码必须含数字'),
       }),
     )
     .mutation(async ({ ctx, input }) => {

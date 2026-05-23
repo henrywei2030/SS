@@ -23,7 +23,9 @@ import { logOperation } from '../middleware/audit.js';
 import {
   acquireEpisodeLock,
   isEpisodeLockedNow,
+  refreshEpisodeLock,
   releaseEpisodeLock,
+  SOFT_LOCK_TTL_MS,
 } from '../utils/episode-lock.js';
 
 // ---------------------------------------------------------------------------
@@ -88,6 +90,9 @@ async function getStoryboardBindings(ctx: Context): Promise<{
 const TRAINABLE_TEXT_FIELDS = new Set([
   'framing',
   'angle',
+  // W1-W5 audit P1 followup:W7 4 预设全部进训练集
+  'movement',
+  'lighting',
   'content',
   'prompt',
   'number', // 组级镜号也是 AI 输出的，可作训练
@@ -212,6 +217,59 @@ export const storyboardRouter = router({
       });
     }),
 
+  /**
+   * 软删 Scene — W1-W5 audit P2 followup(P2-1):级联清 shots + shot groups + bindings
+   * 防止 binding/shot 悬空指向已删 scene。事务内一次性完成,任一步失败回滚。
+   */
+  deleteScene: protectedProcedure
+    .input(z.object({ sceneId: z.string().cuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const scene = await ctx.prisma.scene.findFirst({
+        where: { id: input.sceneId, deletedAt: null },
+        include: {
+          episode: {
+            select: { id: true, projectId: true, status: true, generatingStartedAt: true },
+          },
+        },
+      });
+      if (!scene || !scene.episode) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '场不存在' });
+      }
+      await assertProjectAccess(ctx, scene.episode.projectId);
+      if (isEpisodeLockedNow(scene.episode)) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: '本集正在生成分镜,请等导演侧完成后再删除场',
+        });
+      }
+      const now = new Date();
+      await ctx.prisma.$transaction([
+        ctx.prisma.scene.update({
+          where: { id: input.sceneId },
+          data: { deletedAt: now },
+        }),
+        // 级联软删本场所有 shots
+        ctx.prisma.shot.updateMany({
+          where: { sceneId: input.sceneId, deletedAt: null },
+          data: { deletedAt: now },
+        }),
+        // 级联软删指向本场的 binding(P2-1 修复点)
+        ctx.prisma.assetUsageBinding.updateMany({
+          where: { sceneId: input.sceneId, deletedAt: null },
+          data: { deletedAt: now },
+        }),
+      ]);
+      await logOperation(
+        ctx,
+        'scene.delete',
+        'scene',
+        input.sceneId,
+        { ...scene, projectId: scene.episode.projectId },
+        null,
+      );
+      return { ok: true };
+    }),
+
   // -------- Shot --------
 
   /**
@@ -266,6 +324,9 @@ export const storyboardRouter = router({
         number: z.string(),
         framing: z.string().optional(),
         angle: z.string().optional(),
+        // W1-W5 audit P1 followup:W7 4 预设全收
+        movement: z.string().max(50).optional(),
+        lighting: z.string().max(50).optional(),
         content: z.string(),
         prompt: z.string().default(''),
         durationS: z.number().positive().default(3),
@@ -289,6 +350,8 @@ export const storyboardRouter = router({
           number: input.number,
           framing: input.framing,
           angle: input.angle,
+          movement: input.movement,
+          lighting: input.lighting,
           content: input.content,
           prompt: input.prompt,
           durationS: input.durationS,
@@ -315,6 +378,9 @@ export const storyboardRouter = router({
           .object({
             framing: z.string().optional(),
             angle: z.string().optional(),
+            // W1-W5 audit P1 followup:W7 4 预设全收
+            movement: z.string().max(50).nullable().optional(),
+            lighting: z.string().max(50).nullable().optional(),
             content: z.string().optional(),
             prompt: z.string().optional(),
             durationS: z.number().positive().optional(),
@@ -327,12 +393,24 @@ export const storyboardRouter = router({
     .mutation(async ({ ctx, input }) => {
       const before = await ctx.prisma.shot.findUnique({
         where: { id: input.shotId },
-        include: { episode: { select: { id: true, projectId: true } } },
+        include: {
+          episode: {
+            select: { id: true, projectId: true, status: true, generatingStartedAt: true },
+          },
+        },
       });
       if (!before || !before.episode) {
         throw new TRPCError({ code: 'NOT_FOUND', message: '分镜不存在' });
       }
       await assertProjectAccess(ctx, before.episode.projectId);
+      // W1-W5 audit P1 followup(P1-2):本集 fresh GENERATING 时不允许改 shot,
+      // 防 generateForEpisode 跑到一半被人改字段产生跨版本数据
+      if (isEpisodeLockedNow(before.episode)) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: '本集正在生成分镜,请等导演侧完成后再编辑(避免数据被覆盖)',
+        });
+      }
 
       const after = await ctx.prisma.shot.update({
         where: { id: input.shotId },
@@ -392,12 +470,23 @@ export const storyboardRouter = router({
     .mutation(async ({ ctx, input }) => {
       const shot = await ctx.prisma.shot.findFirst({
         where: { id: input.shotId, deletedAt: null },
-        include: { episode: { select: { projectId: true } } },
+        include: {
+          episode: {
+            select: { projectId: true, status: true, generatingStartedAt: true },
+          },
+        },
       });
       if (!shot || !shot.episode) {
         throw new TRPCError({ code: 'NOT_FOUND' });
       }
       await assertProjectAccess(ctx, shot.episode.projectId);
+      // W1-W5 audit P1 followup(P1-2):本集 fresh GENERATING 时不允许删 shot
+      if (isEpisodeLockedNow(shot.episode)) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: '本集正在生成分镜,请等导演侧完成后再删除分镜',
+        });
+      }
 
       // 联动清理 W4 AssetUsageBinding 指向本 shot 的引用,防止悬空 binding
       const now = new Date();
@@ -455,7 +544,11 @@ export const storyboardRouter = router({
             },
           },
         },
-        include: { episode: { select: { projectId: true } } },
+        include: {
+          episode: {
+            select: { projectId: true, status: true, generatingStartedAt: true },
+          },
+        },
       });
       if (shots.length !== input.shotIds.length) {
         throw new TRPCError({ code: 'NOT_FOUND', message: '部分分镜不存在或无访问权限' });
@@ -466,6 +559,14 @@ export const storyboardRouter = router({
       }
       const episodeId = shots[0]!.episodeId;
       const projectId = shots[0]!.episode!.projectId;
+
+      // W1-W5 audit P1 followup(P1-2):本集 fresh GENERATING 时不允许 merge
+      if (isEpisodeLockedNow(shots[0]!.episode!)) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: '本集正在生成分镜,请等导演侧完成后再合并镜头',
+        });
+      }
 
       const sorted = [...shots].sort((a, b) => a.positionIdx - b.positionIdx);
       const firstNum = sorted[0]!.number;
@@ -555,12 +656,24 @@ export const storyboardRouter = router({
     .mutation(async ({ ctx, input }) => {
       const group = await ctx.prisma.shotGroup.findFirst({
         where: { id: input.groupId, deletedAt: null },
-        include: { episode: { select: { projectId: true } }, shots: true },
+        include: {
+          episode: {
+            select: { projectId: true, status: true, generatingStartedAt: true },
+          },
+          shots: true,
+        },
       });
       if (!group || !group.episode) {
         throw new TRPCError({ code: 'NOT_FOUND', message: '合并组不存在或已删除' });
       }
       await assertProjectAccess(ctx, group.episode.projectId);
+      // W1-W5 audit P1 followup(P1-2):本集 fresh GENERATING 时不允许拆组
+      if (isEpisodeLockedNow(group.episode)) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: '本集正在生成分镜,请等导演侧完成后再拆分合并组',
+        });
+      }
 
       await ctx.prisma.$transaction([
         ctx.prisma.shotGroup.update({
@@ -600,12 +713,23 @@ export const storyboardRouter = router({
     .mutation(async ({ ctx, input }) => {
       const before = await ctx.prisma.shotGroup.findUnique({
         where: { id: input.groupId },
-        include: { episode: { select: { projectId: true } } },
+        include: {
+          episode: {
+            select: { projectId: true, status: true, generatingStartedAt: true },
+          },
+        },
       });
       if (!before || !before.episode) {
         throw new TRPCError({ code: 'NOT_FOUND' });
       }
       await assertProjectAccess(ctx, before.episode.projectId);
+      // W1-W5 audit P1 followup(P1-2):本集 fresh GENERATING 时不允许改 group
+      if (isEpisodeLockedNow(before.episode)) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: '本集正在生成分镜,请等导演侧完成后再编辑合并组',
+        });
+      }
 
       const after = await ctx.prisma.shotGroup.update({
         where: { id: input.groupId },
@@ -777,6 +901,33 @@ export const storyboardRouter = router({
       });
       const knownCharacters = knownAssets.map((a) => a.name);
 
+      // 5b. W7 followup:加载 4 大预设 — admin.preset.list 同源
+      // (从 SystemSetting preset.<kind> 读;没配时 PRESET_DEFAULTS 兜底)
+      const presetRows = await ctx.prisma.systemSetting.findMany({
+        where: {
+          key: { in: ['preset.framing', 'preset.angle', 'preset.movement', 'preset.lighting'] },
+        },
+      });
+      const presetMap = new Map(presetRows.map((s) => [s.key, s.value]));
+      const parsePresetValue = (raw: string | undefined): string[] | undefined => {
+        if (!raw) return undefined;
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.every((v) => typeof v === 'string')) {
+            return parsed;
+          }
+        } catch {
+          // 损坏 JSON,fallback undefined → LLM 走自由发挥
+        }
+        return undefined;
+      };
+      const presets = {
+        framing: parsePresetValue(presetMap.get('preset.framing')),
+        angle: parsePresetValue(presetMap.get('preset.angle')),
+        movement: parsePresetValue(presetMap.get('preset.movement')),
+        lighting: parsePresetValue(presetMap.get('preset.lighting')),
+      };
+
       // 6. 逐场调 LLM
       let totalCost = 0;
       let globalIdx = 0;
@@ -791,7 +942,17 @@ export const storyboardRouter = router({
       });
       let positionIdx = (lastShot?.positionIdx ?? 0);
 
+      // W1-W5 audit P1 followup(P1-3):stale TTL 动态续约 — 长剧本可能 >15min,
+      // 每处理一定时间就续约一次防自己被判 stale。续约间隔取 TTL 的 1/3 留充足缓冲。
+      const REFRESH_INTERVAL_MS = Math.floor(SOFT_LOCK_TTL_MS / 3);
+      let lastRefreshAt = Date.now();
+
       for (const dbScene of scenes) {
+        // 续约判定:距离上次续约超过 1/3 TTL 就刷新一次
+        if (Date.now() - lastRefreshAt > REFRESH_INTERVAL_MS) {
+          await refreshEpisodeLock(ctx.prisma, ep.id);
+          lastRefreshAt = Date.now();
+        }
         // 重新解析单场原文（已存的 rawContent 直接用）
         const parsedScene = parseScriptText(dbScene.content).scenes[0];
         if (!parsedScene) continue;
@@ -832,6 +993,7 @@ export const storyboardRouter = router({
             styleSlug,
             stylePrompt,
             knownCharacters,
+            presets, // W7 followup:框定 framing/angle/movement/lighting 取值
             defaultShotDurationS: bindings.defaultShotDurationS,
             maxShotDurationS: bindings.maxDurationS,
             ctx: {
@@ -858,6 +1020,9 @@ export const storyboardRouter = router({
                 number: String(globalIdx),
                 framing: s.framing,
                 angle: s.angle,
+                // W7 followup:movement/lighting 落库(LLM 可输出,可空)
+                movement: s.movement,
+                lighting: s.lighting,
                 content: s.content,
                 prompt: s.prompt,
                 durationS: s.durationS,
@@ -990,26 +1155,6 @@ export const storyboardRouter = router({
     .mutation(async ({ ctx, input }) => {
       const ep = await loadEpisodeOrThrow(ctx, input.episodeId);
 
-      // W3.1.followup 软锁:本集正在生成中(且未 stale)不可发布,防发布到一半数据
-      if (isEpisodeLockedNow(ep)) {
-        throw new TRPCError({
-          code: 'CONFLICT',
-          message: '本集正在生成分镜,无法发布(请稍候或在管理员后台强制解锁)',
-        });
-      }
-
-      // W1-W5 audit P0(D2):只允许从 NOT_STARTED / IN_PROGRESS 发布。
-      // COMPLETED / ARCHIVED 是终态,无脑设 IN_PROGRESS 会 downgrade 丢状态。
-      // GENERATING 已在上面被 isEpisodeLockedNow 拦截。
-      if (ep.status !== 'NOT_STARTED' && ep.status !== 'IN_PROGRESS') {
-        throw new TRPCError({
-          code: 'CONFLICT',
-          message: `本集状态为 ${ep.status},不能发布(只允许从 NOT_STARTED / IN_PROGRESS 发布)`,
-        });
-      }
-
-      const now = new Date();
-
       // 发布语义(shot/group 的 status):
       //   - DRAFT → 升级为 PUBLISHED + 戳 publishedAt
       //   - PUBLISHED → 保持 PUBLISHED,publishedAt 戳更新(等于重新触发下游消费者)
@@ -1017,13 +1162,51 @@ export const storyboardRouter = router({
       //     (已在制作流水中或终态,避免覆盖丢进度)
       const REPUBLISHABLE: Array<'DRAFT' | 'PUBLISHED'> = ['DRAFT', 'PUBLISHED'];
 
+      // W1-W5 audit P1 followup(P1-1):TOCTOU 全事务化 + advisory_xact_lock
+      //   原版只做事务内 status CAS,仍存在 read-then-act 窗口(读 ep 时未锁定 → 事务前其它请求
+      //   可以把 GENERATING fresh→stale 之间状态变化,或并发 publish 重复增加 publishedVersion)。
+      //   现把 lock check + status check + publish 全部锁内做,advisory_xact_lock 串行化
+      //   同 episode 的所有 publish 请求,与 acquireEpisodeLock 用同一 key 派生空间但不同 namespace
+      //   (这里用 'episode_publish:',与 'episode_lock:' 不冲突)。
+      const now = new Date();
       const updated = await ctx.prisma.$transaction(async (tx) => {
-        // 事务内 + status 双重 CAS,防 D2 守卫之后另一请求把 ep 改成终态(TOCTOU)
+        await tx.$executeRawUnsafe(
+          `SELECT pg_advisory_xact_lock(hashtext('episode_publish:' || $1)::bigint)`,
+          ep.id,
+        );
+        // 锁内 re-read,拿到不可被并发改动的真实状态
+        const fresh = await tx.episode.findUnique({
+          where: { id: ep.id },
+          select: {
+            id: true,
+            status: true,
+            generatingStartedAt: true,
+            publishedVersion: true,
+          },
+        });
+        if (!fresh) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: '集不存在' });
+        }
+        // W3.1.followup 软锁:fresh GENERATING 不可发布
+        if (isEpisodeLockedNow(fresh)) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: '本集正在生成分镜,无法发布(请稍候或在管理员后台强制解锁)',
+          });
+        }
+        // W1-W5 audit P0(D2):只允许从 NOT_STARTED / IN_PROGRESS 发布
+        if (fresh.status !== 'NOT_STARTED' && fresh.status !== 'IN_PROGRESS') {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: `本集状态为 ${fresh.status},不能发布(只允许从 NOT_STARTED / IN_PROGRESS 发布)`,
+          });
+        }
+
         const e = await tx.episode.update({
-          where: { id: ep.id, status: { in: ['NOT_STARTED', 'IN_PROGRESS'] } },
+          where: { id: ep.id },
           data: {
             publishedAt: now,
-            publishedVersion: ep.publishedVersion + 1,
+            publishedVersion: fresh.publishedVersion + 1,
             status: 'IN_PROGRESS',
           },
         });

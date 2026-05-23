@@ -65,4 +65,42 @@ export const meRouter = router({
       }),
     );
   }),
+
+  /**
+   * W1-W5 audit P2 followup(P2-5):公开品牌 + 系统配置 endpoint
+   *
+   * 接通 5 条原本 dead 的 SystemSetting:
+   *   - system.locale.default
+   *   - system.brand.name_cn / name_en / tagline_cn
+   *   - system.gacha.max_attempts(也由 aigc.generateVideo 内联校验)
+   *   - system.budget.warn_pct
+   *
+   * 前端 layout / 项目页拿这个填 logo title + 抽卡上限提示 + 预算颜色档位。
+   */
+  systemBranding: protectedProcedure.query(async ({ ctx }) => {
+    const rows = await ctx.prisma.systemSetting.findMany({
+      where: {
+        key: {
+          in: [
+            'system.locale.default',
+            'system.brand.name_cn',
+            'system.brand.name_en',
+            'system.brand.tagline_cn',
+            'system.gacha.max_attempts',
+            'system.budget.warn_pct',
+          ],
+        },
+      },
+      select: { key: true, value: true },
+    });
+    const map = new Map(rows.map((r) => [r.key, r.value]));
+    return {
+      defaultLocale: map.get('system.locale.default') ?? 'zh-CN',
+      brandNameCn: map.get('system.brand.name_cn') ?? '星垣工坊',
+      brandNameEn: map.get('system.brand.name_en') ?? 'StarsAlign Studio',
+      brandTaglineCn: map.get('system.brand.tagline_cn') ?? '',
+      gachaMaxAttempts: Number(map.get('system.gacha.max_attempts') ?? '5'),
+      budgetWarnPct: Number(map.get('system.budget.warn_pct') ?? '80'),
+    };
+  }),
 });

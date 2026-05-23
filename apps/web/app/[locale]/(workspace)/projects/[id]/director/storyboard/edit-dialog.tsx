@@ -17,7 +17,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 // ---------------------------------------------------------------------------
-// Shot 编辑弹窗 — 改 framing/angle/content/prompt,自动写 PromptEdit
+// Shot 编辑弹窗 — 改 framing/angle/movement/lighting/content/prompt,自动写 PromptEdit
+// W7 followup:扩展 4 大预设 — movement/lighting 与 admin.preset 联动
 // ---------------------------------------------------------------------------
 
 interface ShotEditInput {
@@ -25,6 +26,8 @@ interface ShotEditInput {
   number: string;
   framing: string | null;
   angle: string | null;
+  movement: string | null;
+  lighting: string | null;
   content: string;
   prompt: string;
   durationS: number;
@@ -42,6 +45,8 @@ export function ShotEditDialog({
 }): React.ReactElement {
   const [framing, setFraming] = React.useState(shot.framing ?? '');
   const [angle, setAngle] = React.useState(shot.angle ?? '');
+  const [movement, setMovement] = React.useState(shot.movement ?? '');
+  const [lighting, setLighting] = React.useState(shot.lighting ?? '');
   const [content, setContent] = React.useState(shot.content);
   const [prompt, setPrompt] = React.useState(shot.prompt);
   const [diffNote, setDiffNote] = React.useState('');
@@ -57,6 +62,8 @@ export function ShotEditDialog({
   const hasChanges =
     framing !== (shot.framing ?? '') ||
     angle !== (shot.angle ?? '') ||
+    movement !== (shot.movement ?? '') ||
+    lighting !== (shot.lighting ?? '') ||
     content !== shot.content ||
     prompt !== shot.prompt;
 
@@ -65,11 +72,20 @@ export function ShotEditDialog({
       toast.info('没有改动');
       return;
     }
+    // movement/lighting:空串映射成 null(明确清除字段),非空写入
+    const cleanOrNull = (v: string, was: string | null): string | null | undefined => {
+      const next = v.trim();
+      const cur = was ?? '';
+      if (next === cur) return undefined;
+      return next.length === 0 ? null : next;
+    };
     update.mutate({
       shotId: shot.id,
       patch: {
         framing: framing !== (shot.framing ?? '') ? framing : undefined,
         angle: angle !== (shot.angle ?? '') ? angle : undefined,
+        movement: cleanOrNull(movement, shot.movement),
+        lighting: cleanOrNull(lighting, shot.lighting),
         content: content !== shot.content ? content : undefined,
         prompt: prompt !== shot.prompt ? prompt : undefined,
       },
@@ -89,8 +105,8 @@ export function ShotEditDialog({
 
         <div className="flex flex-col gap-3">
           <div className="grid grid-cols-2 gap-3">
-            {/* W7 audit R6:景别 / 角度 改 Select(datalist 模式),拉 me.presets,
-                兼容自定义值(用户仍可输入预设外的字符串,作训练数据) */}
+            {/* W7 audit R6:景别 / 角度 / 运镜 / 光线 4 大预设字段,
+                datalist 模式拉 me.presets,兼容自定义值(预设外字符串作训练数据) */}
             <PresetField
               id="framing"
               label="景别"
@@ -106,6 +122,22 @@ export function ShotEditDialog({
               value={angle}
               onChange={setAngle}
               placeholder="平视 / 过肩 / 俯角"
+            />
+            <PresetField
+              id="movement"
+              label="运镜"
+              kind="movement"
+              value={movement}
+              onChange={setMovement}
+              placeholder="固定 / 推 / 拉 / 摇 / 跟"
+            />
+            <PresetField
+              id="lighting"
+              label="光线"
+              kind="lighting"
+              value={lighting}
+              onChange={setLighting}
+              placeholder="自然光 / 硬光 / 逆光"
             />
           </div>
 

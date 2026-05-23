@@ -316,11 +316,17 @@ async function main() {
     },
 
     // ----- 分镜业务参数 -----
+    // W1-W5 audit P2 followup(P2-4):storyboard.maxDurationS vs shot.video.maxDurationS 命名澄清
+    //   - storyboard.maxDurationS = mergeShots 算法把若干 shot 合成一个 ShotGroup 时的上限(15s),
+    //     用于"导演侧排序后这一组送视频模型"的拆分边界
+    //   - shot.video.maxDurationS = 单次 aigc.generateVideo 调用 Seedance 等模型时硬上限(10s),
+    //     是 Provider API 一次能生成的物理上限
+    //   两者不同语义:storyboard.* 决定"合多大",shot.video.* 决定"发多大",不要相互覆盖。
     {
       key: 'storyboard.maxDurationS',
       value: '15',
       category: 'general',
-      description: '合并组单段最大时长（秒），按视频 Provider maxDuration 上限',
+      description: 'mergeShots 合并组单段时长上限（秒）— 区别于 shot.video.maxDurationS(Provider 单次调用硬上限)',
     },
     {
       key: 'storyboard.defaultShotDurationS',
@@ -394,7 +400,7 @@ async function main() {
       key: 'shot.video.maxDurationS',
       value: '10',
       category: 'general',
-      description: '单镜视频生成最大时长(秒)— 与 storyboard.maxShotDurationS 联动',
+      description: '单次 aigc.generateVideo 调用 Provider 的硬上限(秒)— 区别于 storyboard.maxDurationS(mergeShots 合并组上限)',
     },
     {
       key: 'shot.video.defaultAspectRatio',

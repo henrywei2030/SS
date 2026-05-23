@@ -24,6 +24,8 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
+import { Prisma } from '@ss/db';
+
 import { router, protectedProcedure } from '../trpc.js';
 import { assertProjectAccess } from '../middleware/access.js';
 
@@ -74,6 +76,21 @@ export const insightsRouter = router({
       await assertProjectAccess(ctx, input.projectId);
       const since = periodStartDate(input.days);
 
+      // W1-W5 audit P2 followup(P2-5):接通 system.budget.warn_pct(原 dead config)
+      // 从 SystemSetting 拉预警阈值,跟项目 budgetCny 相乘后返给前端做颜色档位
+      const [budgetWarnSetting, project] = await Promise.all([
+        ctx.prisma.systemSetting.findUnique({
+          where: { key: 'system.budget.warn_pct' },
+          select: { value: true },
+        }),
+        ctx.prisma.project.findUnique({
+          where: { id: input.projectId },
+          select: { budgetCny: true },
+        }),
+      ]);
+      const budgetWarnPct = Number(budgetWarnSetting?.value ?? '80');
+      const projectBudgetCny = project?.budgetCny ? Number(project.budgetCny) : null;
+
       // 1. 成本数据 — 从 ledger 拉(W6 audit:含 success 和 failed,分开统计)
       const ledgers = await ctx.prisma.costLedgerEntry.findMany({
         where: { projectId: input.projectId, createdAt: { gte: since } },
@@ -85,29 +102,34 @@ export const insightsRouter = router({
         },
       });
 
-      let totalCostCny = 0;
-      let successCostCny = 0;
-      const costByKind: Record<CostKind, number> = {
-        image: 0,
-        video: 0,
-        text: 0,
-        audio: 0,
-        compliance: 0,
-        analysis: 0,
-        other: 0,
+      // W1-W5 audit P1 followup(R9):用 Prisma.Decimal 累加防大额 IEEE-754 误差
+      // (上量后 7000+ ledger 行累加 0.01-0.5 级别小额,Number 累加会漂)
+      let totalDec = new Prisma.Decimal(0);
+      let successDec = new Prisma.Decimal(0);
+      const costByKindDec: Record<CostKind, Prisma.Decimal> = {
+        image: new Prisma.Decimal(0),
+        video: new Prisma.Decimal(0),
+        text: new Prisma.Decimal(0),
+        audio: new Prisma.Decimal(0),
+        compliance: new Prisma.Decimal(0),
+        analysis: new Prisma.Decimal(0),
+        other: new Prisma.Decimal(0),
       };
-      const dailyCost = new Map<string, number>();
+      const dailyCostDec = new Map<string, Prisma.Decimal>();
       const activeDays = new Set<string>();
 
       for (const l of ledgers) {
-        const c = Number(l.costCny);
-        totalCostCny += c;
-        if (l.success) successCostCny += c;
-        costByKind[classifyLedgerAction(l.action)] += c;
+        const c = new Prisma.Decimal(l.costCny);
+        totalDec = totalDec.plus(c);
+        if (l.success) successDec = successDec.plus(c);
+        const kind = classifyLedgerAction(l.action);
+        costByKindDec[kind] = costByKindDec[kind].plus(c);
         const k = utcDayKey(l.createdAt);
-        dailyCost.set(k, (dailyCost.get(k) ?? 0) + c);
+        dailyCostDec.set(k, (dailyCostDec.get(k) ?? new Prisma.Decimal(0)).plus(c));
         activeDays.add(k);
       }
+      const totalCostCny = totalDec.toNumber();
+      const successCostCny = successDec.toNumber();
 
       // 2. 计数 — 从 GenerationAttempt 拉(单一来源,跟 aigc.listGroups 对齐)
       //    过滤 rejected:false(废片不算成功) + 关联 shotGroup/episode 软删
@@ -141,8 +163,19 @@ export const insightsRouter = router({
         const d = new Date(since);
         d.setUTCDate(d.getUTCDate() + i);
         const k = utcDayKey(d);
-        costByDay.push({ date: k, cost: Number((dailyCost.get(k) ?? 0).toFixed(4)) });
+        const dec = dailyCostDec.get(k) ?? new Prisma.Decimal(0);
+        costByDay.push({ date: k, cost: Number(dec.toFixed(4)) });
       }
+
+      // 预算状态判定:超 100% 红,超 warn% 黄,否则绿
+      const budgetStatus: 'over' | 'warn' | 'ok' | 'no_budget' =
+        projectBudgetCny === null
+          ? 'no_budget'
+          : totalCostCny >= projectBudgetCny
+            ? 'over'
+            : totalCostCny >= (projectBudgetCny * budgetWarnPct) / 100
+              ? 'warn'
+              : 'ok';
 
       return {
         period: { since: since.toISOString(), days: input.days },
@@ -155,12 +188,16 @@ export const insightsRouter = router({
         successRate: totalAttempts > 0 ? successCount / totalAttempts : 0,
         activeDays: activeDays.size,
         costByKind: Object.fromEntries(
-          (Object.keys(costByKind) as CostKind[]).map((k) => [
+          (Object.keys(costByKindDec) as CostKind[]).map((k) => [
             k,
-            Number(costByKind[k].toFixed(4)),
+            Number(costByKindDec[k].toFixed(4)),
           ]),
         ) as Record<CostKind, number>,
         costByDay,
+        // P2-5:预算 + 预警阈值 status
+        projectBudgetCny,
+        budgetWarnPct,
+        budgetStatus,
       };
     }),
 
@@ -189,12 +226,13 @@ export const insightsRouter = router({
         _count: { _all: true },
       });
 
+      // W1-W5 audit P1 followup(R9):Decimal 累加 totalCost,与 overview 同口径
       const map = new Map<
         string,
         {
           providerId: string;
           modelId: string;
-          totalCost: number;
+          totalCost: Prisma.Decimal;
           total: number;
           success: number;
           failed: number;
@@ -205,12 +243,12 @@ export const insightsRouter = router({
         const cur = map.get(key) ?? {
           providerId: g.providerId,
           modelId: g.modelId,
-          totalCost: 0,
+          totalCost: new Prisma.Decimal(0),
           total: 0,
           success: 0,
           failed: 0,
         };
-        cur.totalCost += Number(g._sum.costCny ?? 0);
+        cur.totalCost = cur.totalCost.plus(new Prisma.Decimal(g._sum.costCny ?? 0));
         cur.total += g._count._all;
         if (g.success) cur.success += g._count._all;
         else cur.failed += g._count._all;
@@ -218,8 +256,12 @@ export const insightsRouter = router({
       }
       return Array.from(map.values())
         .map((r) => ({
-          ...r,
+          providerId: r.providerId,
+          modelId: r.modelId,
           totalCost: Number(r.totalCost.toFixed(4)),
+          total: r.total,
+          success: r.success,
+          failed: r.failed,
           successRate: r.total > 0 ? r.success / r.total : 0,
         }))
         .sort((a, b) => b.totalCost - a.totalCost);
@@ -264,6 +306,7 @@ export const insightsRouter = router({
         _sum: { costCny: true },
       });
 
+      // W1-W5 audit P1 followup(R9):Decimal 累加 totalCost
       const map = new Map<
         string,
         {
@@ -272,7 +315,7 @@ export const insightsRouter = router({
           success: number;
           failed: number;
           running: number;
-          totalCost: number;
+          totalCost: Prisma.Decimal;
         }
       >();
       for (const g of grouped) {
@@ -283,10 +326,10 @@ export const insightsRouter = router({
           success: 0,
           failed: 0,
           running: 0,
-          totalCost: 0,
+          totalCost: new Prisma.Decimal(0),
         };
         cur.total += g._count._all;
-        cur.totalCost += Number(g._sum.costCny ?? 0);
+        cur.totalCost = cur.totalCost.plus(new Prisma.Decimal(g._sum.costCny ?? 0));
         if (g.status === 'SUCCESS') cur.success += g._count._all;
         else if (g.status === 'FAILED') cur.failed += g._count._all;
         else if (g.status === 'RUNNING' || g.status === 'QUEUED') cur.running += g._count._all;
@@ -330,7 +373,9 @@ export const insightsRouter = router({
             attemptSuccessRate: r.total > 0 ? r.success / r.total : 0,
             totalCostCny: Number(r.totalCost.toFixed(4)),
             costPerSuccessCny:
-              r.success > 0 ? Number((r.totalCost / r.success).toFixed(4)) : null,
+              r.success > 0
+                ? Number(r.totalCost.div(r.success).toFixed(4))
+                : null,
           };
         })
         .filter((r): r is NonNullable<typeof r> => r !== null);

@@ -60,8 +60,13 @@ export class LocalAuthAdapter implements AuthAdapter {
     if (input.password.length < 8) {
       throw new ValidationError('password must be at least 8 characters');
     }
+    // W1-W7 audit:必须过滤 deletedAt 防软删账号永久占用 email/username
+    // 原版漏过滤 → 用户软删后该邮箱永远不能再注册(管理员无法重新建账号)
     const existing = await prisma.user.findFirst({
-      where: { OR: [{ email: input.email }, { username: input.username }] },
+      where: {
+        OR: [{ email: input.email }, { username: input.username }],
+        deletedAt: null,
+      },
     });
     if (existing) throw new ValidationError('email or username already in use');
 

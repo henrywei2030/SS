@@ -209,8 +209,13 @@ const styleRouter = router({
         throw new TRPCError({ code: 'BAD_REQUEST', message: '内置风格不能删除' });
       }
       // 检查引用:有 Project / Asset 用该风格则拒
-      const projectCount = await ctx.prisma.project.count({ where: { styleId: input.id } });
-      const assetCount = await ctx.prisma.asset.count({ where: { styleId: input.id } });
+      // W1-W7 audit:必须过滤 deletedAt:null,否则已软删的项目/资产仍占引用计数,阻止删除
+      const projectCount = await ctx.prisma.project.count({
+        where: { styleId: input.id, deletedAt: null },
+      });
+      const assetCount = await ctx.prisma.asset.count({
+        where: { styleId: input.id, deletedAt: null },
+      });
       if (projectCount > 0 || assetCount > 0) {
         throw new TRPCError({
           code: 'CONFLICT',
@@ -582,6 +587,7 @@ const bindingRouter = router({
       }
 
       // 校验 value 必须是某个真实 provider（OTHER 类不校验，如 docx.parser=mammoth）
+      // W1-W7 audit:provider 必须 isActive=true,防绑到已禁用 provider 让业务侧 silent fail
       const kind = bindingKindOf(input.key);
       if (kind !== 'OTHER') {
         const provider = await ctx.prisma.providerConfig.findFirst({
@@ -591,6 +597,12 @@ const bindingRouter = router({
           throw new TRPCError({
             code: 'BAD_REQUEST',
             message: `provider ${input.value}（kind=${kind}）不存在或类型不匹配`,
+          });
+        }
+        if (!provider.isActive) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `provider ${input.value} 已被禁用(isActive=false),先在 /admin/providers 启用再绑`,
           });
         }
       }
@@ -653,6 +665,60 @@ const episodeRouter = router({
         updated,
       );
       return { ok: true, previousStartedAt: before.generatingStartedAt };
+    }),
+
+  /**
+   * 归档(软删)整集 — W1-W5 audit P2 followup(P2-1)
+   *
+   * 一并软删:
+   *   - episode.deletedAt
+   *   - 本集 scenes / shots / shotGroups
+   *   - 指向本集 assetId 的 AssetUsageBinding(防 binding 悬空)
+   *
+   * 不删除:
+   *   - generationAttempts(保留审计 + cost ledger 链路)
+   *   - mediaItems(可能被其它项目复用)
+   */
+  archive: adminProcedure
+    .input(z.object({ episodeId: z.string().cuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const before = await ctx.prisma.episode.findUnique({
+        where: { id: input.episodeId },
+      });
+      if (!before) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '集不存在' });
+      }
+      if (before.deletedAt) {
+        return { ok: true, alreadyArchived: true };
+      }
+      const now = new Date();
+      await ctx.prisma.$transaction([
+        ctx.prisma.episode.update({
+          where: { id: before.id },
+          data: { deletedAt: now, status: 'ARCHIVED' },
+        }),
+        ctx.prisma.scene.updateMany({
+          where: { episodeId: before.id, deletedAt: null },
+          data: { deletedAt: now },
+        }),
+        ctx.prisma.shot.updateMany({
+          where: { episodeId: before.id, deletedAt: null },
+          data: { deletedAt: now },
+        }),
+        ctx.prisma.shotGroup.updateMany({
+          where: { episodeId: before.id, deletedAt: null },
+          data: { deletedAt: now },
+        }),
+        ctx.prisma.assetUsageBinding.updateMany({
+          where: { episodeId: before.id, deletedAt: null },
+          data: { deletedAt: now },
+        }),
+      ]);
+      await logOperation(ctx, 'episode.archive', 'episode', before.id, before, {
+        deletedAt: now,
+        projectId: before.projectId,
+      });
+      return { ok: true, alreadyArchived: false };
     }),
 });
 

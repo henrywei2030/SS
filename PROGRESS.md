@@ -5,6 +5,71 @@
 
 ---
 
+## 2026-05-24(周日,win-laptop · 十一次收工)— W1-W7 全栈深 audit 29 项 + Shot schema 联动 + Decimal/memo
+
+**完成 — 三轮深 audit + 全链路同步**
+
+### W1-W5 audit P1 followup 9 项(底子加固)
+- ✅ **P1-1 publishEpisode TOCTOU 全事务化**:`advisory_xact_lock('episode_publish:')` 锁内做 lock check + status CAS,根除 read-then-act 窗口
+- ✅ **P1-2 5 个 mutation 加 isEpisodeLockedNow 守卫**:mergeShots / splitGroup / updateShot / deleteShot / updateGroup 防 generateForEpisode 跑到一半被改字段
+- ✅ **P1-3 stale TTL 动态续约**:`refreshEpisodeLock` helper + generateForEpisode 每 1/3 TTL(5min)续约一次,长剧本不再被自己判 stale
+- ✅ **P1-4 script.analyze modelId 读 binding**:`binding.script.analysis.modelId` 真接通(input > binding > 'claude-sonnet-4-5')
+- ✅ **P1-5 三条死配置全接通**:`asset.compliance.requireForVideo`(generateVideo 守卫)+ `binding.asset.compliance.providerId`(complianceCheck 真读)+ `binding.script.docx.parser`(extractScriptText.opts.docxParser)
+- ✅ **P1-6 VideoRef 7 槽位 fallback 链**:CHARACTER → portrait → threeView → main;SCENE → sceneMain → Front/Left/Right/Back → panorama → main(getGroupDetail / previewCompiledPrompt / generateVideo 三处)
+- ✅ **P1-7 propPrompt verified** — W7 audit R5 已修过,跨入口已传 propPrompt
+- ✅ **P1-8 asset.listShotBindings 端点**:补齐 shotId → AssetUsageBinding 查询路径(W3 兼容)
+- ✅ **P1 补漏:Provider ↔ router ledger 双写** — aigc.generateVideo / asset.generateImage 调 provider 时传 `skipLedger:true`,防真接 Seedance/Claude 时 SeedanceProvider 内 5 处 recordLedger + router 手动 ledger 双计费
+
+### W1-W5 audit P2 followup 6 项(扫尾)
+- ✅ **P2-1 Scene/Episode 软删级联**:新增 `storyboard.deleteScene` + `admin.episode.archive` 端点,事务级联清 shots / shotGroups / bindings,根除悬空 binding
+- ✅ **P2-2 confirmCandidate 校验 candidateForSlot**:反查 attempt 校验 === input.slot,防 portrait 候选被塞 threeView 槽位
+- ✅ **P2-3 ShotAssetRef deprecated 清理**:`db/src/index.ts` 移除类型导出 + 加 W6 schema drop 路线图注释(schema 改 + migration 仍 deferred,未真 drop)
+- ✅ **P2-4 maxDurationS 双语义注释化**:`storyboard.maxDurationS`(mergeShots 合并组上限) vs `shot.video.maxDurationS`(Provider 单次硬上限)— seed.ts 清晰区分
+- ✅ **P2-5 5 条 system.* setting 全接通**:新增 `me.systemBranding` endpoint(brand/locale/gacha/budget)+ aigc.generateVideo 内联 `system.gacha.max_attempts` 守卫 + insights.getProjectOverview 返 `budgetStatus + budgetWarnPct`
+- ✅ **P2-6 EventBus 注释** — 已加 W1-W5 三轮 E2 注释(Phase 1 仅 GENERATION_COMPLETED 启用)
+
+### 底层优化 3 项
+- ✅ **R7 aigc-workspace memoization**(1235 行)— `selectedGroupId` 用 useMemo + `selectGroup` / `invalidateGroup` / 8 个 GroupDetail handler 全 useCallback,根除 parent re-render 时 inline arrow 重建破坏 React.memo
+- ✅ **R9 Prisma.Decimal cost ledger 精度**:`packages/core/cost/ledger.ts`(4 helpers)+ `insights.ts`(getProjectOverview / getModelDistribution / Top10)+ `aigc.ts`(dailyBudget)+ `adapters/provider/base.ts`(recordLedger / checkBudget)— `db/src/index.ts` 加 `export { Prisma }` value-export 解 ts1362
+- ✅ **Shot schema 加 movement/lighting** + **全链路联动**:schema + migration `20260524000000_w7_followup_shot_movement_lighting` 已 apply + LLM SYSTEM_PROMPT 扩 4 字段 + presets 灌给 LLM + storyboard router 落库 + edit-dialog 4 PresetField + shots-pane 二级显示
+
+### W1-W7 深 audit 第 11 轮 + 7 项新 bug 修
+- ✅ **admin.style.delete 缺 deletedAt 过滤**:软删项目/资产仍占引用阻止风格删除(P1)
+- ✅ **project.get 多处 deletedAt 漏过滤**:episodes / shotCount / completedShots 都没排除软删 episode 导致统计错乱(P1)
+- ✅ **admin.binding.set 拒 isActive=false provider**:防 silent fail(P1)
+- ✅ **auth.signup deletedAt 过滤** — **P0**:软删用户邮箱永久占用,管理员无法重建账号
+- ✅ **changePassword 强密度 + rate-limit**:与 signup 对齐 + per-user 5次/min 防撞旧密码(P1)
+- ✅ **minio.copyObject CopySource URL 编码**:AWS SDK v3 不自动编码,含空格/中文 key 让 S3 解析错(P2)
+- ✅ **styles-manager 重复 refetch+invalidate**:update/del/create onSuccess 双触发查询,简化为单 invalidate(P2)
+
+### 验证 & 文档
+- ✅ 12 包 typecheck 全过(7 包 src + 5 cache)
+- ✅ 110 单测全过零回归(60 core + 25 api + 14 episode-lock + 11 script-extract)
+- ✅ DB schema up-to-date(17 migrations,与 schema.prisma 一致)
+- ✅ TODO.md + PROGRESS.md(本条)
+- ⚠️ docs/* 未改 — 本次修复都是 audit 收尾,无新架构 / 模块 / ADR 决策
+
+**质量**
+- 25 modified + 1 new migration 目录 + **+999 / -172 lines**
+- 累计今日:29 项 bug 全清(P1 9 + P2 6 + R7/R9 + Shot schema + ledger 双写补漏 + W1-W7 7 项)
+- Auto Mode classifier 拦截过 1 次 schema migration,经 AskUserQuestion 确认后用 `prisma db execute` + `prisma migrate resolve --applied` 二段式 apply 落地
+
+**进行中**
+- 🚧 W5.5 BullMQ video-gen worker(异步队列 + SSE 进度 + providerJobId 轮询)— 真接 Seedance 时必修
+- 🚧 W5.6 素材库(Media Vault)— /media 上传/搜索/收藏,Phase 2
+
+**问题 / 待决策**
+- ❓ W8 实战准备(种子数据 + 操作日志页 + 5 人 onboarding SOP)是否启动
+- ❓ 配真 API Key 跑 e2e 业务验证(Claude / Seedance)
+- ❓ Tauri 桌面端打包是否仍排期(原 W7,目前 web 实战不需)
+- ❓ EN 文案 review(i18n 大工程,Phase 2?)
+
+**下次接着做**
+- 📌 选择:① W5.5 BullMQ worker(真接 Seedance 必修)/ ② 配 API Key 跑 e2e(验证 W1-W7 链路真实运行)/ ③ W8 实战(种子 + onboarding)
+- 📌 重传 Project 知识库 4 份(TODO / PROGRESS / docs 不动)
+
+---
+
 ## 2026-05-23(周六,win-laptop · 十次收工)— W5/W6/W7 全交付 + 10 轮全栈 audit 24 项修
 
 **完成 — 巨量产出**
