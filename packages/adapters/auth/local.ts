@@ -40,7 +40,13 @@ export class LocalAuthAdapter implements AuthAdapter {
         deletedAt: null,
       },
     });
-    if (!user) throw new ForbiddenError('invalid credentials');
+    // 7 轮 audit A3:防时序攻击 — 用户不存在时跑 dummy bcrypt,等时长跟真用户接近
+    // 否则 attacker 能通过响应时间枚举 email/username 存在性
+    if (!user) {
+      // bcrypt cost=10 dummy hash,运行时间跟真 compare 接近(~100ms)
+      await compare(creds.password, '$2a$10$XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX');
+      throw new ForbiddenError('invalid credentials');
+    }
     if (user.status !== 'ACTIVE') throw new ForbiddenError(`account ${user.status.toLowerCase()}`);
 
     const ok = await compare(creds.password, user.passwordHash);
@@ -102,7 +108,8 @@ export class LocalAuthAdapter implements AuthAdapter {
 
   async changePassword(userId: string, oldPw: string, newPw: string): Promise<void> {
     if (newPw.length < 8) throw new ValidationError('new password must be at least 8 characters');
-    const user = await prisma.user.findUnique({ where: { id: userId } });
+    // 7 轮 audit A2:必须过滤 deletedAt:null,防软删账号改密复活
+    const user = await prisma.user.findFirst({ where: { id: userId, deletedAt: null } });
     if (!user) throw new ForbiddenError('user not found');
     const ok = await compare(oldPw, user.passwordHash);
     if (!ok) throw new ForbiddenError('old password mismatch');

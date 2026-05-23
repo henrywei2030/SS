@@ -25,6 +25,31 @@ const nextConfig: NextConfig = {
   output: 'standalone',
 
   /**
+   * 第 13 轮 audit:基础 security headers
+   * - X-Frame-Options: 防 clickjacking(iframe 嵌入)
+   * - X-Content-Type-Options: 防浏览器 MIME 嗅探
+   * - Referrer-Policy: 跨站跳转时不泄漏完整 URL
+   * - Permissions-Policy: 默认拒绝 camera/mic/geolocation 权限请求
+   * CSP / HSTS 复杂度高 + 跟 Next.js 内联脚本冲突,留 Phase 2 生产部署时单独定制
+   */
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(), microphone=(), geolocation=(), payment=()',
+          },
+        ],
+      },
+    ];
+  },
+
+  /**
    * Webpack 解析配置 — 修复 Next.js 15 + ESM `.js` 扩展名导入
    *
    * 源码中写 `import x from './foo.js'` 是 NodeNext / ESM 规范写法，

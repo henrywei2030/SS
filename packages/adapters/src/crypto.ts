@@ -27,7 +27,12 @@ function getMasterKey(): Buffer {
   if (raw.length === 64 && /^[0-9a-fA-F]+$/.test(raw)) {
     _key = Buffer.from(raw, 'hex');
   } else {
-    // 兼容非十六进制输入：用 SHA-256 派生 32B
+    // 第 13 轮 audit:非 64 字符 hex 时 SHA-256 派生,但显式 warn,
+    // 防止部署者误填弱 key(如 'change-me' / 'secret123')静默通过
+    console.warn(
+      '[crypto] ⚠️ APP_MASTER_KEY 不是 64 字符 hex,已用 SHA-256 派生 32B 密钥。' +
+        '生产强烈建议改成 `openssl rand -hex 32` 生成的 hex,以保证密钥熵足够。',
+    );
     _key = createHash('sha256').update(raw, 'utf8').digest();
   }
   return _key;

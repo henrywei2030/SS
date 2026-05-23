@@ -501,7 +501,20 @@ const systemRouter = router({
           ...(input.isSecret !== undefined && { isSecret: input.isSecret }),
         },
       });
-      await logOperation(ctx, 'system.setSetting', 'systemSetting', setting.id, before, setting);
+      // 7 轮 audit A4:isSecret 字段不能让 value 明文进 OperationLog.afterJson
+      // 否则 DBA / 备份泄露 / 越权 listOperationLog 能拿密钥明文
+      const maskValue = (s: typeof setting | typeof before): typeof s => {
+        if (!s) return s;
+        return s.isSecret ? { ...s, value: '••••••(secret)' } : s;
+      };
+      await logOperation(
+        ctx,
+        'system.setSetting',
+        'systemSetting',
+        setting.id,
+        maskValue(before),
+        maskValue(setting),
+      );
       return setting;
     }),
 });

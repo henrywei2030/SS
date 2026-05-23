@@ -5,6 +5,55 @@
 
 ---
 
+## 2026-05-24(周日,win-laptop · 十三次收工)— 7+1 轮深漏洞 audit 修 12 项
+
+**完成 — 8 轮深扫(7 漏洞 + 1 系统层)+ 12 项真 vuln 修复**
+
+### 7 轮漏洞 audit + 修 7 项(认证/注入/并发/经济/泄漏/供应链/部署 各 1 角度)
+73 项 agent 报告严格筛选(信噪比 ~10%)→ 7 项真 vuln:
+- ✅ **A1 P0 aigc.generateVideo advisory_xact_lock 在事务外失效**:重构为 `$transaction` 内 锁 + inflight check + 占位 QUEUED attempt + failPlaceholder helper;前置 check 失败时 mark FAILED 释放占位
+- ✅ **A2 P1 auth.changePassword 缺 deletedAt:null 过滤**:软删账号可改密复活 → findFirst 加过滤
+- ✅ **A3 P1 auth.login 时序攻击**:用户不存在跳 bcrypt 立返 → 加 dummy bcrypt compare 等时长防 email enumeration
+- ✅ **A4 P1 admin.system.setSetting isSecret 明文进 OperationLog.afterJson**:maskValue helper 屏蔽 isSecret 行 value
+- ✅ **A5 P1 asset.update name 重复检测 TOCTOU**:dup check 移进 $transaction 内 fresh read 之前
+- ✅ **A6 P1 set-admin-password.ts 默认 'admin123'**:强制传参 + 强度校验(8+字母+数字)+ 不再回显明文
+- ✅ **A7 P1 db:reset 无 NODE_ENV 守卫**:新 scripts/db-reset-guard.mjs 检查 NODE_ENV/DATABASE_URL,生产/远端 DB 拒绝执行
+
+### 第 13 轮系统层 audit + 修 5 项
+- ✅ **db:migrate (dev) 加生产守卫**:新 scripts/db-migrate-dev-guard.mjs(同 db:reset 模式),防 prisma migrate dev 在生产触发自动 reset
+- ✅ **clean script 跨平台**:`rm -rf node_modules .turbo` → Node ESM `fs.rmSync recursive:true`(Win + Mac 通用)
+- ✅ **Next.js 基础 security headers**:apps/web/next.config.ts 加 X-Frame-Options:DENY + X-Content-Type-Options:nosniff + Referrer-Policy + Permissions-Policy(camera/mic/geolocation/payment 拒)
+- ✅ **Prisma client SIGTERM/SIGINT 优雅退出**:packages/db/src/client.ts 注册 once SIGTERM/SIGINT → $disconnect 防 PG connection slot 残留;`__ssPrismaSignalsRegistered` 防 HMR 重复挂
+- ✅ **APP_MASTER_KEY 弱 key warn**:packages/adapters/src/crypto.ts 非 64 字符 hex 时 SHA-256 派生 + console.warn 提示生产环境改用 `openssl rand -hex 32`
+
+### Agent 信噪比观察
+- 8 轮 agent 共 85 项原始报告,真 vuln 12 项,信噪比 ~14%
+- 多数误判类型:① agent 没看到我前 11 轮修过的代码(过时认知)② 把 adminProcedure 设计本意当 IDOR ③ 把"防滥用"逻辑反着报成"被滥用" ④ 把 storage key 当 file path 报 path traversal ⑤ 把 `await x.catch(y)` 报"缺 await"
+- 严格筛选 + 自己 verify(每条 P0/P1 都看代码再判)是必要的工程
+
+**质量**
+- 12 包 typecheck 全过 + 110 单测全过零回归
+- DB schema up-to-date(18 migrations 全 apply)
+
+**进行中**
+- 🚧 W5.5 BullMQ video-gen worker(真接 Seedance 必修)
+- 🚧 跨设备衔接实测 V2 协议(到 mac 端验证)
+
+**问题 / 待决策**
+- ❓ Phase 2 加固:Provider response zod 校验 / SSRF 内网 IP 白名单 / Pino structured logger / JWT revocation list / Per-username login rate limit / CSP/HSTS 完整 headers
+- ❓ Agent audit 信噪比低,后续 audit 是否改成手动深扫为主、agent 辅助?
+
+**下次接着做**
+- 📌 跨设备实测 V2 协议(说 `开工,在 mac-mini`,预期 fetch + reset --hard + 环境差异自动提示)
+- 📌 W5.5 BullMQ worker 或配 API Key 跑 e2e
+
+**累计**
+- 13 次收工累计 P0/P1/P2 audit 修复:**41 项**(W1-W7 P1 9 / P2 6 / R7+R9 / Shot schema / W1-W7 audit 7 / 改进意见 Step 1 4 / 7 轮深扫 7 / 系统层 5 + Decimal/memo + ledger 双写补漏)
+- 18 migrations 已 apply,DB schema up-to-date
+- **17 ADR + V2 协议**(ADR-22 Mastra / ADR-23 Shot 首尾帧 / ADR-24 反向护城河)
+
+---
+
 ## 2026-05-24(周日,win-laptop · 十二次收工)— 改进意见 Step 1 + Phase 0 + 仓库清理 + V2 协议
 
 **完成 — 同一天三件大事**

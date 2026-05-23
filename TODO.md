@@ -1,6 +1,6 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-05-24(十二收工 · 改进意见 Step 1 + Phase 0 体检 + 仓库清理 33 文件 + CLAUDE.md V2 强同步协议)
+> 最后更新:2026-05-24(十三收工 · 7+1 轮深漏洞 audit 修 12 项 + 系统层加固)
 > 仓库:https://github.com/henrywei2030/SS
 
 ---
@@ -32,6 +32,8 @@
 - [x] **代码优化(安全前提)**(十二收工)— TRAINABLE_TEXT_FIELDS 抽 @ss/shared 单一真相源 + MAX_LENGTHS 常量集中(asset/storyboard router 同源) — 2026-05-24
 - [x] **CLAUDE.md V2 强同步协议**(十二收工)— 开工加 Dirty Check + git fetch + reset --hard origin/main + 环境差异自动检测;收工 git add . → git add -A + 强制 verify(本地↔GitHub 真一致);跨设备衔接保证 — 2026-05-24
 - [x] **`*.tsbuildinfo` 加到 `.gitignore`**(十二收工,原 TODO 待办)— 顺手清掉 — 2026-05-24
+- [x] **7 轮深漏洞 audit + 修 7 项**(十三收工)— 认证/注入/并发/经济/泄漏/供应链/部署 7 维度,73 项 agent 报告筛 7 项真 vuln:aigc 占位 attempt + advisory_lock 修 / login dummy bcrypt 防时序 / changePassword deletedAt / setSetting isSecret 不进 OperationLog / Asset.update name TOCTOU / set-admin-password 强制传参 / db:reset NODE_ENV 守卫 — 2026-05-24
+- [x] **第 13 轮系统层 audit + 修 5 项**(十三收工)— db:migrate (dev) 生产守卫 + clean script 跨平台 + Next.js security headers (X-Frame/Content-Type/Referrer/Permissions) + Prisma SIGTERM 优雅退出 + APP_MASTER_KEY 弱 key warn — 2026-05-24
 - [ ] **W5.5** BullMQ video-gen worker(异步队列 + SSE 进度 + providerJobId 轮询)— 真接 Seedance 时必修
 - [ ] **W5.6** 素材库(Media Vault)— /media 上传 / 搜索 / 收藏 / 批量,Phase 2 / W6+
 

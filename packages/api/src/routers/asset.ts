@@ -436,24 +436,6 @@ export const assetRouter = router({
         }
       }
 
-      // name 改动需要检测同项目重名(不能撞已存在的)
-      if (input.patch.name && input.patch.name !== before.name) {
-        const dup = await ctx.prisma.asset.findFirst({
-          where: {
-            projectId: before.projectId,
-            name: input.patch.name,
-            deletedAt: null,
-            id: { not: before.id },
-          },
-        });
-        if (dup) {
-          throw new TRPCError({
-            code: 'CONFLICT',
-            message: `项目内已存在同名资产 "${input.patch.name}"`,
-          });
-        }
-      }
-
       // 若改了 prompt 或任何槽位字段,联动重算 maturity — 与 patch 同事务一次写入
       // 防"先 update patch → 再 update maturity"中间他人 confirm 把 maturity 覆盖
       const slotFieldNames = Object.values(SLOT_FIELD);
@@ -461,7 +443,25 @@ export const assetRouter = router({
         input.patch.prompt !== undefined ||
         Object.keys(input.patch).some((k) => slotFieldNames.includes(k));
 
+      // 7 轮 audit A5:name 重复检测必须在 transaction 内,防 TOCTOU(check 通过后,
+      // 另一并发 update 写入同 name,本 update 也写入,致同项目同 name 双行)
       const after = await ctx.prisma.$transaction(async (tx) => {
+        if (input.patch.name && input.patch.name !== before.name) {
+          const dup = await tx.asset.findFirst({
+            where: {
+              projectId: before.projectId,
+              name: input.patch.name,
+              deletedAt: null,
+              id: { not: before.id },
+            },
+          });
+          if (dup) {
+            throw new TRPCError({
+              code: 'CONFLICT',
+              message: `项目内已存在同名资产 "${input.patch.name}"`,
+            });
+          }
+        }
         const fresh = await tx.asset.findFirstOrThrow({
           where: { id: input.assetId, deletedAt: null },
         });

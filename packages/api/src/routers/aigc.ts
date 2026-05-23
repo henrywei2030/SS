@@ -1007,27 +1007,65 @@ export const aigcRouter = router({
         bindings.maxDurationS,
       );
 
-      // W1-W5 audit 三轮 G1:advisory lock 串行同 group 的并发生成,
-      // 防双击 / React 双 invoke / 客户端 retry 重复抽卡扣费
-      await ctx.prisma.$executeRawUnsafe(
-        `SELECT pg_advisory_xact_lock(hashtext('aigc_video:' || $1)::bigint)`,
-        grp.id,
-      );
-      // 锁内查"是否已有 RUNNING attempt",有的话直接拒,不创建新 attempt
-      const inflight = await ctx.prisma.generationAttempt.findFirst({
-        where: {
-          shotGroupId: grp.id,
-          action: 'VIDEO',
-          status: { in: ['QUEUED', 'RUNNING'] },
-        },
-        select: { id: true, providerId: true, startedAt: true },
-      });
-      if (inflight) {
-        throw new TRPCError({
-          code: 'CONFLICT',
-          message: `本生成段已有进行中的视频任务(provider=${inflight.providerId})— 等完成或失败后再点`,
+      // W1-W5 audit 三轮 G1 + 7 轮 audit P0(A1):advisory lock 必须在 $transaction 内,
+      // 否则 pg_advisory_xact_lock 在 implicit transaction(单条 raw)立即释放,串行失效。
+      //
+      // 模式:transaction 内 锁 + inflight check + 占位 attempt(status=QUEUED)。锁释放后
+      // 占位 attempt 仍在 DB,其他并发 inflight check 会看到 QUEUED → 拒。
+      // 后续检查(gachaMax/budget/compile)失败时 update 占位为 FAILED 释放;通过则升 RUNNING。
+      const earlyAttempt = await ctx.prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(
+          `SELECT pg_advisory_xact_lock(hashtext('aigc_video:' || $1)::bigint)`,
+          grp.id,
+        );
+        const inflight = await tx.generationAttempt.findFirst({
+          where: {
+            shotGroupId: grp.id,
+            action: 'VIDEO',
+            status: { in: ['QUEUED', 'RUNNING'] },
+          },
+          select: { id: true, providerId: true, startedAt: true },
         });
-      }
+        if (inflight) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: `本生成段已有进行中的视频任务(provider=${inflight.providerId})— 等完成或失败后再点`,
+          });
+        }
+        // 锁内创建占位 attempt(QUEUED),commit 后即占位防其他并发
+        return tx.generationAttempt.create({
+          data: {
+            projectId: grp.episode.projectId,
+            episodeId: grp.episodeId,
+            shotGroupId: grp.id,
+            providerId,
+            modelId: providerId,
+            action: 'VIDEO',
+            inputJson: { kind: 'aigc.generateVideo.placeholder' },
+            outputMediaIds: [],
+            inputUnits: 0,
+            outputUnits: 0,
+            unitPriceCny: '0',
+            costCny: '0',
+            status: 'QUEUED',
+            createdBy: ctx.user.id,
+          },
+        });
+      });
+
+      // 7 轮 audit A1:任何前置 check 失败都要把占位 attempt 标 FAILED 释放
+      // 用 try/catch 集中处理,失败时 update earlyAttempt 然后 rethrow
+      const failPlaceholder = async (err: Error, code: 'TOO_MANY_REQUESTS' | 'PRECONDITION_FAILED' | 'BAD_REQUEST') => {
+        await ctx.prisma.generationAttempt.updateMany({
+          where: { id: earlyAttempt.id, status: 'QUEUED' },
+          data: {
+            status: 'FAILED',
+            errorMsg: err.message,
+            finishedAt: new Date(),
+          },
+        });
+        throw new TRPCError({ code, message: err.message });
+      };
 
       // W1-W5 audit P2 followup(P2-5):接通 system.gacha.max_attempts(原 dead config)
       // 单 group 累计非 rejected attempt 数(含成功/失败)超 max_attempts 时拒,防失控烧钱
@@ -1046,10 +1084,10 @@ export const aigcRouter = router({
           },
         });
         if (used >= gachaMax) {
-          throw new TRPCError({
-            code: 'TOO_MANY_REQUESTS',
-            message: `本生成段已抽 ${used} 次(上限 ${gachaMax}),把废片标 rejected 或在后台调高 system.gacha.max_attempts 再试`,
-          });
+          await failPlaceholder(
+            new Error(`本生成段已抽 ${used} 次(上限 ${gachaMax}),把废片标 rejected 或在后台调高 system.gacha.max_attempts 再试`),
+            'TOO_MANY_REQUESTS',
+          );
         }
       }
 
@@ -1081,10 +1119,10 @@ export const aigcRouter = router({
         );
         const limitDec = new Prisma.Decimal(bindings.dailyBudgetCny);
         if (spentDec.plus(estimateDec).gt(limitDec)) {
-          throw new TRPCError({
-            code: 'TOO_MANY_REQUESTS',
-            message: `今日视频预算已用 ${spentDec.toFixed(2)}¥ / 上限 ${bindings.dailyBudgetCny}¥,本次预估 ${estimateDec.toFixed(2)}¥ 会超限`,
-          });
+          await failPlaceholder(
+            new Error(`今日视频预算已用 ${spentDec.toFixed(2)}¥ / 上限 ${bindings.dailyBudgetCny}¥,本次预估 ${estimateDec.toFixed(2)}¥ 会超限`),
+            'TOO_MANY_REQUESTS',
+          );
         }
       }
 
@@ -1128,12 +1166,14 @@ export const aigcRouter = router({
           (b) => b.asset.type === 'CHARACTER' && b.asset.complianceStatus !== 'APPROVED',
         );
         if (blockedChars.length > 0) {
-          throw new TRPCError({
-            code: 'PRECONDITION_FAILED',
-            message: `合规未通过的人物不允许生成视频:${blockedChars
-              .map((b) => `${b.asset.name}(${b.asset.complianceStatus})`)
-              .join(', ')} — 在美术工作台完成合规后再试`,
-          });
+          await failPlaceholder(
+            new Error(
+              `合规未通过的人物不允许生成视频:${blockedChars
+                .map((b) => `${b.asset.name}(${b.asset.complianceStatus})`)
+                .join(', ')} — 在美术工作台完成合规后再试`,
+            ),
+            'PRECONDITION_FAILED',
+          );
         }
       }
 
@@ -1208,36 +1248,36 @@ export const aigcRouter = router({
 
       // 2. 提示词缺图 / 未关联 token 阻断 — 让用户先修
       if (compiled.warnings.missingMedia.length > 0) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: `${compiled.warnings.missingMedia
-            .map((m) => `${m.assetName} 缺主图`)
-            .join(' / ')} — 去美术工作台补图后再试`,
-        });
+        await failPlaceholder(
+          new Error(
+            `${compiled.warnings.missingMedia
+              .map((m) => `${m.assetName} 缺主图`)
+              .join(' / ')} — 去美术工作台补图后再试`,
+          ),
+          'BAD_REQUEST',
+        );
       }
       if (compiled.warnings.unknownTokens.length > 0) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: `提示词里用了未关联的 token:${compiled.warnings.unknownTokens.join(', ')} — 先关联或删除 token`,
-        });
+        await failPlaceholder(
+          new Error(
+            `提示词里用了未关联的 token:${compiled.warnings.unknownTokens.join(', ')} — 先关联或删除 token`,
+          ),
+          'BAD_REQUEST',
+        );
       }
       if (!grp.prompt.trim()) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: '提示词为空 — 去导演工作台生成或手编',
-        });
+        await failPlaceholder(
+          new Error('提示词为空 — 去导演工作台生成或手编'),
+          'BAD_REQUEST',
+        );
       }
 
-      // 3. 创建 attempt(status=RUNNING)
+      // 3. 升级占位 attempt 到 RUNNING + 真实 inputJson(7 轮 audit A1)
+      // 注:projectId/episodeId/shotGroupId/providerId/modelId/action 在占位时已写,不重复 set
       const startedAt = new Date();
-      const attempt = await ctx.prisma.generationAttempt.create({
+      const attempt = await ctx.prisma.generationAttempt.update({
+        where: { id: earlyAttempt.id },
         data: {
-          projectId: grp.episode.projectId,
-          episodeId: grp.episodeId,
-          shotGroupId: grp.id,
-          providerId,
-          modelId: providerId,
-          action: 'VIDEO',
           // W7 audit R8 P0:inputJson 脱敏 — 不存明文 prompt + 不存资产 name/mediaUrl
           // 保留 preview/hash/length 便于追溯;references 只留 idx+kind+assetId
           inputJson: {
@@ -1249,11 +1289,6 @@ export const aigcRouter = router({
             durationS,
             references: sanitizeReferencesForLedger(compiled.references),
           },
-          outputMediaIds: [],
-          inputUnits: 0,
-          outputUnits: 0,
-          unitPriceCny: '0',
-          costCny: '0',
           status: 'RUNNING',
           startedAt,
           createdBy: ctx.user.id,
