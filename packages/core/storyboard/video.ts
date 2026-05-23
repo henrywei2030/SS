@@ -3,7 +3,7 @@
  *
  * 把"分镜表里的 shot + 引用资产"拼成"送视频 Provider(Seedance 等)的完整 prompt"。
  *
- * 公式:
+ * 公式(9 段,顺序固定):
  *   最终 positive prompt =
  *     [项目风格]           ← StyleProfile.characterPrompt + scenePrompt
  *   + [角色视觉]           ← 引用 Asset(CHARACTER)的 description+prompt(让视频模型知道"陆乘长什么样")
@@ -13,7 +13,7 @@
  *   + [视频描述]           ← Shot.prompt(由用户/LLM 写的视频核心描述)
  *   + [镜头语言]           ← Shot.framing + Shot.angle(景别 + 机位)
  *   + [时长 + 比例]        ← "{duration}s · {aspectRatio}"
- *   + [额外指令]
+ *   + [额外指令]           ← extraInstruction(用户在抽卡面板的"额外要求")
  *
  *   最终 negative prompt = StyleProfile.forbiddenWords ∪ extraNegative
  *
@@ -110,7 +110,9 @@ export function compileShotVideoPrompt(
     input.shot.framing,
     input.shot.angle,
   );
-  const aspectRatio = (input.aspectRatio ?? DEFAULT_ASPECT_RATIO).trim();
+  // 注意:用户传 '   '(纯空白)也算缺省,fallback 到 9:16
+  const aspectRatio =
+    (input.aspectRatio ?? '').trim() || DEFAULT_ASPECT_RATIO;
   const durationS = clampDuration(input.shot.durationS);
   const durationPart = `【参数】时长 ${durationS}s · 宽高比 ${aspectRatio}`;
   const extraPart = (input.extraInstruction ?? '').trim();

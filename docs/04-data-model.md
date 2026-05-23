@@ -16,6 +16,13 @@
 > - GenerationAttempt 加 candidateForSlot + rejected/rejectedAt/rejectedBy
 > - ScriptAnalysis 加 scope (EPISODE/PROJECT) + scriptId nullable + projectId + perEpisodeStats + comparisonJson(W6 整剧批量分析预留)
 > - PromptEditTarget enum 加 ASSET(资产文本字段改动训练集)
+>
+> 2026-05-23 (八收工) 更新(W1-W5 跨模块 audit P0):
+> - **`asset_usage_bindings`** 唯一约束由 `@@unique([assetId, episodeId, sceneId, shotId, usageType])` → **partial functional unique index**(`COALESCE(sceneId,'') + COALESCE(shotId,'') + WHERE deletedAt IS NULL`),修 PG 中 NULL≠NULL 致并发双插。schema 里 `@@unique` 注释化,真索引在 migration `20260523103000_audit_p0_assetusage_partial_unique`。
+> - **`generation_attempts`** 写入路径补齐:storyboard.generateForEpisode(每场 action=TEXT)/ script.analyze(action=ANALYSIS)/ asset.breakdown(action=TEXT)/ asset.generateImage(失败路径补 status=FAILED + 真 unitPriceCny)— Phase 2 ROI 链路完整。
+> - **`AssetDraft` LLM 输出** 新增 `archetypeKey` 必出字段(同人物变体共享 key,如 "陆乘-重生初期"/"疗伤期" 都用 `lucheng`),Asset 变体能力贯穿。
+> - **`Episode.status`** 状态转换守卫:publishEpisode 只允 NOT_STARTED/IN_PROGRESS → IN_PROGRESS,防 COMPLETED/ARCHIVED 终态被 downgrade;script.upload/uploadFile 入口加 isEpisodeLockedNow 守卫,防 GENERATING 期间换剧本致跨版本 shot。
+> - **`Asset.maturity`** 升级路径补齐:setComplianceManually 通过合规后必触发 computeMaturity(L4→L5)。
 
 | 领域 | 表 | 用途 |
 |---|---|---|

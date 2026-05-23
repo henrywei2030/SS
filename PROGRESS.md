@@ -5,6 +5,50 @@
 
 ---
 
+## 2026-05-23(周六,win-laptop · 八次收工)— Win 首次拉起 + W5.0 跨平台修 + W1-W5 跨模块 audit P0 8 项
+
+**完成**
+- ✅ **Win 笔记本首次拉起验证**(出差携带机首战):
+  - `pnpm preflight` 7/7 全绿(Node 24.16 / pnpm 9.12 / Docker / .env / node_modules / git 干净 / 远程同步)
+  - 全仓 7 包 typecheck 全过 + 36 core + 25 api 单测全过
+  - `开工,在 win-laptop` SOP 跑通
+- ✅ **W5.0 跨平台 + 内部修补**(发现 W5.0 漏的小问题):
+  - **B1 阻塞**:`packages/{core,api}/package.json` 写死 `--config=/dev/null`,Win 上解析成 `C:\dev\null` vitest 崩溃 → 改成 per-package vitest.config.ts(Node `os.devNull` 不能用在 JSON script)
+  - **B2**:`compileShotVideoPrompt` aspectRatio 仅 trim,纯空白 `'   '` 会让"宽高比 "后面挂空 → fallback 改为「trim 后空也用默认 9:16」
+  - **B3**:顶部公式注释列了 8 段实际拼 9 段(漏标"额外指令"),注释补齐
+  - **B4/B5**:happy path 单测顺序断言只到 lines[3],没传 props,扩成 9 行完整顺序断言 + 加 props + 新增 whitespace fallback 单测(19→18+1)
+- ✅ **W1-W5 4 个 parallel agent 跨模块全面 audit**(SystemSetting 消费链 / GenerationAttempt 写入链 / Asset-Shot-Binding 数据流 / 状态机+并发+EventBus)— 共扫出 **25 项问题**(8 P0 / 10 P1 / 7 P2):
+- ✅ **P0 8 项全修**:
+  - **D1** [`schema.prisma:461`](packages/db/prisma/schema.prisma#L461) — AssetUsageBinding 复合 unique 含 nullable 列,PG 中 NULL≠NULL 致并发双插。改 partial functional unique(`COALESCE(sceneId,'') + COALESCE(shotId,'') + WHERE deletedAt IS NULL`),schema 去 `@@unique` 注释化,新 migration `20260523103000_audit_p0_assetusage_partial_unique`(**未自动跑**)
+  - **D2** [`storyboard.ts:953`](packages/api/src/routers/storyboard.ts) — publishEpisode 无条件设 `IN_PROGRESS` 会把 COMPLETED/ARCHIVED 集 downgrade。加 status 守卫(只允 NOT_STARTED/IN_PROGRESS)+ 事务内 CAS 防 TOCTOU
+  - **A1** [`asset.ts:1629`](packages/api/src/routers/asset.ts) — setComplianceManually 通过合规后不重算 maturity,L4 人物永远卡 L4。改事务内 findFirstOrThrow + computeMaturity(projected) + maturity 字段同步写
+  - **A2** [`breakdown.ts`](packages/core/asset/breakdown.ts) — LLM 输出无 archetypeKey,W4 变体能力(陆乘-重生初期 / 疗伤期)全链路断。AssetDraft 接口加字段 + SYSTEM_PROMPT 加"第 8 条 archetypeKey 规则"+ 3 个示例(陆乘/luchengjia_tuwu/guali_1983)+ parseDraftArray 提取
+  - **C1** [`script.ts:23-44`](packages/api/src/routers/script.ts) — script.upload/uploadFile 在 GENERATING 期间能换剧本 → 跨版本 shot。新 helper `assertEpisodeNotGenerating` 复用 isEpisodeLockedNow,两入口都加守卫
+  - **B1** 三个 LLM 入口完全不写 GenerationAttempt → ROI/PromptEdit 训练源头断:
+    - storyboard.generateForEpisode 每场 attempt(action=TEXT,RUNNING→SUCCESS/FAILED)
+    - script.analyze attempt(action=ANALYSIS)
+    - asset.breakdown attempt(action=TEXT)
+    - attemptId 都传给 provider 的 CallContext,让 base.ts 的 recordLedger 自动关联 CostLedgerEntry.attemptId
+  - **B2** [`asset.ts:778`](packages/api/src/routers/asset.ts) — generateImage 失败路径既不写 attempt 也不写 ledger,抽卡率分母错。catch 内补写 FAILED attempt + success=false ledger,关联 attemptId
+  - **B3** generateImage 硬编码 `unitPriceCny:'0'` → Phase 2 真 provider 接入对账全错。改成 `imageResult.costCny / count` 反推真单价
+- ✅ **质量**:7 包 typecheck 全绿 / 36 core + 25 api 单测全过 / migration 已写未跑 / 工作区 10 modified + 3 untracked
+
+**进行中**
+- 🚧 D1 migration 待手动跑(`pnpm db:migrate`)
+- 🚧 W5.1 UI 骨架 — 产品形态(详情面板 / 表格式 / 混合)等用户拍板
+
+**问题 / 待决策**
+- ❓ W5.1 产品形态(主交互节奏)— 之前 ask 被 dismiss,需要重新拍板
+- ❓ D1 migration 跑的时机(收工 push 后立即跑?还是 W5.1 启动前跑?)
+- ❓ P1/P2 共 17 项 audit followup 何时收(每周一波?还是 W5.2 启动前清?)
+
+**下次接着做**
+- 📌 跑 D1 migration → 验证 AssetUsageBinding 并发双插问题真修
+- 📌 W5.1 启动:用户拍板形态后开干
+- 📌 audit P1 部分集中跟(优先 VideoAssetRef 加 mediaUrl + propPrompt 接入 — W5.1 落地前刚需)
+
+---
+
 ## 2026-05-23(周六,mac-studio · 七次收工)— 跨设备协作工作流升级 + Win 笔记本接入方案
 
 **完成**

@@ -596,6 +596,33 @@ export const assetRouter = router({
         map.get('binding.asset.breakdown.modelId') ?? 'claude-sonnet-4-5';
       const maxCharacters = Number(map.get('asset.breakdown.maxCharacters') ?? '20');
 
+      // W1-W5 audit P0(B1):写 GenerationAttempt(action=TEXT),Phase 1 资产拆解扣费回溯链路
+      const attemptStartedAt = new Date();
+      const attempt = await ctx.prisma.generationAttempt.create({
+        data: {
+          projectId: input.projectId,
+          episodeId: input.episodeId,
+          providerId: modelId,
+          modelId,
+          action: 'TEXT',
+          inputJson: {
+            kind: 'asset.breakdown',
+            scriptId: script.id,
+            projectType: project?.type,
+            styleSlug: project?.style?.slug,
+            maxCharacters,
+          },
+          outputMediaIds: [],
+          inputUnits: 0,
+          outputUnits: 0,
+          unitPriceCny: '0',
+          costCny: '0',
+          status: 'RUNNING',
+          startedAt: attemptStartedAt,
+          createdBy: ctx.user.id,
+        },
+      });
+
       let result;
       try {
         result = await breakdownAssets({
@@ -608,18 +635,42 @@ export const assetRouter = router({
             userId: ctx.user.id,
             projectId: input.projectId,
             episodeId: input.episodeId,
+            attemptId: attempt.id,
           },
         });
       } catch (e) {
+        const finishedAt = new Date();
+        const errMsg = e instanceof Error ? e.message : String(e);
+        await ctx.prisma.generationAttempt.update({
+          where: { id: attempt.id },
+          data: {
+            status: 'FAILED',
+            errorMsg: errMsg,
+            finishedAt,
+            durationMs: finishedAt.getTime() - attemptStartedAt.getTime(),
+          },
+        });
         await logOperation(ctx, 'asset.breakdown.failed', 'project', input.projectId, null, {
-          error: e instanceof Error ? e.message : String(e),
+          error: errMsg,
           scriptId: script.id,
         });
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
-          message: e instanceof Error ? e.message : '资产拆解失败',
+          message: errMsg || '资产拆解失败',
         });
       }
+
+      const finishedAt = new Date();
+      await ctx.prisma.generationAttempt.update({
+        where: { id: attempt.id },
+        data: {
+          status: result.warning ? 'FAILED' : 'SUCCESS',
+          errorMsg: result.warning ?? null,
+          costCny: result.cost.toFixed(4),
+          finishedAt,
+          durationMs: finishedAt.getTime() - attemptStartedAt.getTime(),
+        },
+      });
 
       await logOperation(ctx, 'asset.breakdown', 'project', input.projectId, null, {
         scriptId: script.id,
@@ -776,18 +827,76 @@ export const assetRouter = router({
           },
         );
       } catch (e) {
+        // W1-W5 audit P0(B2):失败路径也必须留 attempt + ledger 行,
+        // 否则抽卡率(成功 / (成功+失败))分母会缺,Phase 2 ROI 监控失真
+        const failedAt = new Date();
+        const errMsg = e instanceof Error ? e.message : String(e);
+        const failedAttempt = await ctx.prisma.generationAttempt.create({
+          data: {
+            projectId: asset.projectId,
+            assetId: asset.id,
+            providerId,
+            modelId: input.modelId ?? providerId,
+            action: 'IMAGE',
+            candidateForSlot: input.slot,
+            inputJson: {
+              prompt: compiled.positive,
+              negative: compiled.negative,
+              aspectRatio,
+              sizePx: input.sizePx,
+              count: input.count,
+            },
+            outputMediaIds: [],
+            inputUnits: 0,
+            outputUnits: 0,
+            unitPriceCny: '0',
+            costCny: '0',
+            status: 'FAILED',
+            errorMsg: errMsg,
+            startedAt,
+            finishedAt: failedAt,
+            durationMs: failedAt.getTime() - startedAt.getTime(),
+            createdBy: ctx.user.id,
+          },
+        });
+        await ctx.prisma.costLedgerEntry.create({
+          data: {
+            userId: ctx.user.id,
+            projectId: asset.projectId,
+            assetId: asset.id,
+            attemptId: failedAttempt.id,
+            providerId,
+            modelId: input.modelId ?? providerId,
+            action: 'image.generate',
+            inputUnits: 0,
+            outputUnits: 0,
+            unitPriceCny: '0',
+            costCny: '0',
+            success: false,
+            billingCycle: new Date().toISOString().slice(0, 7),
+          },
+        });
+
         await logOperation(ctx, 'asset.generateImage.failed', 'asset', asset.id, null, {
-          error: e instanceof Error ? e.message : String(e),
+          error: errMsg,
           providerId,
           slot: input.slot,
           projectId: asset.projectId,
+          attemptId: failedAttempt.id,
         });
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
-          message: `图像生成失败: ${e instanceof Error ? e.message : String(e)}`,
+          message: `图像生成失败: ${errMsg}`,
         });
       }
       const finishedAt = new Date();
+
+      // W1-W5 audit P0(B3):从 imageResult 反推真单价,不再硬编码 '0',
+      // Phase 2 真 ImageProvider 接入后对账才不会全错
+      const realUnitPriceCny =
+        imageResult.imageUrls.length > 0
+          ? (imageResult.costCny / imageResult.imageUrls.length).toFixed(6)
+          : '0';
 
       // 三类写入(MediaItem×N + GenerationAttempt + CostLedgerEntry)用同一事务
       // 任一失败回滚全部 — 防出现"图片入库但没账单"或"账单但找不到图"
@@ -850,7 +959,7 @@ export const assetRouter = router({
             outputMediaIds: ids,
             inputUnits: 0,
             outputUnits: imageResult.imageUrls.length,
-            unitPriceCny: '0',
+            unitPriceCny: realUnitPriceCny,
             costCny: imageResult.costCny.toFixed(4),
             status: 'SUCCESS',
             startedAt,
@@ -871,7 +980,7 @@ export const assetRouter = router({
             action: 'image.generate',
             inputUnits: 0,
             outputUnits: imageResult.imageUrls.length,
-            unitPriceCny: '0',
+            unitPriceCny: realUnitPriceCny,
             costCny: imageResult.costCny.toFixed(4),
             success: true,
             billingCycle: new Date().toISOString().slice(0, 7),
@@ -1628,21 +1737,35 @@ export const assetRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const before = await loadAssetWithAccess(ctx, input.assetId);
-      const after = await ctx.prisma.asset.update({
-        where: { id: input.assetId },
-        data: {
-          complianceId: input.complianceId,
+
+      // W1-W5 audit P0(A1):合规通过后必须重算 maturity,否则 L4 人物永远卡 L4 升不上 L5
+      const after = await ctx.prisma.$transaction(async (tx) => {
+        const fresh = await tx.asset.findFirstOrThrow({
+          where: { id: input.assetId, deletedAt: null },
+        });
+        const projected = {
+          ...fresh,
           complianceStatus: 'APPROVED',
-          complianceCheckedAt: new Date(),
-        },
+        } as Parameters<typeof computeMaturity>[0];
+        const newMaturity = computeMaturity(projected);
+        return tx.asset.update({
+          where: { id: input.assetId },
+          data: {
+            complianceId: input.complianceId,
+            complianceStatus: 'APPROVED',
+            complianceCheckedAt: new Date(),
+            maturity: newMaturity,
+          },
+        });
       });
+
       await logOperation(
         ctx,
         'asset.compliance.manualSet',
         'asset',
         input.assetId,
         before,
-        { ...after, projectId: after.projectId },
+        { ...after, projectId: after.projectId, maturity: after.maturity },
       );
       return after;
     }),

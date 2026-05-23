@@ -458,7 +458,11 @@ model AssetUsageBinding {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  @@unique([assetId, episodeId, sceneId, shotId, usageType])
+  // ⚠️ W1-W5 audit P0(D1):复合 unique 含 nullable 列在 PG 中 NULL≠NULL,
+  // 同 (陆乘,第14集,null,null,APPEAR) 会被双插。
+  // 改为 partial functional unique index(COALESCE + WHERE deletedAt IS NULL),
+  // 见 migration `20260523_audit_p0_assetusage_partial_unique`。
+  // Prisma schema 此处不再写 `@@unique` 避免下次 migrate dev 试图恢复成原始版本。
   @@index([assetId])
   @@index([episodeId])
   @@index([sceneId])

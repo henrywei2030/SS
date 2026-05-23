@@ -354,6 +354,53 @@ bus.publish<EventOf<typeof EVENTS.GENERATION_COMPLETED>>(EVENTS.GENERATION_COMPL
 
 ---
 
+## ADR-20 · W1-W5 跨模块 audit P0 集中修(2026-05-23 八收工)
+**日期**:2026-05-23 · **状态**:✅ 已实施
+
+**背景**:4 个 parallel agent 跨模块 audit 共扫出 25 项(8 P0 / 10 P1 / 7 P2)。本 ADR 记录 8 项 P0 的设计决策依据 — 这些决策跨多个模块,影响 W5+ 的数据底座对齐。
+
+### D1 · AssetUsageBinding 用 partial functional unique 取代复合 unique
+**问题**:`@@unique([assetId, episodeId, sceneId, shotId, usageType])` 中 sceneId/shotId 是 nullable。PG 中 `NULL ≠ NULL`,并发两个 `(陆乘, 第14集, null, null, APPEAR)` 不会被唯一约束拦住,asset.ts 的 findFirst 防御也救不了(P2002 不触发)。
+**决策**:用 partial functional unique index — `COALESCE(sceneId, '') / COALESCE(shotId, '')` 当 sentinel,`WHERE deletedAt IS NULL` 只对活跃行强制唯一。
+**替代方案**:用 `''` 替换 null 数据(改 schema 类型,破坏性大);Prisma 中暂无原生支持 `@@unique WHERE` — 在 schema 注释化 `@@unique`,真索引手写在 migration。
+**代价**:未来 `prisma migrate dev` 看不到约束在 schema,需在 schema 注释明确指出迁移文件位置。
+
+### D2 · publishEpisode 加 status 白名单 + 事务内 CAS
+**问题**:publishEpisode 无条件 `status: 'IN_PROGRESS'`,COMPLETED/ARCHIVED 终态会被 downgrade。
+**决策**:守卫 + 事务内 prisma extended where unique(`where: { id, status: { in: [...] } }`)— P2025 错误化"被另一请求改成终态"的 TOCTOU 缝隙。
+
+### A1 · setComplianceManually 强制重算 maturity
+**问题**:complianceStatus 改 APPROVED 后,L4→L5 升级不触发,UI 显示永远 L4。
+**决策**:同事务 findFirstOrThrow + 投影后 computeMaturity,与 confirmCandidate/unconfirmSlot 对齐 — 任意 maturity 关键字段变化必重算。
+
+### A2 · archetypeKey 在 breakdown LLM 输出端必出
+**问题**:LLM 不输出 archetypeKey → batchCreate 全为 null → listArchetypeVariants 永远空 → W4-MM.7 变体能力实质废掉。
+**决策**:SYSTEM_PROMPT 加"第 8 条 archetypeKey"规则 + 3 个示例(陆乘/luchengjia_tuwu/guali_1983),AssetDraft 接口加字段,parseDraftArray 提取。**LLM 输出端是变体管理的唯一入口**,从源头修而不是 router 端补 — 后续手动 create 也走同 schema。
+
+### C1 · Episode 软锁覆盖到 script.upload/uploadFile
+**问题**:generateForEpisode 已用 ADR-19 软锁,但 script.upload 在 GENERATING 期间能换剧本 → 跨版本 shot。
+**决策**:新 helper `assertEpisodeNotGenerating` 复用 `isEpisodeLockedNow`,两个 script 上传入口先调。**与 ADR-19 同一锁系统的覆盖扩展**,不引入新锁机制。
+**P1 followup**:mergeShots/splitGroup/updateShot/deleteShot 也应该加,但属 P1 留下次。
+
+### B1 · GenerationAttempt 三入口全量贯穿(action 枚举从此点亮)
+**问题**:storyboard.generateForEpisode / script.analyze / asset.breakdown 三个 LLM 入口完全不写 GenerationAttempt → schema.prisma 加的 ANALYSIS/BATCH_ANALYSIS 枚举无人使用,Phase 2 ROI / PromptEdit 训练源头断。
+**决策**:每入口 wrap 一段 `attempt = create(RUNNING) → call provider with ctx.attemptId → update(SUCCESS/FAILED)`。**attemptId 透传到 provider 的 CallContext,base.ts 的 recordLedger 自动写 CostLedgerEntry.attemptId**,统一计费链路完整性。
+**代价**:每入口多 2 次 DB 写,但都很轻(单表 create/update),且这是 Phase 2 ROI 必需。
+**Phase 2 注意**:真 ImageProvider 接入后,base.ts 自动写 CostLedger + router 显式写 CostLedger 会**双写** — 需在 ctx 加 `skipLedger: true` 或彻底删 router 端 ledger.create。P1 followup 记账。
+
+### B2 · generateImage 失败路径补 attempt + ledger(成功率分母完整)
+**问题**:catch 内只 logOperation,FAILED attempt 和 success=false ledger 都不写 → 抽卡率(SUCCESS / (SUCCESS+FAILED))分母永远缺,Phase 2 ROI 失真。
+**决策**:catch 内 sequential 创建 FAILED attempt → attemptId 写 ledger(success=false)。**不和成功路径放同一事务**(provider 已抛错,事务回滚没意义)。
+
+### B3 · generateImage 单价从 imageResult 反推,不硬编码 '0'
+**问题**:Phase 1 mock 单价 0 OK,但代码里写死 `'0'` 会让 Phase 2 真接 NanoBananaProvider(0.04 CNY/图)后 attempt 和 ledger 全锁成 0,对账全错。
+**决策**:`unitPriceCny = (costCny / count).toFixed(6)` 反推,任何 provider 都正确。
+
+**整体测试覆盖**:7 包 typecheck 全过 / 36 core + 25 api 单测全过(无新单测,既有覆盖未破)。
+**migration 状态**:`20260523103000_audit_p0_assetusage_partial_unique` 已写,待手动 `pnpm db:migrate` 应用。
+
+---
+
 ## 撤销决策的流程
 
 如果某个 ADR 被推翻：

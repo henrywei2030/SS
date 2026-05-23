@@ -16,7 +16,33 @@ import { parseScriptText } from '@ss/core/script';
 import { router, protectedProcedure } from '../trpc.js';
 import type { Context } from '../context.js';
 import { logOperation } from '../middleware/audit.js';
+import { isEpisodeLockedNow } from '../utils/episode-lock.js';
 import { extractScriptText } from '../utils/script-extract.js';
+
+// ---------------------------------------------------------------------------
+// W1-W5 audit P0(C1):上传剧本前的软锁守卫
+// generateForEpisode 跑到一半另一请求换剧本会导致跨版本 shot
+// ---------------------------------------------------------------------------
+
+async function assertEpisodeNotGenerating(
+  ctx: Context,
+  projectId: string,
+  episodeNumber: number,
+): Promise<void> {
+  const existing = await ctx.prisma.episode.findUnique({
+    where: {
+      projectId_number: { projectId, number: episodeNumber },
+    },
+    select: { id: true, status: true, generatingStartedAt: true },
+  });
+  if (existing && isEpisodeLockedNow(existing)) {
+    throw new TRPCError({
+      code: 'CONFLICT',
+      message:
+        '本集正在生成分镜,请等生成完成或在管理员后台解锁后再上传剧本(防跨版本 shot)',
+    });
+  }
+}
 
 // ---------------------------------------------------------------------------
 // 通用：项目访问
@@ -145,6 +171,7 @@ export const scriptRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId, ctx.user.id);
+      await assertEpisodeNotGenerating(ctx, input.projectId, input.episodeNumber);
 
       // 1. upsert Episode
       const episode = await ctx.prisma.episode.upsert({
@@ -219,6 +246,7 @@ export const scriptRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId, ctx.user.id);
+      await assertEpisodeNotGenerating(ctx, input.projectId, input.episodeNumber);
 
       // 1. base64 → Buffer → 按格式提取纯文本
       let text: string;
@@ -539,6 +567,32 @@ export const scriptRouter = router({
 
       const { analyzeScript } = await import('@ss/core/script');
 
+      // W1-W5 audit P0(B1):写 GenerationAttempt(action=ANALYSIS),回溯 ROI / PromptEdit 用
+      const attemptStartedAt = new Date();
+      const attempt = await ctx.prisma.generationAttempt.create({
+        data: {
+          projectId: script.projectId,
+          episodeId: script.episodeId,
+          providerId: input.modelId,
+          modelId: input.modelId,
+          action: 'ANALYSIS',
+          inputJson: {
+            kind: 'script.analyze',
+            scriptId: input.scriptId,
+            episodeNumber: script.episode?.number ?? 1,
+            textLength: script.content.length,
+          },
+          outputMediaIds: [],
+          inputUnits: 0,
+          outputUnits: 0,
+          unitPriceCny: '0',
+          costCny: '0',
+          status: 'RUNNING',
+          startedAt: attemptStartedAt,
+          createdBy: ctx.user.id,
+        },
+      });
+
       try {
         const result = await analyzeScript({
           scriptText: script.content,
@@ -548,6 +602,7 @@ export const scriptRouter = router({
             userId: ctx.user.id,
             projectId: script.projectId,
             episodeId: script.episodeId ?? undefined,
+            attemptId: attempt.id,
           },
         });
 
@@ -577,6 +632,17 @@ export const scriptRouter = router({
           },
         });
 
+        const finishedAt = new Date();
+        await ctx.prisma.generationAttempt.update({
+          where: { id: attempt.id },
+          data: {
+            status: 'SUCCESS',
+            costCny: result.cost.toFixed(4),
+            finishedAt,
+            durationMs: finishedAt.getTime() - attemptStartedAt.getTime(),
+          },
+        });
+
         await logOperation(ctx, 'script.analyze.complete', 'script', script.id, null, {
           analysisId: analysis.id,
           overallScore: result.scores.overallScore,
@@ -586,13 +652,24 @@ export const scriptRouter = router({
 
         return { analysis, status: 'done' };
       } catch (e) {
+        const finishedAt = new Date();
+        const errMsg = e instanceof Error ? e.message : String(e);
+        await ctx.prisma.generationAttempt.update({
+          where: { id: attempt.id },
+          data: {
+            status: 'FAILED',
+            errorMsg: errMsg,
+            finishedAt,
+            durationMs: finishedAt.getTime() - attemptStartedAt.getTime(),
+          },
+        });
         await logOperation(ctx, 'script.analyze.failed', 'script', script.id, null, {
-          error: e instanceof Error ? e.message : String(e),
+          error: errMsg,
           projectId: script.projectId,
         });
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
-          message: e instanceof Error ? e.message : '剧本分析失败',
+          message: errMsg || '剧本分析失败',
         });
       }
     }),

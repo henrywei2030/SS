@@ -1,6 +1,6 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-05-23(七收工 · 跨设备协作工作流升级 + Win 接入)
+> 最后更新:2026-05-23(八收工 · Win 接入 + W5.0 跨平台修 + W1-W5 跨模块 audit P0 8 项)
 > 仓库:https://github.com/henrywei2030/SS
 
 ---
@@ -8,6 +8,9 @@
 ## 🚧 进行中
 
 - [x] **W5.0 数据底座** — SystemSetting 4 条 + compileShotVideoPrompt 拼接公式 + GenerationAttempt.providerJobId — 2026-05-22(六收工)
+- [x] **W5.0 修补**(Win-laptop · 八收工)— vitest 跨平台 / aspectRatio 空白 fallback / 9 段顺序断言 — 2026-05-23
+- [x] **W1-W5 跨模块 audit P0 8 项**(Win-laptop · 八收工)— D1 partial unique / D2 publish 状态守卫 / A1 maturity 重算 / A2 archetypeKey 贯穿 / C1 script.upload 软锁 / B1 三入口 GenerationAttempt / B2 失败 ledger / B3 真单价 — 2026-05-23
+- [ ] **D1 migration 待跑**:`pnpm db:migrate` 应用 `20260523103000_audit_p0_assetusage_partial_unique`(AssetUsageBinding partial functional unique)
 - [ ] **W5.1 UI 骨架**(下一步,待定形态)— 分镜级 4 列布局(资产关联 / 原始剧本 / 视频提示词 / 视频预览);**产品形态待决策**:表格式(每镜一行 4 格)/ 详情面板(选中后展开)/ 混合
 - [ ] **W5.2+** — Seedance 抽卡 router + 自动 @ 资产匹配(W1.6 auto-match 已就绪)
 - [ ] **W5.3** — BullMQ video-gen worker + 实时进度推送(SSE)+ providerJobId 轮询
@@ -44,6 +47,24 @@
 
 ### 📐 W3 / W4 followup(不阻塞下阶段)
 - [x] **Episode.status='GENERATING' 软锁**防 generateForEpisode 重入扣费(W3.1.followup) — 2026-05-22(五收工)
+- [x] **Episode 软锁覆盖到 script.upload/uploadFile**(W1-W5 audit C1)— 2026-05-23(八收工)
+- [ ] **W1-W5 audit P1 followup**(audit 18 项里的 P1 部分 — 下次集中收):
+  - publishEpisode TOCTOU(检查移进事务内 + pg_advisory_xact_lock)
+  - mergeShots/splitGroup/updateShot/deleteShot 加 isEpisodeLockedNow 守卫
+  - stale TTL 15min 对长 LLM 任务动态续约
+  - 真 ImageProvider 接入瞬间 base.ts + router 双写 ledger(需在 ctx 加 skipLedger)
+  - script.analyze modelId 硬编码 fallback,绕过 binding.script.analysis.modelId
+  - asset.compliance.requireForVideo / binding.asset.compliance.providerId / binding.script.docx.parser 三条死配置
+  - VideoAssetRef 加 7 槽位 mediaUrl(W5.1 router 落地前必扩)
+  - compileShotVideoPrompt 不读 style.propPrompt
+  - 缺 shotId → AssetUsageBinding 查询路径(W5.1 router 必加)
+- [ ] **W1-W5 audit P2 followup**(audit 7 项 P2 — 再下次清):
+  - Scene/Episode 软删不级联清 binding
+  - confirmCandidate 不校验 attempt.candidateForSlot === slot
+  - ShotAssetRef 已 deprecated 但仍在 schema(W5 收尾前清)
+  - storyboard.maxDurationS vs shot.video.maxDurationS 命名重复统一
+  - 5 条 system.* setting(brand/locale/gacha/budget warn)从未被读取
+  - EventBus 46 topic 全 dead-letter(events.ts 顶部加注释 Phase 1 未启用)
 - [ ] **storyboardRouter / assetRouter 集成测试**(mergeShots / splitGroup / confirmCandidate 并发场景 — generate 已覆盖)
 - [ ] parse.ts 边界 case 测试("时间:xxx"误识场景)
 - [ ] PromptEdit 加 Project / Episode / Script `@@index` 反向外键

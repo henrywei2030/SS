@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest';
 import { compileShotVideoPrompt } from './video.js';
 
 describe('compileShotVideoPrompt', () => {
-  it('happy path:全段拼接,顺序固定', () => {
+  it('happy path:9 段全段拼接,顺序固定', () => {
     const result = compileShotVideoPrompt({
       shot: {
         content: '陆乘走进咖啡馆,看到李婉',
@@ -34,29 +34,40 @@ describe('compileShotVideoPrompt', () => {
         description: '复古工业风,暖色灯光',
         prompt: '完整场景描述',
       },
+      props: [
+        { name: '咖啡杯', description: '白瓷', prompt: '' },
+      ],
       style: {
         characterPrompt: '写实风格',
         scenePrompt: '电影感',
         forbiddenWords: ['模糊', '低质量'],
       },
       aspectRatio: '9:16',
+      extraInstruction: '使用浅景深',
     });
 
     expect(result.positive).toContain('【风格】写实风格 · 电影感');
     expect(result.positive).toContain('【角色】陆乘:男主,30岁,西装;李婉:女主,28岁,白裙');
     expect(result.positive).toContain('【场景】咖啡馆:复古工业风,暖色灯光');
+    expect(result.positive).toContain('【道具】咖啡杯:白瓷');
     expect(result.positive).toContain('【镜头内容】陆乘走进咖啡馆,看到李婉');
     expect(result.positive).toContain('【视频描述】镜头慢慢推进,跟随陆乘脚步');
     expect(result.positive).toContain('【镜头语言】中景 · 过肩');
     expect(result.positive).toContain('【参数】时长 5s · 宽高比 9:16');
     expect(result.negative).toBe('模糊、低质量');
 
-    // 顺序:风格 → 角色 → 场景 → 道具 → 内容 → 视频描述 → 镜头语言 → 参数
+    // 9 段完整顺序:风格 → 角色 → 场景 → 道具 → 镜头内容 → 视频描述 → 镜头语言 → 参数 → 额外指令
     const lines = result.positive.split('\n');
+    expect(lines).toHaveLength(9);
     expect(lines[0]).toMatch(/^【风格】/);
     expect(lines[1]).toMatch(/^【角色】/);
     expect(lines[2]).toMatch(/^【场景】/);
-    expect(lines[3]).toMatch(/^【镜头内容】/);
+    expect(lines[3]).toMatch(/^【道具】/);
+    expect(lines[4]).toMatch(/^【镜头内容】/);
+    expect(lines[5]).toMatch(/^【视频描述】/);
+    expect(lines[6]).toMatch(/^【镜头语言】/);
+    expect(lines[7]).toMatch(/^【参数】/);
+    expect(lines[8]).toBe('使用浅景深');
   });
 
   it('无风格 → stylePart 为空,不留空行', () => {
@@ -152,6 +163,15 @@ describe('compileShotVideoPrompt', () => {
       aspectRatio: '16:9',
     });
     expect(result.aspectRatio).toBe('16:9');
+  });
+
+  it('aspectRatio 纯空白 → fallback 到默认 9:16', () => {
+    const result = compileShotVideoPrompt({
+      shot: { content: '内容', prompt: '描述', durationS: 5 },
+      aspectRatio: '   ',
+    });
+    expect(result.aspectRatio).toBe('9:16');
+    expect(result.positive).toContain('宽高比 9:16');
   });
 
   it('durationS=0 → clamp 到默认 5s', () => {

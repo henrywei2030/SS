@@ -799,6 +799,35 @@ export const storyboardRouter = router({
         const parsedScene = parseScriptText(dbScene.content).scenes[0];
         if (!parsedScene) continue;
 
+        // W1-W5 audit P0(B1):每场起一条 GenerationAttempt(action=TEXT,status=RUNNING),
+        // 提供方拿 attemptId 回写 CostLedgerEntry.attemptId,后续 ROI / PromptEdit 回溯链路完整。
+        const attemptStartedAt = new Date();
+        const attempt = await ctx.prisma.generationAttempt.create({
+          data: {
+            projectId: ep.projectId,
+            episodeId: ep.id,
+            providerId: bindings.modelId,
+            modelId: bindings.modelId,
+            action: 'TEXT',
+            inputJson: {
+              kind: 'storyboard.generateForEpisode',
+              sceneNumber: dbScene.number,
+              sceneId: dbScene.id,
+              styleSlug,
+              defaultShotDurationS: bindings.defaultShotDurationS,
+              maxShotDurationS: bindings.maxDurationS,
+            },
+            outputMediaIds: [],
+            inputUnits: 0,
+            outputUnits: 0,
+            unitPriceCny: '0',
+            costCny: '0',
+            status: 'RUNNING',
+            startedAt: attemptStartedAt,
+            createdBy: ctx.user.id,
+          },
+        });
+
         try {
           const gen = await generateStoryboard({
             scene: parsedScene,
@@ -812,6 +841,7 @@ export const storyboardRouter = router({
               userId: ctx.user.id,
               projectId: ep.projectId,
               episodeId: ep.id,
+              attemptId: attempt.id,
             },
           });
           totalCost += gen.cost;
@@ -840,10 +870,31 @@ export const storyboardRouter = router({
             });
             createdShotIds.push(created.id);
           }
+
+          const finishedAt = new Date();
+          await ctx.prisma.generationAttempt.update({
+            where: { id: attempt.id },
+            data: {
+              status: gen.warning ? 'FAILED' : 'SUCCESS',
+              errorMsg: gen.warning ?? null,
+              costCny: gen.cost.toFixed(4),
+              finishedAt,
+              durationMs: finishedAt.getTime() - attemptStartedAt.getTime(),
+            },
+          });
         } catch (e) {
-          errors.push(
-            `场 ${dbScene.number}: ${e instanceof Error ? e.message : String(e)}`,
-          );
+          const finishedAt = new Date();
+          const errMsg = e instanceof Error ? e.message : String(e);
+          await ctx.prisma.generationAttempt.update({
+            where: { id: attempt.id },
+            data: {
+              status: 'FAILED',
+              errorMsg: errMsg,
+              finishedAt,
+              durationMs: finishedAt.getTime() - attemptStartedAt.getTime(),
+            },
+          });
+          errors.push(`场 ${dbScene.number}: ${errMsg}`);
         }
       }
 
@@ -950,9 +1001,19 @@ export const storyboardRouter = router({
         });
       }
 
+      // W1-W5 audit P0(D2):只允许从 NOT_STARTED / IN_PROGRESS 发布。
+      // COMPLETED / ARCHIVED 是终态,无脑设 IN_PROGRESS 会 downgrade 丢状态。
+      // GENERATING 已在上面被 isEpisodeLockedNow 拦截。
+      if (ep.status !== 'NOT_STARTED' && ep.status !== 'IN_PROGRESS') {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: `本集状态为 ${ep.status},不能发布(只允许从 NOT_STARTED / IN_PROGRESS 发布)`,
+        });
+      }
+
       const now = new Date();
 
-      // 发布语义:
+      // 发布语义(shot/group 的 status):
       //   - DRAFT → 升级为 PUBLISHED + 戳 publishedAt
       //   - PUBLISHED → 保持 PUBLISHED,publishedAt 戳更新(等于重新触发下游消费者)
       //   - QUEUED/GENERATING/GENERATED/ADOPTED/IN_EDIT/FINAL/FAILED/BUDGET_BLOCKED → 不动
@@ -960,8 +1021,9 @@ export const storyboardRouter = router({
       const REPUBLISHABLE: Array<'DRAFT' | 'PUBLISHED'> = ['DRAFT', 'PUBLISHED'];
 
       const updated = await ctx.prisma.$transaction(async (tx) => {
+        // 事务内 + status 双重 CAS,防 D2 守卫之后另一请求把 ep 改成终态(TOCTOU)
         const e = await tx.episode.update({
-          where: { id: ep.id },
+          where: { id: ep.id, status: { in: ['NOT_STARTED', 'IN_PROGRESS'] } },
           data: {
             publishedAt: now,
             publishedVersion: ep.publishedVersion + 1,

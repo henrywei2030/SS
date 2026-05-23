@@ -17,7 +17,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc",
-    "test": "vitest run --config=/dev/null storyboard generation"
+    "test": "vitest run storyboard generation"
   },
   "dependencies": {
     "@ss/adapters": "workspace:*",
