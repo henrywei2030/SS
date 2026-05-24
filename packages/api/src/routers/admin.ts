@@ -1361,7 +1361,7 @@ const apiUsageRouter = router({
           esc(r.refundReason),
         ].join(','),
       );
-      // BOM 让 Excel / 国产 office 正确识别 UTF-8 中文
+      // BOM(U+FEFF)让 Excel / 国产 office 正确识别 UTF-8 中文 — 显式转义防编辑器吞字符
       const csv = '﻿' + [header, ...lines].join('\r\n');
 
       // 写 OperationLog(导出含敏感成本数据,审计可追溯)

@@ -258,16 +258,23 @@ model MediaItem {
 - `embeddingId` — Phase 2 向量检索"用图搜""用音搜"
 - `parentId` — 多版本衍生（原始 / 降噪 / 混音 / 最终）
 
-### 2.6 `CostLedgerEntry` — 成本账本（不可篡改）
+### 2.6 `CostLedgerEntry` — 成本账本（不可篡改 + Phase 1.5 预扣退还）
 
 ```prisma
+enum LedgerEntryType {
+  NORMAL      // 普通扣费(LLM / image / 不带预扣的 action)
+  PREPAY      // 视频生成 task 创建时预扣
+  REFUND      // 退还(完成时退多扣 / 失败时全退;costCny 为负数)
+  ADJUSTMENT  // 手动调整(admin 校对 / 异常补偿;或 actual>prepaid 罕见补扣)
+}
+
 model CostLedgerEntry {
   id            String     @id
   userId        String
   projectId     String?
   episodeId     String?
   shotId        String?
-  attemptId     String?    @unique
+  attemptId     String?               // Phase 1.5 P0-1:1:1 @unique 改 1:N @@index(允许 PREPAY+REFUND 配对)
 
   providerId    String
   modelId       String
@@ -280,12 +287,27 @@ model CostLedgerEntry {
 
   success       Boolean
 
-  billingCycle  String?    // '2026-05' 月度归集
-  plan          String?    // 'subscription' / 'pay-as-you-go'
+  // Phase 1.5 P0-1(2026-05-24)— 预扣退还机制
+  entryType     LedgerEntryType  @default(NORMAL)
+  refundReason  String?   // 'video_task_overcharge_refund' / 'video_task_failed_full_refund' / 'video_task_enqueue_failed' / 'video_task_precheck_failed' / 'video_task_underestimate_adjustment'
+  parentEntryId String?   // REFUND/ADJUSTMENT 指向 PREPAY,自引用账目链(onDelete: SetNull)
+
+  billingCycle  String?   // '2026-05' 月度归集
+  plan          String?   // 'subscription' / 'pay-as-you-go'
+
+  @@index([attemptId])
+  @@index([entryType])
 }
 ```
 
-**Phase 2 升级**：
+**Phase 1.5 预扣退还机制**(参考 OpenAI 兼容中转站实测):
+- 视频生成 task 创建时同事务写 PREPAY(`provider.estimateCost`)
+- worker 完成时:成功 → REFUND(-(prepaid-actual)) 或 ADJUSTMENT(actual>prepaid 罕见补扣) / 失败 → REFUND(-prepaid) 全退
+- enqueue 失败 / failPlaceholder → REFUND 退还(避免 PREPAY 永久悬挂)
+- REFUND 永远 success=true(退还动作执行成功;task 成败用 GenerationAttempt.status 表达)
+- 守恒:成功 task ledger 净额 = +actual / 失败 task = 0 / SUM(success:true) 自然抵消
+
+**Phase 2 升级**:
 - `billingCycle` 已就位 → 月度账单一行 SQL
 - `plan` 字段支持双轨计费
 
@@ -306,9 +328,13 @@ model ProviderConfig {
   apiKeyUpdatedBy  String?
   apiKeyRef        String?   // env 变量名（fallback）
 
-  // 计费
+  // 计费 — 旧单价模式(向后兼容)
   unitPriceCny  Decimal       @db.Decimal(10, 6)
   unitName      String        // 'second' / 'image' / 'ktoken' / 'request'
+
+  // Phase 1.5 P0-2 — 2 倍率计费(modelRate 非空时优先)
+  modelRate     Decimal?      @db.Decimal(10, 6)   // 基础倍率 / 1M tokens(CNY)
+  outputRate    Decimal?      @db.Decimal(10, 4)   // 输出价 = 输入 × 此倍率(典型 2x-5x)
 
   maxConcurrent Int
   rateLimitRpm  Int
@@ -319,11 +345,17 @@ model ProviderConfig {
 }
 ```
 
-**加密说明**：
+**加密说明**:
 - `apiKeyEnc` 用 `APP_MASTER_KEY` 加密
 - 仅服务端解密
 - `apiKeyMasked` 在 UI 显示后 4 位
 - 切换 `APP_MASTER_KEY` 会导致已加密 key 无法解密 → 后台重新填写
+
+**Phase 1.5 P0-2 计费公式**:
+- `modelRate` 非空时:`cost = inputUnits/1M × modelRate + outputUnits/1M × modelRate × outputRate`
+- 否则 fallback 旧 `outputUnits × unitPriceCny`(向后兼容)
+- `cacheRate` / `groupRate` 推 Phase 2(SaaS 多租户产物,单租户工坊过度)
+- seed.ts 给 3 个 LLM provider 填真倍率:claude-sonnet(22/4.9091)/ haiku(5/1)/ deepseek(1/2)
 
 ### 2.8 `SystemSetting` — 系统级 KV
 

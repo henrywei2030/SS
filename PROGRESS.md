@@ -9,7 +9,21 @@
 
 **完成 — Phase 1.5 代码层 100% ready,真接中转站全链路通**
 
-### 收工后补丁(同日,binding 强制显式选)
+### 收工后补丁 #2(同日,Audit r21 — 深度审查 + 一键启动)
+用户要求"深度检查 10 遍 + 全局检视 + 启动流程优化"。2 个并行 audit agent 跑 Phase 1.5 + 全局文件审查
+
+- ✅ **真 P0 修(P0-A)** — aigc.generateVideo enqueue 失败漏写 REFUND → PREPAY 悬挂(用户被扣任务没跑)。补独立 transaction 写 REFUND + attempt FAILED
+- ✅ **真 P1 修(P1-3)** — worker REFUND 双写 race(BullMQ stalled re-queue)。加 `pg_advisory_xact_lock(hashtext('attempt_refund:' || $1))` 锁同 attempt REFUND 写入
+- ✅ **P1/P2 微优化**:base.ts `as never` → `Prisma.Decimal.Value` 类型安全 / aigc.ts PREPAY 注释更正 / failPlaceholder 字符串拼接简化 / CSV BOM 显式注释 / openai-compat 注释 moyu.info 残留清 / seed `binding.storyboard.prompt.modelId` description 标 "预留 Phase 2"(代码不读)/ .env.example 加 `SS_EVENTBUS_TRACE` 调试开关
+- ✅ **一键启动 `pnpm start`**(解决 user pain "3 个终端 + 浏览器手动"):
+  - 新建 `scripts/start.mjs` 跨平台 Node 脚本(Win/Mac/Linux)
+  - 7 步:preflight → docker compose + 等 healthy → migration status → 检测端口占用 → spawn turbo dev → wait :3000 ready → open browser → Ctrl+C 优雅停
+  - flag:`--skip-preflight` / `--skip-infra` / `--no-open` / `--auto-migrate`
+  - 端口被占用(已有 dev 跑)时 graceful 跳过 startDev,直接 open browser 退出 — **已 verify 跑通**
+- ✅ **文档同步**:docs/03-roadmap-and-progress.md 进度速览刷新到 20 收工 + Phase 1.5 ✅ / docs/04-data-model.md CostLedgerEntry 加 LedgerEntryType + 3 新字段 + ProviderConfig 加 modelRate/outputRate / ADR-28 §G(audit r21)
+- ✅ typecheck 15/15 + test 85/85 全过(smoke 19/19 二十收工已跑过,本次未重跑)
+
+### 收工后补丁 #1(同日,binding 强制显式选)
 用户反馈:"测试调试可以,实际用必须后台设置最终用哪一个" — 不该 hardcode 任何 provider 作为默认值
 
 - ✅ seed.ts 7 个 binding.*.{modelId|providerId} 默认值改 `''`(留 `binding.script.docx.parser` = mammoth,这是库不是 provider)

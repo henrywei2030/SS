@@ -77,7 +77,7 @@ export abstract class BaseProvider {
     // costCnyOverride 优先(预扣/退还/调整时用),否则按 2 倍率 / 单价公式算
     const costCny =
       opts.costCnyOverride !== undefined
-        ? new Prisma.Decimal(opts.costCnyOverride as never)
+        ? new Prisma.Decimal(opts.costCnyOverride as Prisma.Decimal.Value)
         : calcCostCnyDecimal({
             inputUnits: opts.inputUnits,
             outputUnits: opts.outputUnits,

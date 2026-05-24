@@ -1126,7 +1126,7 @@ export const aigcRouter = router({
             outputUnits: 0,
             unitPriceCny: '0',
             costCny: prepayEstimateCny.toFixed(4),
-            success: true, // PREPAY 写入即生效;失败时 REFUND 配 success:false 抵消
+            success: true, // PREPAY 永远 success=true(预扣动作成功);task 成败用 attempt.status,后续 REFUND 抵消
             entryType: 'PREPAY',
             billingCycle: new Date().toISOString().slice(0, 7),
           },
@@ -1160,9 +1160,7 @@ export const aigcRouter = router({
               inputUnits: 0,
               outputUnits: 0,
               unitPriceCny: '0',
-              costCny: prepayEstimateCny.toFixed(4) === '0.0000'
-                ? '0'
-                : `-${prepayEstimateCny.toFixed(4)}`,
+              costCny: prepayEstimateCny > 0 ? (-prepayEstimateCny).toFixed(4) : '0',
               // REFUND 永远 success=true(退还动作执行成功);task 成败用 GenerationAttempt.status 表达,
               // 这样 ledger SUM(success:true) 自然把失败 task 的 PREPAY+REFUND 抵成 0
               success: true,
@@ -1475,16 +1473,42 @@ export const aigcRouter = router({
           requestId: ctx.requestId,
         });
       } catch (enqueueErr) {
+        // Audit P0-A 修(2026-05-24 audit r21):enqueue 失败时 attempt 已 RUNNING,
+        // failPlaceholder 的 updateMany(status='QUEUED') 不会命中,必须独立写 REFUND
+        // 否则 PREPAY 永久悬挂 — 用户被扣但任务根本没进队
         const errMsg = enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr);
         const finishedAt = new Date();
-        await ctx.prisma.generationAttempt.update({
-          where: { id: attempt.id },
-          data: {
-            status: 'FAILED',
-            errorMsg: `enqueue failed: ${errMsg}`,
-            finishedAt,
-            durationMs: finishedAt.getTime() - startedAt.getTime(),
-          },
+        await ctx.prisma.$transaction(async (tx) => {
+          await tx.generationAttempt.update({
+            where: { id: attempt.id },
+            data: {
+              status: 'FAILED',
+              errorMsg: `enqueue failed: ${errMsg}`,
+              finishedAt,
+              durationMs: finishedAt.getTime() - startedAt.getTime(),
+            },
+          });
+          // 退还全部 PREPAY(同 failPlaceholder 逻辑,reason 区分入队失败)
+          await tx.costLedgerEntry.create({
+            data: {
+              userId: ctx.user.id,
+              projectId: grp.episode.projectId,
+              episodeId: grp.episodeId,
+              attemptId: attempt.id,
+              providerId,
+              modelId: providerId,
+              action: 'video.generate',
+              inputUnits: 0,
+              outputUnits: 0,
+              unitPriceCny: '0',
+              costCny: prepayEstimateCny > 0 ? (-prepayEstimateCny).toFixed(4) : '0',
+              success: true, // REFUND 永远 success=true(退还动作成功);task 失败用 attempt.status
+              entryType: 'REFUND',
+              refundReason: 'video_task_enqueue_failed',
+              parentEntryId: prepayEntryId,
+              billingCycle: new Date().toISOString().slice(0, 7),
+            },
+          });
         });
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',

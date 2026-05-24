@@ -2,7 +2,7 @@
  * OpenAI-Compatible Text Provider
  *
  * 适配所有 OpenAI Chat Completions 兼容的中转 / 原生站点:
- *   - OpenAI 兼容中转站(OpenRouter / Poe / OneAPI 自部署 / moyu.info 等) — Claude / GPT / Gemini / DeepSeek / 豆包 全系
+ *   - OpenAI 兼容中转站(OpenRouter / Poe / OneAPI 自部署 等)— Claude / GPT / Gemini / DeepSeek / 豆包 全系
  *   - Poe (poe.com/api-docs)
  *   - OpenRouter
  *   - OpenAI 直连

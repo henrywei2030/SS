@@ -478,7 +478,7 @@ async function main() {
       key: 'binding.storyboard.prompt.modelId',
       value: '',
       category: 'model_binding',
-      description: '分镜提示词生成(单镜→视频 prompt 含台词/OS)使用的 LLM modelId(必须 admin 显式选)',
+      description: '【预留 Phase 2】分镜提示词二次优化 LLM(当前 compileShotGroupVideoPrompt 用模板拼接,未调 LLM。Phase 2 加 LLM 优化时启用此 binding)',
     },
     {
       key: 'binding.script.docx.parser',

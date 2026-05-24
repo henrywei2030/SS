@@ -4,7 +4,7 @@
 
 ---
 
-## 📊 当前进度速览(2026-05-24,十一收工后)
+## 📊 当前进度速览(2026-05-24,二十次收工 + Phase 1.5 完整落地后)
 
 | Phase | 状态 | 完成度 |
 |---|---|---|
@@ -12,22 +12,25 @@
 | **W2 应用层**(7 子任务) | ✅ 完成 | 7/7 |
 | **UI 系统升级** | ✅ 完成 | 双主题 + Logo + Cursor 风格 |
 | **W3 分镜工坊** | ✅ 完成 | 100%(W3.0-W3.7 + 3 轮 audit + W3.1.followup 软锁) |
-| **W4 美术工作台** | ✅ 完成 | 100%(W4-MM.0-W4-MM.9 + 6 轮 audit + mock ImageProvider) |
-| **W5 抽卡引擎** | 🚧 90% | W5.0-W5.4 ✅(数据底座 + token 化 + AIGC 工作台 + Seedance Mock 抽卡 + 历史 + 集数总览);W5.5 BullMQ worker / W5.6 素材库 pending |
-| **W6 数据洞察** | ✅ MVP 完成 | insightsRouter 3 procs + KPI/日趋势/kind 分布/模型分布/Top10 group |
-| **W7 后台三件套** | ✅ MVP 完成 | admin/prompts(版本树+回滚)/ admin/styles(create+delete)/ admin/presets(4 类 framing+angle+movement+lighting)/ admin/bindings |
-| **W8 团队实战** | 📋 待启动 | 等 W5.5 真接 Seedance + 配 API Key |
-| **Phase 2** | 📋 待启动 | 数据模型 + 接口 + 15+ hook 字段已预留 |
+| **W4 美术工作台** | ✅ 完成 | 100%(W4-MM.0-W4-MM.9 + 6 轮 audit + Mock ImageProvider) |
+| **W5 抽卡引擎** | ✅ 完成 | 100%(W5.0-W5.6:数据底座 + token 化 + AIGC 工作台 + Seedance Mock 抽卡 + 历史 + 集数总览 + **W5.5 BullMQ 真异步 worker + SSE 进度** + W5.6 Media Vault) |
+| **W6 数据洞察 + Collab** | ✅ 完成 | insightsRouter + KPI/日趋势/分布/Top10 + 成员/集数分配/工作报告 |
+| **W7 后台三件套+** | ✅ 完成 | admin/prompts(版本树+回滚)+ admin/styles + admin/presets + admin/bindings + admin/audit + admin/api-usage(**+ CSV 导出**)+ admin/settings + admin/health + admin/db-explorer + Tauri 桌面骨架 |
+| **Phase 1.5 P0**(2026-05-24) | ✅ 代码 100% | **P0-1** CostLedgerEntry entryType+预扣退还 / **P0-2** ProviderConfig 2 倍率 / **P0-4** CSV 导出 / **P0-5** 中转站 asset:// 引用 / **moyu→relay 全面去特征** / **binding 强制显式选** / 真接中转站 verify(testConnection 14.9s + script.analyze 37s) |
+| **W8 团队实战** | 📋 待启动 | 代码 ready · 等配 binding + 中转站 token + 5 人冷启动会议 |
+| **Phase 2** | 📋 待启动 | 数据模型 + 接口 + 17+ hook 字段已预留(ADR-26 Agent 联动 + ADR-28 Phase 1.5 决议) |
 | **Phase 3** | 🔮 远期 | Schema 字段已预留 |
 
-**整体可升级性评级:A**(详见 `PROGRESS.md` 中 11 次收工 + 11 轮 audit 共 36 项 P0/P1/P2 修复记录)
+**整体可升级性评级:A+**(Phase 1.5 完整落地 + 真接中转站 verify pass)
 
 ### 收工 / audit 累计
 
-- **11 次收工**,29+7 项 P1/P2 audit 全清(ADR-24 8 项护城河外部验证)
-- **18 个 migration apply**(最新 ADR-23 Shot 首尾帧字段预留)
-- **17 ADR 已落定**(ADR-22 Mastra over LangGraph 取代 ADR-01)
-- **110 单测全过零回归**(60 core + 25 api + 14 episode-lock + 11 script-extract)
+- **20 次收工**(含 Phase 1.5 二十次 + 同日 binding 强制显式选补丁)
+- **20 个 migration apply**(最新 `20260524130000_phase15_ledger_prepay_refund_provider_rates`)
+- **28 ADR 已落定**(ADR-28 Phase 1.5 完整决议含 §A-§G,§F = explicit-choice-only,§G = 预留)
+- **85 单测全过零回归**(api 25 + core 60 — episode-lock 14 + script-extract 11 + storyboard/merge 8 + auto-match 9 + storyboard/video 43 + asset/compile-prompt 等)
+- **typecheck 15/15 + W8 smoke 19/19 + 真接中转站 verify**
+- ~110 轮 audit(含 r21 — Phase 1.5 Audit A/B 深审)
 
 ---
 

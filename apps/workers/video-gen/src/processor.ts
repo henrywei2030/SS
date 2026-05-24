@@ -188,6 +188,12 @@ export async function processVideoGenJob(
             durationMs: finishedAt.getTime() - startedAt.getTime(),
           },
         });
+        // Audit P1-3(2026-05-24 r21):advisory_xact_lock 防 BullMQ stalled re-queue race
+        // 两个 worker 同时 process 同 attempt 时各自 findFirst → null → create 双 REFUND
+        await tx.$executeRawUnsafe(
+          `SELECT pg_advisory_xact_lock(hashtext('attempt_refund:' || $1)::bigint)`,
+          attemptId,
+        );
         // idempotent:retry 时若已写过 REFUND,跳过
         const existingRefund = await tx.costLedgerEntry.findFirst({
           where: { attemptId, entryType: 'REFUND' },
@@ -300,9 +306,14 @@ export async function processVideoGenJob(
         durationMs: finishedAt.getTime() - startedAt.getTime(),
       },
     });
-    // idempotent:retry 时若已写过 REFUND,跳过
+    // Audit P1-3(2026-05-24 r21):advisory_xact_lock 防 BullMQ stalled re-queue race
+    await tx.$executeRawUnsafe(
+      `SELECT pg_advisory_xact_lock(hashtext('attempt_refund:' || $1)::bigint)`,
+      attemptId,
+    );
+    // idempotent:retry 时若已写过 REFUND / ADJUSTMENT,跳过
     const existingRefund = await tx.costLedgerEntry.findFirst({
-      where: { attemptId, entryType: 'REFUND' },
+      where: { attemptId, entryType: { in: ['REFUND', 'ADJUSTMENT'] } },
       select: { id: true },
     });
     if (!existingRefund) {
