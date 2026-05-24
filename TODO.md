@@ -1,6 +1,6 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-05-24(十四收工 · W5.5 BullMQ 异步 + W5.5.1 扩展 + W7 后台 4 页 + 14 项 audit + ADR-25/26)
+> 最后更新:2026-05-24(十五收工 · W6 Collab Hub 三波 + W5.6 Media Vault MVP + 6 UX 反馈 + 5 audit + DateTime polish)
 > 仓库:https://github.com/henrywei2030/SS
 
 ---
@@ -37,7 +37,12 @@
 - [x] **W5.5** BullMQ video-gen worker(异步队列 + SSE 进度 + providerJobId 轮询)— 完整交付,Mock 全链路跑通,14 项 audit 修(十四收工 · 2026-05-24)
 - [x] **W5.5.1** 扩展参数 + 高级选项 UI(resolution/audio/watermark/webSearch/refVideo/refAudio + 'auto' aspectRatio,对照即梦/可灵 UI)— 十四收工
 - [x] **W7 后台轻量四页**(audit/api-usage/settings/health)— adminRouter 加 3 sub-router + 4 页 UI — 十四收工
-- [ ] **W5.6** 素材库(Media Vault)— /media 上传 / 搜索 / 收藏 / 批量,Phase 2 / W6+
+- [x] **W6 Collab Hub 三波**(成员/集数分配/工作报告)— /admin/users + /projects/[id]/team + /admin/reports + 13 procedure + 自锁防御 — 十五收工
+- [x] **W5.6 Media Vault MVP**(/library)— mediaRouter 5 procedure + 上传/搜索/收藏/删/4 tabs + AIGC 自动沉淀 — 十五收工
+- [x] **W5.5 第 3 轮 audit 5 项**(十五收工)— 双 worker cutoff 30min / SSE 空 media 兜底 / insights 公式 / SSE token 自动续期 / MediaItem partial unique migration
+- [x] **6 项 UX 反馈修复**(十五收工)— nav team 入口 / scripts redirect / director home 合并
+- [x] **DateTime locale polish**(十五收工)— 11 处 toLocaleString('zh-CN') → 浏览器 default
+- [ ] **W5.6 进阶**(留 Phase 2)— 音频波形(wavesurfer.js)/ AI 自动打标(BPM/时长)/ pgvector 向量搜索
 
 - [ ] **跨设备协作工作流验证**(多端)
   - [x] 家里 Mac Studio `git pull` + 登录同一 Project + 说 `开工,在 mac-studio` 验证接续 — 2026-05-23

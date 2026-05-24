@@ -5,7 +5,8 @@
     "aigc": "AIGC",
     "edit": "剪辑",
     "library": "素材库",
-    "analytics": "数据监控"
+    "analytics": "数据监控",
+    "team": "团队"
   },
   "missionControl": {
     "title": "项目首页",

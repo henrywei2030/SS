@@ -15,6 +15,7 @@ import {
   LogOut,
   Shield,
   User,
+  Users,
   Search,
 } from 'lucide-react';
 
@@ -34,7 +35,7 @@ import { LogoMark } from '@/components/brand/logo';
 import { cn } from '@/lib/utils';
 
 interface NavItem {
-  key: 'director' | 'art' | 'aigc' | 'edit' | 'library' | 'analytics';
+  key: 'director' | 'art' | 'aigc' | 'edit' | 'library' | 'analytics' | 'team';
   href: (locale: string, projectId: string) => string;
   icon: React.ComponentType<{ className?: string }>;
 }
@@ -46,6 +47,8 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'edit', href: (l, p) => `/${l}/projects/${p}/edit`, icon: Scissors },
   { key: 'library', href: (l, p) => `/${l}/library`, icon: Library },
   { key: 'analytics', href: (l, p) => `/${l}/projects/${p}/analytics`, icon: BarChart3 },
+  // W6 波 2 反馈 F1+F5:加 team nav 入口,让用户能找到成员管理 + 集数分配
+  { key: 'team', href: (l, p) => `/${l}/projects/${p}/team`, icon: Users },
 ];
 
 export function TopNav({

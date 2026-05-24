@@ -1,5 +1,9 @@
 /**
  * Project Router — Mission Control 后端
+ *
+ * W6 Collab Hub(2026-05-24):扩展 listMembers / addMember / removeMember /
+ * updateMemberRole / searchAddableUsers / listAssignments / assignUserToEpisode /
+ * unassignUser 8 个 procedure,加 assertProjectAdmin helper。
  */
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
@@ -11,6 +15,47 @@ import {
 
 import { router, protectedProcedure } from '../trpc.js';
 import { logOperation } from '../middleware/audit.js';
+import type { Context } from '../context.js';
+
+// ===========================================================================
+// W6 Collab Hub:权限 helper
+//
+// 校验当前用户对项目有"管理"权限 — owner / member.role=ADMIN / 全局 admin
+// 任何 member CRUD / episode assignment 必须先调,统一权限语义
+// ===========================================================================
+async function assertProjectAdmin(
+  ctx: Context,
+  projectId: string,
+): Promise<{ id: string; ownerId: string; name: string }> {
+  if (!ctx.user) throw new TRPCError({ code: 'UNAUTHORIZED' });
+  const project = await ctx.prisma.project.findFirst({
+    where: { id: projectId, deletedAt: null },
+    select: { id: true, ownerId: true, name: true },
+  });
+  if (!project) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: '项目不存在' });
+  }
+  if (project.ownerId === ctx.user.id || ctx.user.isAdmin) return project;
+  const member = await ctx.prisma.projectMember.findUnique({
+    where: { projectId_userId: { projectId, userId: ctx.user.id } },
+  });
+  if (member?.role === 'ADMIN') return project;
+  throw new TRPCError({
+    code: 'FORBIDDEN',
+    message: '需要项目所有者 / ADMIN 权限',
+  });
+}
+
+const MODULE_ENUM = z.enum([
+  'director',
+  'art',
+  'aigc',
+  'edit',
+  'library',
+  'analytics',
+]);
+const MEMBER_ROLE_ENUM = z.enum(['ADMIN', 'LEADER', 'MEMBER', 'VIEWER']);
+const ASSIGN_ROLE_ENUM = z.enum(['OWNER', 'COLLAB', 'REVIEWER']);
 
 export const projectRouter = router({
   /** 列表 — 当前用户可见的所有项目 */
@@ -233,5 +278,398 @@ export const projectRouter = router({
       // 资产/剧本的深克隆放 Phase 2 — 当前仅复制元信息
       await logOperation(ctx, 'project.clone', 'project', cloned.id, src, cloned);
       return cloned;
+    }),
+
+  // =========================================================================
+  // W6 Collab Hub:成员管理(7 procedure)
+  // =========================================================================
+
+  /** 列项目成员(含 owner) — 任何项目成员可查 */
+  listMembers: protectedProcedure
+    .input(z.object({ projectId: z.string().cuid() }))
+    .query(async ({ ctx, input }) => {
+      const project = await ctx.prisma.project.findFirst({
+        where: {
+          id: input.projectId,
+          deletedAt: null,
+          OR: [
+            { ownerId: ctx.user.id },
+            { members: { some: { userId: ctx.user.id } } },
+          ],
+        },
+        include: {
+          owner: {
+            select: {
+              id: true,
+              displayName: true,
+              email: true,
+              avatarUrl: true,
+              status: true,
+            },
+          },
+          members: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  displayName: true,
+                  email: true,
+                  avatarUrl: true,
+                  status: true,
+                },
+              },
+            },
+            orderBy: [{ role: 'asc' }, { joinedAt: 'asc' }],
+          },
+        },
+      });
+      if (!project) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: '项目不存在或无权访问',
+        });
+      }
+      return {
+        ownerId: project.ownerId,
+        owner: project.owner,
+        members: project.members,
+      };
+    }),
+
+  /** 添加成员 — 必须是已注册激活用户 */
+  addMember: protectedProcedure
+    .input(
+      z.object({
+        projectId: z.string().cuid(),
+        userId: z.string().cuid(),
+        role: MEMBER_ROLE_ENUM,
+        modules: z.array(MODULE_ENUM).default([]),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectAdmin(ctx, input.projectId);
+      const targetUser = await ctx.prisma.user.findFirst({
+        where: { id: input.userId, deletedAt: null, status: 'ACTIVE' },
+        select: { id: true, displayName: true, email: true },
+      });
+      if (!targetUser) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: '用户不存在或已禁用',
+        });
+      }
+      const existing = await ctx.prisma.projectMember.findUnique({
+        where: {
+          projectId_userId: {
+            projectId: input.projectId,
+            userId: input.userId,
+          },
+        },
+      });
+      if (existing) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: `${targetUser.displayName} 已是项目成员`,
+        });
+      }
+      const member = await ctx.prisma.projectMember.create({
+        data: {
+          projectId: input.projectId,
+          userId: input.userId,
+          role: input.role,
+          modules:
+            input.modules.length > 0
+              ? input.modules
+              : ['director', 'art', 'aigc', 'edit', 'library', 'analytics'],
+        },
+      });
+      await logOperation(
+        ctx,
+        'project.member.add',
+        'projectMember',
+        `${input.projectId}/${input.userId}`,
+        null,
+        { ...member, projectId: input.projectId, targetUserName: targetUser.displayName },
+      );
+      return member;
+    }),
+
+  /** 移除成员(不能移除 owner) */
+  removeMember: protectedProcedure
+    .input(z.object({ projectId: z.string().cuid(), userId: z.string().cuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const project = await assertProjectAdmin(ctx, input.projectId);
+      if (input.userId === project.ownerId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '不能移除项目 owner — 请先转移所有权(Phase 2)',
+        });
+      }
+      const before = await ctx.prisma.projectMember.findUnique({
+        where: {
+          projectId_userId: {
+            projectId: input.projectId,
+            userId: input.userId,
+          },
+        },
+        include: { user: { select: { displayName: true } } },
+      });
+      if (!before) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '成员不存在' });
+      }
+      await ctx.prisma.projectMember.delete({
+        where: {
+          projectId_userId: {
+            projectId: input.projectId,
+            userId: input.userId,
+          },
+        },
+      });
+      await logOperation(
+        ctx,
+        'project.member.remove',
+        'projectMember',
+        `${input.projectId}/${input.userId}`,
+        before,
+        { projectId: input.projectId },
+      );
+      return { success: true };
+    }),
+
+  /** 更新成员 role(owner role 不可改) */
+  updateMemberRole: protectedProcedure
+    .input(
+      z.object({
+        projectId: z.string().cuid(),
+        userId: z.string().cuid(),
+        role: MEMBER_ROLE_ENUM,
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const project = await assertProjectAdmin(ctx, input.projectId);
+      if (input.userId === project.ownerId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Owner 角色不可改(转移所有权 Phase 2)',
+        });
+      }
+      const before = await ctx.prisma.projectMember.findUnique({
+        where: {
+          projectId_userId: {
+            projectId: input.projectId,
+            userId: input.userId,
+          },
+        },
+      });
+      if (!before) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '成员不存在' });
+      }
+      const updated = await ctx.prisma.projectMember.update({
+        where: {
+          projectId_userId: {
+            projectId: input.projectId,
+            userId: input.userId,
+          },
+        },
+        data: { role: input.role },
+      });
+      await logOperation(
+        ctx,
+        'project.member.updateRole',
+        'projectMember',
+        `${input.projectId}/${input.userId}`,
+        before,
+        { ...updated, projectId: input.projectId },
+      );
+      return updated;
+    }),
+
+  /** 搜索可邀请的用户(已是成员的排除) */
+  searchAddableUsers: protectedProcedure
+    .input(z.object({ projectId: z.string().cuid(), q: z.string().max(100) }))
+    .query(async ({ ctx, input }) => {
+      await assertProjectAdmin(ctx, input.projectId);
+      const q = input.q.trim();
+      if (q.length < 1) return [];
+      const project = await ctx.prisma.project.findUnique({
+        where: { id: input.projectId },
+        select: { ownerId: true },
+      });
+      const existingMemberIds = await ctx.prisma.projectMember.findMany({
+        where: { projectId: input.projectId },
+        select: { userId: true },
+      });
+      const excludeIds = [
+        ...existingMemberIds.map((m) => m.userId),
+        ...(project ? [project.ownerId] : []),
+      ];
+      const users = await ctx.prisma.user.findMany({
+        where: {
+          deletedAt: null,
+          status: 'ACTIVE',
+          id: { notIn: excludeIds },
+          OR: [
+            { email: { contains: q, mode: 'insensitive' } },
+            { username: { contains: q, mode: 'insensitive' } },
+            { displayName: { contains: q, mode: 'insensitive' } },
+          ],
+        },
+        take: 20,
+        select: {
+          id: true,
+          displayName: true,
+          email: true,
+          username: true,
+          avatarUrl: true,
+        },
+        orderBy: [{ displayName: 'asc' }],
+      });
+      return users;
+    }),
+
+  // =========================================================================
+  // W6 Collab Hub:集数分配(3 procedure)
+  // =========================================================================
+
+  /** 列项目所有集 + 各集的 EpisodeAssignment */
+  listAssignments: protectedProcedure
+    .input(z.object({ projectId: z.string().cuid() }))
+    .query(async ({ ctx, input }) => {
+      const project = await ctx.prisma.project.findFirst({
+        where: {
+          id: input.projectId,
+          deletedAt: null,
+          OR: [
+            { ownerId: ctx.user.id },
+            { members: { some: { userId: ctx.user.id } } },
+          ],
+        },
+        select: { id: true },
+      });
+      if (!project) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: '项目不存在或无权访问',
+        });
+      }
+      const episodes = await ctx.prisma.episode.findMany({
+        where: { projectId: input.projectId, deletedAt: null },
+        orderBy: { number: 'asc' },
+        include: {
+          assignments: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  displayName: true,
+                  email: true,
+                  avatarUrl: true,
+                },
+              },
+            },
+            orderBy: [{ role: 'asc' }, { assignedAt: 'asc' }],
+          },
+          _count: {
+            select: { shotGroups: { where: { deletedAt: null } } },
+          },
+        },
+      });
+      return episodes.map((e) => ({
+        id: e.id,
+        number: e.number,
+        title: e.title,
+        status: e.status,
+        totalGroups: e._count.shotGroups,
+        assignments: e.assignments,
+      }));
+    }),
+
+  /** 分配集到用户(必须是项目成员或 owner) */
+  assignUserToEpisode: protectedProcedure
+    .input(
+      z.object({
+        episodeId: z.string().cuid(),
+        userId: z.string().cuid(),
+        role: ASSIGN_ROLE_ENUM,
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const ep = await ctx.prisma.episode.findFirst({
+        where: { id: input.episodeId, deletedAt: null },
+        include: { project: { select: { id: true, ownerId: true } } },
+      });
+      if (!ep) throw new TRPCError({ code: 'NOT_FOUND', message: '集不存在' });
+      await assertProjectAdmin(ctx, ep.projectId);
+      const isProjectOwner = ep.project.ownerId === input.userId;
+      if (!isProjectOwner) {
+        const isMember = await ctx.prisma.projectMember.findUnique({
+          where: {
+            projectId_userId: {
+              projectId: ep.projectId,
+              userId: input.userId,
+            },
+          },
+        });
+        if (!isMember) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: '只能分配给项目成员 — 请先在团队页添加成员',
+          });
+        }
+      }
+      const existing = await ctx.prisma.episodeAssignment.findUnique({
+        where: {
+          episodeId_userId_role: {
+            episodeId: input.episodeId,
+            userId: input.userId,
+            role: input.role,
+          },
+        },
+      });
+      if (existing) {
+        return { ...existing, alreadyExisted: true };
+      }
+      const assignment = await ctx.prisma.episodeAssignment.create({
+        data: {
+          episodeId: input.episodeId,
+          userId: input.userId,
+          role: input.role,
+        },
+      });
+      await logOperation(
+        ctx,
+        'episode.assign',
+        'episodeAssignment',
+        assignment.id,
+        null,
+        { ...assignment, projectId: ep.projectId },
+      );
+      return { ...assignment, alreadyExisted: false };
+    }),
+
+  /** 取消分配 */
+  unassignUser: protectedProcedure
+    .input(z.object({ assignmentId: z.string().cuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const before = await ctx.prisma.episodeAssignment.findUnique({
+        where: { id: input.assignmentId },
+        include: { episode: { select: { projectId: true } } },
+      });
+      if (!before) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '分配不存在' });
+      }
+      await assertProjectAdmin(ctx, before.episode.projectId);
+      await ctx.prisma.episodeAssignment.delete({
+        where: { id: input.assignmentId },
+      });
+      await logOperation(
+        ctx,
+        'episode.unassign',
+        'episodeAssignment',
+        input.assignmentId,
+        before,
+        { projectId: before.episode.projectId },
+      );
+      return { success: true };
     }),
 });

@@ -1296,7 +1296,7 @@ function VideoPreviewSection({
                 )}
               </div>
               <div>
-                {new Date(selectedTake.createdAt).toLocaleString('zh-CN')}
+                {new Date(selectedTake.createdAt).toLocaleString()}
                 {selectedTake.durationMs &&
                   ` · 耗时 ${Math.round(selectedTake.durationMs / 100) / 10}s`}
                 {' · '}
@@ -1345,7 +1345,7 @@ function VideoPreviewSection({
                       {t.rejected && ' · 废片'}
                     </div>
                     <div className="truncate text-[10px] text-[hsl(var(--color-muted-foreground))]">
-                      {new Date(t.createdAt).toLocaleTimeString('zh-CN')}
+                      {new Date(t.createdAt).toLocaleTimeString()}
                       {' · '}
                       {Number(t.costCny ?? 0).toFixed(2)}¥
                       {t.errorMsg && ` · ${t.errorMsg.slice(0, 30)}`}

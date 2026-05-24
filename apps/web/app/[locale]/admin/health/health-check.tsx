@@ -118,7 +118,7 @@ export function HealthCheck(): React.ReactElement {
 
       {dataUpdatedAt > 0 && (
         <div className="mt-3 text-right text-[10px] text-[hsl(var(--color-muted-foreground))]">
-          上次检查:{new Date(dataUpdatedAt).toLocaleString('zh-CN')}
+          上次检查:{new Date(dataUpdatedAt).toLocaleString()}
         </div>
       )}
     </div>

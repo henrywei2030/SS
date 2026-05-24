@@ -185,7 +185,13 @@ export const insightsRouter = router({
         successCount,
         failedCount,
         runningCount,
-        successRate: totalAttempts > 0 ? successCount / totalAttempts : 0,
+        // 第 2 轮 audit P1-1:W5.5 异步化后 RUNNING attempt 可能停留秒-分钟级,
+        // 用 success/total 会把 inflight 一并算进分母,让 successRate 在高峰期被人为拉低。
+        // 改 success/(success+failed) — RUNNING 单独看 runningCount 字段。
+        successRate:
+          successCount + failedCount > 0
+            ? successCount / (successCount + failedCount)
+            : 0,
         activeDays: activeDays.size,
         costByKind: Object.fromEntries(
           (Object.keys(costByKindDec) as CostKind[]).map((k) => [

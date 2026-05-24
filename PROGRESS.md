@@ -5,6 +5,65 @@
 
 ---
 
+## 2026-05-24(周日,win-laptop · 十五次收工)— W6 Collab Hub 三波 + W5.6 Media Vault + 11 项 UX/audit/polish
+
+**完成 — W6 三波完整交付 + W5.6 素材库 MVP + 6 UX 反馈 + 5 audit + DateTime polish**
+
+### W6 Collab Hub 三波完整交付
+- ✅ **波 1 /admin/users 全局用户管理**:adminRouter.user(list/setStatus/setAdmin/stats)+ KPI 4 卡 + 用户表 + 自锁防御(不能 SUSPEND 自己 / 不能取消自己 admin / 至少保留 1 活跃 admin)
+- ✅ **波 2 /projects/[id]/team 项目成员 + 集数分配**:projectRouter 加 8 procedure(listMembers / addMember / removeMember / updateMemberRole / searchAddableUsers / listAssignments / assignUserToEpisode / unassignUser)+ `assertProjectAdmin` helper 统一权限校验 + 完整 UI(成员表 inline role 改 + 集分配看板 grid + 添加成员/分配 dialog)
+- ✅ **波 3 /admin/reports 工作报告**:reportsRouter.memberStats 跨 4 数据源聚合(GenerationAttempt + CostLedger + OperationLog + EpisodeAssignment)+ KPI + 成员明细表(项目/集分配/操作数/抽卡 success/failed/inflight + 成功率 + 成本 + 上次登录)
+
+### W5.6 Media Vault MVP
+- ✅ **mediaRouter 5 procedures**:list(分页 + 4 视图 + kind filter + filename/tag 搜索)/ upload(base64 → MinIO + MediaItem,100MB 上限,scope 权限校验)/ toggleFavorite / softDelete(需 project admin / owner / global admin)/ getSignedUrl(私有 media 临时签名 URL)
+- ✅ **/library 页**:4 tabs(全部 / 收藏 / 项目内 / 公共库)+ 搜索 + kind filter + 网格 4-6 列卡片 + AIGC 角标(紫色 Sparkles)+ 收藏 toggle + 删除
+- ✅ **AIGC 生成物自动沉淀**:复用 W5.5 已有的 `source='AIGC'` MediaItem 写入,list 自动包含,**无需额外接入**
+
+### 6 项 UX 反馈修复(用户实测)
+- ✅ **F1+F5 nav 加 team 入口**:TopNav 第 7 tab(Users 图标,/projects/[id]/team)+ zh-CN/en `workbench.team` 词条
+- ✅ **F2+F3 /director/scripts redirect**:旧 scripts 模块只有文本框 + state 不清空,直接 redirect 到 /director/storyboard(已完整支持 docx/md/txt/rtf/html 文件上传)
+- ✅ **F4 剧本整体显示**:已有 — storyboard/script-pane 用 `<pre whitespace-pre-wrap>` 完整显示 `data.content`
+- ✅ **F6 director home 合并**:删"剧本管理"卡,只剩"分镜工坊 + 剧本分析"两卡,分镜工坊描述强调"含剧本上传+版本管理"
+
+### 第 3 轮 audit 5 项(深度对照同行 + agent 跑 git diff 找 bug)
+- ✅ **P0 双 worker stale 竞态**:cutoff 10→30min(Seedance 慢 + retry 累计可能 > 10min,防 Worker B 启动时误杀 Worker A 正在跑的长 job)
+- ✅ **P0 SSE success 时 MediaItem 已被软删**:2 处兜底分支 `findFirst(deletedAt:null)` + null check → 推 `failed` with `errorMsg: media_deleted_or_missing` 而非空 `videoUrl`
+- ✅ **P1 insights successRate 公式错**:W5.5 异步化后 RUNNING 拉低成功率,改 `success/(success+failed)`,RUNNING 单独看 `runningCount`
+- ✅ **P1 SSE token 自动续期**(L1 提前 Phase 2 → Phase 1):hook `onerror + CLOSED` 时重签 token + 重建 EventSource(MAX 3 次防无限循环)
+- ✅ **P1 MediaItem.sourceRef partial unique**(L2 提前 Phase 2 → Phase 1):新 migration `20260524110000_w5_5_audit_media_source_ref_unique`,WHERE source='AIGC' AND sourceRef IS NOT NULL AND deletedAt IS NULL — schema-level 双保险防 idempotency 失败时真双写
+
+### Polish:DateTime locale 11 处
+- ✅ 批量 `toLocaleString('zh-CN')` → `toLocaleString()`,浏览器自动跟用户 locale(英语用户立刻看英语日期/时间),9 文件
+
+**进行中**
+- 🚧 (W6 + W5.6 + 6 UX + 5 audit + DateTime polish 全部交付,无在途)
+
+**问题 / 待决策**
+- ❓ Phase 1.5 真接 Seedance(配 API Key + 火山合规)— 当前 Mock 全链路已跑通
+- ❓ task #5 剩余 polish(34 处硬编码颜色 / a11y / listBindings N+1)留 W7 收尾 / Phase 2
+- ❓ task #6 W7 收尾(Tauri 桌面端 + EN 文案 review + DB Explorer)
+- ❓ task #7 README + CHANGELOG
+
+**下次接着做**
+- 📌 task #6 W7 收尾(Tauri + EN + DB Explorer)
+- 📌 task #7 README + CHANGELOG
+- 📌 **重要**:跑 W5.5 第 3 轮 audit migration `pnpm db:migrate:deploy`(应用 MediaItem partial unique)
+- 📌 跨设备验证 V2 协议(切 mac 后续)
+- 📌 配 API Key 真接 Seedance 进入 W8 团队实战
+
+**质量**
+- 15 包 typecheck 全过(本次新增 mediaRouter + W6 三波 router 扩展)
+- 零 schema 改(MediaItem partial unique 是索引,不动列)
+- W6 三波 + W5.6 完整交付,无功能性回归
+
+**累计**
+- 15 次收工 audit 累计:**~75 项**(14 收工累计 55 + 本次 5 audit + 11 polish + 6 UX = 22 项)
+- 19 ADR / 19 migration(本次新 media partial unique)
+- 14 monorepo workspace 包(本次未新增,@ss/queue + @ss/worker-video-gen 是十四收工)
+- W6 + W5.6 全部交付,**W1-W6 路线图完成**,剩余 W7 收尾 + W8 实战
+
+---
+
 ## 2026-05-24(周日,win-laptop · 十四次收工)— W5.5 BullMQ 异步 + W7 后台 4 页 + 14 项 audit + ADR-25/26
 
 **完成 — W5.5 全栈异步 + W7 后台 + 同行调研 + ADR 升级**

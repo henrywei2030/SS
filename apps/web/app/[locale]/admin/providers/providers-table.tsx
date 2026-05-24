@@ -136,7 +136,7 @@ export function ProvidersTable(): React.ReactElement {
                       </td>
                       <td className="px-4 py-3 text-xs text-[hsl(var(--color-muted-foreground))]">
                         {p.apiKeyUpdatedAt
-                          ? new Date(p.apiKeyUpdatedAt).toLocaleString('zh-CN')
+                          ? new Date(p.apiKeyUpdatedAt).toLocaleString()
                           : '—'}
                       </td>
                       <td className="px-4 py-3 text-right">

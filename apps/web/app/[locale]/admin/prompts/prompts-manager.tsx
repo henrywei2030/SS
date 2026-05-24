@@ -341,7 +341,7 @@ function HistoryDialog({
                   >
                     <div className="font-mono text-[11px]">{v.versionTag}</div>
                     <div className="mt-0.5 text-[10px] opacity-70">
-                      {new Date(v.createdAt).toLocaleString('zh-CN')}
+                      {new Date(v.createdAt).toLocaleString()}
                     </div>
                     {v.changeLog && (
                       <div className="mt-0.5 truncate text-[10px] opacity-60">{v.changeLog}</div>
@@ -356,7 +356,7 @@ function HistoryDialog({
               <>
                 <div className="flex items-center justify-between border-b border-[hsl(var(--color-border))] p-3">
                   <div className="text-xs text-[hsl(var(--color-muted-foreground))]">
-                    {sel.versionTag} · {new Date(sel.createdAt).toLocaleString('zh-CN')}
+                    {sel.versionTag} · {new Date(sel.createdAt).toLocaleString()}
                   </div>
                   <button
                     onClick={() => setRestoreConfirm({ id: sel.id, tag: sel.versionTag })}

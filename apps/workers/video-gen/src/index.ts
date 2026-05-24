@@ -23,15 +23,16 @@ async function bootstrap(): Promise<void> {
 
   startHealthServer({ workerId });
 
-  // P0-2(langfuse audit)+ audit 修 P1-1:worker 启动时扫 stale RUNNING attempt
+  // P0-2(langfuse) + 第 2 轮 audit P0-1:worker 启动时扫 stale RUNNING attempt
   //   场景:上次 worker 进程被 SIGKILL,attempt 永远卡在 RUNNING 状态(DB 视角)。
-  //   策略:startedAt 10min 前还是 RUNNING 的,认定是孤儿,标 FAILED + reason。
   //
-  //   cutoff = 10min(原 5min):因 worker.ts lockDuration 也是 5min,边界相同时
-  //   慢路径(seedance 真接入可能 6-8min)会被 bootstrap 误杀。10min 给 5min lockDuration
-  //   + 5min grace = 安全余量,但仍能恢复真正崩溃的 job(K8s SIGKILL 后 worker 重启 < 1min)。
+  //   cutoff = 30min(从 10min 进一步放宽,第 2 轮 audit 发现):
+  //     - 防 多 worker 启动时竞态误杀正在跑的真长 job(Seedance 6 次重试 × 60s = 6+ 分钟,
+  //       含 BullMQ exponential backoff 5/10/20/40/80s 还会更长)
+  //     - 30min 是"绝对孤儿"阈值 — 任何视频生成 job 超过 30min 都该认定为崩溃
+  //     - BullMQ 自身 lockDuration 5min 内会续锁,正常 job 不会被 stale 标 FAILED
   try {
-    const staleCutoff = new Date(Date.now() - 10 * 60_000);
+    const staleCutoff = new Date(Date.now() - 30 * 60_000);
     const result = await prisma.generationAttempt.updateMany({
       where: {
         status: 'RUNNING',

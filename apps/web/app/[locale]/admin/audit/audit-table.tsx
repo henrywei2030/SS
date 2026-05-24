@@ -122,7 +122,7 @@ export function AuditTable(): React.ReactElement {
                           )}
                         </td>
                         <td className="px-3 py-2 font-mono text-[10px] text-[hsl(var(--color-muted-foreground))]">
-                          {new Date(l.createdAt).toLocaleString('zh-CN')}
+                          {new Date(l.createdAt).toLocaleString()}
                         </td>
                         <td className="px-3 py-2">{l.actorName}</td>
                         <td className="px-3 py-2 font-mono">{l.action}</td>

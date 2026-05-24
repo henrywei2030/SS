@@ -1113,7 +1113,7 @@ function CandidateInfoDialog({
             <KV label="槽位" value={attempt.candidateForSlot ?? '—'} mono />
             <KV
               label="生成时间"
-              value={new Date(attempt.createdAt).toLocaleString('zh-CN')}
+              value={new Date(attempt.createdAt).toLocaleString()}
             />
             <KV
               label="耗时"

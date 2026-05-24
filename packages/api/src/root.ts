@@ -14,6 +14,7 @@ import { aigcRouter } from './routers/aigc.js';
 import { insightsRouter } from './routers/insights.js';
 import { adminRouter } from './routers/admin.js';
 import { i18nRouter } from './routers/i18n.js';
+import { mediaRouter } from './routers/media.js';
 
 export const appRouter = router({
   auth: authRouter,
@@ -26,6 +27,7 @@ export const appRouter = router({
   insights: insightsRouter,
   admin: adminRouter,
   i18n: i18nRouter,
+  media: mediaRouter,
 });
 
 export type AppRouter = typeof appRouter;
