@@ -1,7 +1,8 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-05-24(十六收工 · W7 收尾全交付 + README/CHANGELOG + Tauri 骨架 + DB Explorer + W1-W7 全完成)
+> 最后更新:2026-05-24(十七收工 · W1-W7 待完成事项详细盘点 + W8 启动 checklist)
 > 仓库:https://github.com/henrywei2030/SS
+> **📖 实战前必读**:[docs/W1-W7-followup.md](docs/W1-W7-followup.md)(完整留尾清单 + 12 步启动 checklist)
 
 ---
 

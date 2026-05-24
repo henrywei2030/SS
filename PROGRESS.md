@@ -5,6 +5,51 @@
 
 ---
 
+## 2026-05-24(周日,win-laptop · 十七次收工)— W1-W7 待完成事项详细盘点 + W8 启动 checklist
+
+**完成 — 实战前的完整留尾清单 + 启动检查清单**
+
+### 新建 `docs/W1-W7-followup.md`(永久参考文档)
+- ✅ **P0 实战阻塞项**(进入 W8 前必修)5 项:跑 audit migration / pnpm install 新依赖 / 配 Claude Key / 配 Seedance Key / 验证真接 Provider 端到端
+- ✅ **Phase 1.5 应做项**(W8 中或紧接着):W4 真 ImageProvider 接入 / W5.5 L3-L7 升级(尤其 L4 cancel 机制 真接 Seedance 必修)/ W4 火山合规 API / Tauri 真编译 / Invitation 邀请流程 UI
+- ✅ **Phase 2 留项**:W3 Y.js+Hocuspocus 协作 / W4 资产关系图谱 / W5.6 进阶(pgvector + 音频波形 + BGM) / 多模型 Race + Auto-Salvage / W7 polish(34 硬编码颜色 + a11y + N+1) / ADR-26 Agent 联动接口落地
+- ✅ **Phase 3 远期**:Wireless Canvas / 3D Gaussian Splatting / Distribution Hub / Plugin SDK / 海外合规网关
+- ✅ **完成度精确盘点表**:W1-W8 的 MVP/Phase 1.5/Phase 2/Phase 3 四级状态对照
+- ✅ **W8 启动 checklist 12 步**(打勾顺序)— 从 git pull 到 5 人冷启动会议
+
+### 关键留尾标记(实战前注意)
+- 🔴 **3 个真 Provider Key 必配**:Claude / Seedance / NanoBanana(后两个可选)
+- 🔴 **migration 必跑**:`pnpm db:migrate:deploy`(应用 MediaItem partial unique)
+- 🔴 **pnpm install 必跑**:本批加 @tauri-apps/cli
+- 🟡 **W5.5 L4 cancel 机制**:真接 Seedance 后必修(单条 60-180s 用户改主意常见)
+- 🟡 **Tauri 真编译**:Phase 1.5,需 Rust toolchain
+- 🟡 **W4 真 ImageProvider**:Phase 1.5,Mock picsum 占位仍可演示
+
+**进行中**
+- 🚧 (W1-W7 MVP 全部完成,无在途;下一步进入 W8 实战准备)
+
+**问题 / 待决策**
+- ❓ Phase 1.5 起点:用户选择"先实战暴露 bug 再 Phase 2 升级" vs "Phase 1.5 全部补完再实战"
+- ❓ Claude API Key / Seedance Key 申请进度(用户自己跑)
+
+**下次接着做**
+- 📌 **执行 W8 启动 checklist 12 步**(详见 docs/W1-W7-followup.md)
+- 📌 配 API Key 后跑一遍完整流程验证真接 Provider
+- 📌 5 人冷启动会议(分配集数 + 角色 + 集分配)
+- 📌 1 集 7 镜头实战 + 收集 P0/P1 bug
+
+**质量**
+- 零代码改动 / 纯文档交付(本次收工)
+- typecheck / build 状态不变(沿用十六收工 dbcdff7)
+
+**累计**
+- 17 次收工 / **W1-W7 MVP 全部完成 + 实战 checklist 就绪**
+- 19 ADR / 19 migration / ~75 audit / 110+ 单测
+- 11 workspace 包(2 apps + 1 desktop + 1 worker + 7 packages)
+- 全 7 task completed(十六收工)
+
+---
+
 ## 2026-05-24(周日,win-laptop · 十六次收工)— W7 收尾全交付 + 文档体系完整 + 全 7 task 完成
 
 **完成 — W7 收尾(Tauri 骨架 + DB Explorer + EN 校验) + README/CHANGELOG + polish enums**
