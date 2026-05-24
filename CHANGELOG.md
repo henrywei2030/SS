@@ -8,14 +8,57 @@
 ## [Unreleased] · W8 实战准备
 
 ### 计划
+- 用户在 `/admin/bindings` 显式选 5 项核心 binding(Phase 1.5 后 explicit-choice-only)
+- 中转站申请 token + 录入 `/admin/providers` relay-* + 改 apiUrl
+- (可选)中转站后台创建 group → 填 `relay.assets.default_group_id` 启用素材库 asset:// 引用
+- 5 人冷启动会议 + 1 集 7 镜头实战 + 收集 P0/P1 bug
 - Tauri 桌面端真编译(需 Rust toolchain)
 - DB Explorer 编辑模式(当前只读)
-- 配 Claude API Key 真接 → 验证 requestId 真贯通日志
-- 配 Seedance Key → 真出片 → W8 5 人冷启动
 
 ---
 
-## 0.1.0 - 2026-05-24(W1-W7 + 19-20 轮 audit 加固 + W8 实战准备)
+## 0.1.0 - 2026-05-25(21 次收工 — 全局文档刷新)
+
+### 二十一次收工 — Phase 1.5 完整闭环后的文档总成 + 启动流程归档
+- 📝 **README.md** badge 刷新(W7 ✅ + Phase 1.5 ✅ 代码 100%)+ 累计指标更新(28 ADR / 20 migrations / 20+ 收工 / 85 单测 / smoke 19/19)
+- 🚀 **快速启动改写** — 主推 `pnpm start` 一键(替代旧 3 终端),保留分步调试模式
+- 📖 **CLAUDE.md 设备登记/切换流程** 加 `pnpm start` 详细指引 + 7 步流程 + 4 flag 选项 + graceful 跳过端口占用
+- 📝 **CHANGELOG / PROGRESS / TODO** 二十/二十一收工累积条目
+- 🔖 **docs/W1-W7-followup.md** P0 实战阻塞项 5 条标"已完成 / 已迁至 Phase 1.5 plan"
+- 🔖 **docs/integrations/phase-1.5-plan.md** 顶部加完成时间戳 + 验证清单 checkmark
+- 📚 **docs/HOME-SETUP / SETUP-WINDOWS** 加 `pnpm start` callout(底部"日常开工")
+
+---
+
+## 0.1.0 - 2026-05-24(W1-W7 + 19-20 轮 audit 加固 + Phase 1.5 P0 完整 + 真接中转站)
+
+### 二十次收工 + 收工后补丁 #1+#2 — Phase 1.5 P0-1/2/4/5 + moyu→relay 全面去特征化 + binding 强制显式选 + Audit r21 深度审查 + 一键启动 — **ADR-28(7 段 §A-§G)**
+
+**3 个 commit**:`dda9051` (feat phase15) + `8767465` (fix bindings) + `2502d3d` (fix audit-r21)
+
+- 🏗️ **P0-1 CostLedgerEntry 加 entryType + 预扣退还机制**:
+  - 新 enum `LedgerEntryType`(NORMAL / PREPAY / REFUND / ADJUSTMENT)+ refundReason + parentEntryId 自引用链
+  - attemptId 从 1:1 @unique 改 1:N @@index(允许 PREPAY+REFUND 配对)
+  - aigc.generateVideo 创建 attempt 同事务写 PREPAY · failPlaceholder 同时写 REFUND
+  - worker processor 成功路径写 REFUND(prepaid-actual)或 ADJUSTMENT(actual>prepaid)
+  - REFUND 永远 success=true(退还动作执行成功;task 成败用 attempt.status 表达)
+- 💰 **P0-2 ProviderConfig 加 2 倍率**(modelRate / outputRate):
+  - BaseProvider.calcCostCnyDecimal 公共算法 · OpenAICompatTextProvider 优先 2 倍率 · cache/group 推 Phase 2
+  - seed 给 3 LLM relay-* 填真倍率(claude-sonnet 22/4.9091 / haiku 5/1 / deepseek 1/2)
+- 📊 **P0-4 /admin/api-usage CSV 导出**:adminRouter.apiUsage.exportCsv 13 字段 + UTF-8 BOM + OperationLog + Blob 下载
+- 🔗 **P0-5 中转站 asset:// 引用**:RelayAssetProvider(create/get/list/delete)+ mediaRouter.syncToRelay + aigc 优先 asset://(免重传)
+- 🏷️ **moyu → relay 全面去特征化**:providerId × 8 / env(MOYU_API_KEY → RELAY_API_KEY)/ endpointStyle 'moyu'→'relay' / 文件名 / 类名 / 字段名 / SystemSetting key / meta key 全替换;数据字段 apiUrl 清空(admin 必填,不绑定特定中转站);docs 保留中性参考叙述
+- 🚦 **Binding 强制显式选**(补丁 #1):seed 7 binding.*.{modelId|providerId} 默认 `''` + 5 业务 router 空时抛 PRECONDITION_FAILED + 引导 /admin/bindings(测试场景 input.modelId/providerOverride 仍可绕过)— 解决"silent fallback hardcode default"漏洞
+- 🛡️ **Audit r21 深度审查修真 P0 + P1**(补丁 #2):
+  - **真 P0**:aigc.generateVideo enqueue 失败 catch 内漏写 REFUND → PREPAY 永久悬挂(用户被扣任务没跑)→ 补独立 transaction REFUND + attempt FAILED
+  - **真 P1**:worker REFUND 双写 race(BullMQ stalled re-queue)→ 加 `pg_advisory_xact_lock(hashtext('attempt_refund:' || $1))`
+  - P1/P2 微优化:类型安全(`as Prisma.Decimal.Value`)+ 注释更正 + 字符串拼接简化 + CSV BOM 显式注释 + 预留 binding 标注 + .env SS_EVENTBUS_TRACE 文档
+- 🚀 **一键启动 `pnpm start`**:scripts/start.mjs 跨平台(Win/Mac/Linux)— 7 步:preflight → docker compose + 等 healthy → migration status → 检测端口占用 → spawn turbo dev → wait :3000 → open browser → Ctrl+C 优雅停 / 4 flag(skip-preflight / skip-infra / no-open / auto-migrate)/ 端口占用 graceful 跳过 startDev
+- 🌐 **真接中转站 verify**:用户给 1h 临时 token,relay-real-test.mjs 真触发:setApiKey + setActive + testConnection 14.9s + image/video dryRun + W3 script.analyze 37s 真跑 + smoke 19/19
+- 📝 **ADR-28 全 7 段决议**(§A-§G):中转站抽象 / entryType / 2 倍率 / CSV / asset:// / binding 显式 / audit r21 + 一键启动
+- ✅ migration `20260524130000_phase15_ledger_prepay_refund_provider_rates` apply / typecheck 15/15 + test 85/85 + W8 smoke 19/19 / **0 schema breaking**(全 nullable + 1:N 反向自动适配)
+
+### 十八次收工 — 第 19-20 轮 audit 全栈加固(`573a659`)— **ADR-27**
 
 ### 十八次收工 — 第 19-20 轮 audit 全栈加固(`573a659`)— **ADR-27**
 - 🛡️ **60 次 debug 共 7 个 sprint**(Sprint A/A2/B/C/D + R2 F/G/H)

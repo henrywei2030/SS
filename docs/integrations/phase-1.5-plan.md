@@ -1,9 +1,11 @@
-# Phase 1.5 P0 规划 v2.1(主次重审版)
+# Phase 1.5 P0 规划 v2.1(主次重审版)— ✅ **代码层全部已完成(2026-05-24 二十次收工)**
 
-> 日期:2026-05-24
+> 日期:2026-05-24 / 完成确认:2026-05-25 二十一次收工
 > 来源:整合 docs/integrations/moyu-{api,full-docs,pricing,design-notes}.md
 > 替换:docs/W1-W7-followup.md 中"P0 实战阻塞项"章节
-> 状态:Phase 1.5 启动前的最终任务清单
+> 状态:**P0-1 / P0-2 / P0-4 / P0-5 代码 100% + 真接中转站 verify pass(testConnection 14.9s + script.analyze 37s)+ smoke 19/19**
+> **剩 P0-6**(用户操作):1h 测试 token 已用过,需在 `/admin/bindings` 显式选 5 项 binding + `/admin/providers` 录入新中转站 token
+> 关联 ADR-28(§A-§G,7 段决议)+ commits dda9051 / 8767465 / 2502d3d
 >
 > **v2.1 主次重审变更(2026-05-24 十九收工后)**:
 > - 原则:moyu 是参考源不是设计模板,严格分"产品逻辑必需"(主)vs "UI 风格借鉴"(次)

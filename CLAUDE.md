@@ -29,12 +29,35 @@
 | `mac-studio` | 家里 Mac Studio | `~/Project/starsalign-studio` | zsh | 主力机 2 |
 | `win-laptop` | 出差携带 Win 笔记本 | `C:\Projects\starsalign-studio` | PowerShell 7 | 备机 |
 
-**首次接入新设备**:
+**首次接入新设备**(三平台通用 3 步):
+1. `pnpm install` —— 拉所有 workspace 依赖
+2. `pnpm setup:env` —— 自动生成 `.env.local`(JWT_SECRET / APP_MASTER_KEY 等密钥)
+3. `pnpm db:migrate:deploy && pnpm db:seed` —— 首次 DB 初始化(需 Docker 已起,或先跑 `pnpm infra:up`)
+
+详细环境搭建分平台:
 - macOS → [docs/HOME-SETUP.md](docs/HOME-SETUP.md)
 - Windows → [docs/SETUP-WINDOWS.md](docs/SETUP-WINDOWS.md)
-- 三平台通用脚本: `pnpm setup:env`(生成密钥)+ `pnpm preflight`(环境自检)
 
-**每天开工前**(任意设备): `pnpm preflight` 30 秒确认 node / pnpm / docker / git / env 全绿。
+**每天开工 / 切换设备**(任意设备): **`pnpm start` 一键启动**(2026-05-24 二十收工后引入)
+
+自动跑完 7 步:
+1. preflight 自检(Node / pnpm / Docker / .env / git)
+2. `docker compose up -d`(postgres + redis + minio)+ 等容器 healthy
+3. Prisma migration status 检查(未应用时提示)
+4. 检测 :3000 / :9200 端口占用 — 已有 dev 跑则 graceful 跳过 turbo dev,只 open browser
+5. `turbo run dev`(web + worker 并行,stdio inherit 你看到实时日志)
+6. 等 web :3000 ready
+7. **自动打开浏览器** http://localhost:3000 + Ctrl+C 优雅停 turbo dev(docker 保留)
+
+可选 flag:
+- `--skip-preflight` 跳过自检
+- `--skip-infra` Docker 已起时跳过
+- `--no-open` 不自动打开浏览器
+- `--auto-migrate` 检测到未应用 migration 时自动 `db:migrate:deploy`
+
+想分步排查(老办法仍可用):`pnpm preflight` → `pnpm infra:up` → `pnpm dev`(turbo 并行 web + worker)→ 浏览器手动开 :3000
+
+> 注:`pnpm dev` 已经是 turbo 并行启 web + worker,**不需要单独开 worker 终端**。`pnpm worker:dev` 仅在你想单独看 worker 日志或 turbo 没拉起来时用。
 
 ---
 

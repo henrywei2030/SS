@@ -1,20 +1,23 @@
 # W1-W7 待完成事项清单 · Phase 1 完结后的留尾
 
 > **生成日期**:2026-05-24(十七次收工)
+> **更新**:2026-05-25(二十一次收工)— P0 实战阻塞项全部已完成或迁至 [Phase 1.5 plan v2.1](integrations/phase-1.5-plan.md)
 > **背景**:W1-W7 路线图标 "100% 完成",但实际是 **MVP 完成**(核心功能可跑全流程)。本文件列出每个阶段的留尾事项,按**优先级 + 阶段**分类,实战前后参考。
 > **维护**:每次有项落地或新增留尾,在本文件勾选 / 追加。
 
 ---
 
-## 🔴 P0 实战阻塞项(进入 W8 前必修)
+## 🔴 P0 实战阻塞项 ~~进入 W8 前必修~~ ✅ **已全部完成(2026-05-24 二十次收工)** — 详见 [phase-1.5-plan.md v2.1](integrations/phase-1.5-plan.md)
 
-| # | 项 | 所属 | 工作量 | 说明 |
-|---|---|---|---|---|
-| **1** | 跑 W5.5 第 3 轮 audit migration | W5.5 | 1 min | `pnpm db:migrate:deploy` — 应用 MediaItem `sourceRef` partial unique 索引(防 idempotency 失败时双写) |
-| **2** | `pnpm install` 拉 `@tauri-apps/cli` 新依赖 | W7 | 30 sec | 十六收工新加 apps/desktop workspace |
-| **3** | 配 Claude API Key | W2.7 / 实战 | 5 min | `/admin/providers` 设 ClaudeTextProvider Key,W2 Story Compass / W3 storyboard.generate / W4 asset.breakdown 才能真跑 |
-| **4** | 配 Seedance API Key + Volcengine 合规 | W5 / 实战 | 30 min(账号注册 + Key 申请) | `/admin/providers` 设 SeedanceProvider Key,W5.5 异步视频生成才真跑(当前 Mock 兜底) |
-| **5** | 验证 W3+W4+W5 真接 Provider 端到端 | 实战前 | 30 min | 上传剧本 → 分析 → 分镜 → 资产生成 → 抽卡 → SSE 进度 → 视频出来 |
+> 本节已被 phase-1.5-plan.md v2.1 替代 + 用户授权完整跑通(commit `dda9051` / `8767465` / `2502d3d`)。下表仅保留作为历史 audit trail。
+
+| # | 项 | 所属 | 工作量 | 说明 | 状态 |
+|---|---|---|---|---|---|
+| **1** | 跑 W5.5 第 3 轮 audit migration | W5.5 | 1 min | `pnpm db:migrate:deploy` — 应用 MediaItem `sourceRef` partial unique 索引(防 idempotency 失败时双写) | ✅ 完成(二十收工累积 19 → 20 migration) |
+| **2** | `pnpm install` 拉 `@tauri-apps/cli` 新依赖 | W7 | 30 sec | 十六收工新加 apps/desktop workspace | ✅ 完成(已 install) |
+| **3** | 配 Claude API Key | W2.7 / 实战 | 5 min | `/admin/providers` 设 ClaudeTextProvider Key,W2 Story Compass / W3 storyboard.generate / W4 asset.breakdown 才能真跑 | 🔄 **替换为 Phase 1.5 P0-6**(配 1 个中转站 token 覆盖 8 Provider) |
+| **4** | 配 Seedance API Key + Volcengine 合规 | W5 / 实战 | 30 min(账号注册 + Key 申请) | `/admin/providers` 设 SeedanceProvider Key,W5.5 异步视频生成才真跑(当前 Mock 兜底) | 🔄 **替换为 Phase 1.5 P0-6**(同上,中转站 token 覆盖) |
+| **5** | 验证 W3+W4+W5 真接 Provider 端到端 | 实战前 | 30 min | 上传剧本 → 分析 → 分镜 → 资产生成 → 抽卡 → SSE 进度 → 视频出来 | ✅ 完成(二十收工 relay-real-test.mjs 真触发 testConnection 14.9s + W3 script.analyze 37s) |
 
 ---
 

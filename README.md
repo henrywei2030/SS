@@ -4,7 +4,7 @@
 >
 > **垣** = 城墙、屏障。**群星垒垣** — 当剧本、美术、AI、团队这群"星"齐心垒起内容之"垣",万剧自然汇聚。
 
-![Phase 1](https://img.shields.io/badge/Phase%201-W1--W6%20%E2%9C%85-success) ![W7](https://img.shields.io/badge/W7-%E6%94%B6%E5%B0%BE%E4%B8%AD-orange) ![W8](https://img.shields.io/badge/W8-%E5%AE%9E%E6%88%98%E5%BE%85%E5%90%AF-blue) ![License](https://img.shields.io/badge/License-Private-lightgrey)
+![Phase 1](https://img.shields.io/badge/Phase%201-W1--W7%20%E2%9C%85-success) ![Phase 1.5](https://img.shields.io/badge/Phase%201.5-%E4%BB%A3%E7%A0%81%20100%25-success) ![W8](https://img.shields.io/badge/W8-%E5%AE%9E%E6%88%98%E5%BE%85%E5%90%AF-blue) ![License](https://img.shields.io/badge/License-Private-lightgrey)
 
 ---
 
@@ -30,10 +30,11 @@
 | **W4** Asset Forge(7 视角 + L0-L5 maturity + archetypeKey 同人物多变体) | ✅ 完成 | 100% |
 | **W5** Generation Engine(W5.0-W5.4 ✅ + **W5.5 BullMQ 异步** ✅ + **W5.5.1 扩展参数** ✅ + **W5.6 Media Vault** ✅) | ✅ 完成 | 100% |
 | **W6** Insight Cockpit + Collab Hub(数据洞察 + 全局用户管理 + 项目成员/集分配 + 工作报告) | ✅ 完成 | 100% |
-| **W7** 后台 + 国际化 + 打磨(audit/api-usage/settings/health/users/reports/db-explorer + Tauri 骨架 + EN 文案) | 🚧 收尾 | ~85% |
-| **W8** 团队真实使用(配 API Key → 1 集 7 镜头实战) | 📋 待启动 | — |
+| **W7** 后台 + 国际化 + 打磨(audit/api-usage/settings/health/users/reports/db-explorer + Tauri 骨架 + EN 文案) | ✅ 完成 | 100% |
+| **Phase 1.5** P0(预扣退还 / 2 倍率 / CSV 导出 / 中转站 asset:// / binding 强制显式 / 一键启动) | ✅ 代码 100% | 真接中转站 verify pass |
+| **W8** 团队真实使用(配 binding + 中转站 token → 1 集 7 镜头实战) | 📋 待启动 | 代码 ready |
 
-**累计 19 ADR / 19 migrations / 15 次收工 / ~75 项 audit 修复**。
+**累计 28 ADR / 20 migrations / 20+ 次收工 / ~110 轮 audit / typecheck 15/15 + test 85/85 + smoke 19/19**。
 
 ---
 
@@ -50,34 +51,48 @@
 
 ---
 
-## 快速启动
+## 快速启动 ⚡
 
-```powershell
-# 1. 准备环境(首次)
-pnpm install
-pnpm setup:env       # 自动生成 .env.local(JWT_SECRET / APP_MASTER_KEY 等)
-pnpm preflight       # 30s 环境自检(node/pnpm/docker/git/env)
+### 首次准备(任何设备 3 步)
 
-# 2. 起基础设施(PostgreSQL + Redis + MinIO)
-pnpm infra:up
-
-# 3. 初始化数据库
-pnpm db:generate
-pnpm db:migrate:deploy   # 应用 19 个 migration
-pnpm db:seed             # 初始数据(管理员 admin/admin123 + style + provider)
-
-# 4. 启动 3 个进程
-# 终端 1
-pnpm dev                 # Next.js @ :3000
-# 终端 2
-pnpm worker:dev          # BullMQ video-gen worker(W5.5 异步)
-# 终端 3(可选)
-pnpm infra:logs          # 容器日志监控
-
-# 5. 浏览器打开
-# http://localhost:3000/zh-CN
-# 登录 admin/admin123 → 创建项目 → 走全流程
+```bash
+pnpm install                                # 1. 拉依赖
+pnpm setup:env                              # 2. 生成 .env.local 密钥
+pnpm infra:up && pnpm db:migrate:deploy && pnpm db:seed   # 3. 起 Docker + DB 初始化
 ```
+
+### 日常开工 / 切换设备 — 一键启动 🎯
+
+```bash
+pnpm start
+```
+
+`pnpm start` 自动跑完:**preflight 自检 → docker compose 起 + 等 healthy → migration 检查 → turbo dev(web+worker 并行) → 等 :3000 ready → 自动打开浏览器**。Ctrl+C 优雅停 turbo dev(docker 保留)。
+
+可选 flag:
+| Flag | 用途 |
+|---|---|
+| `--skip-preflight` | 跳过 Node/pnpm/Docker 自检 |
+| `--skip-infra` | Docker 已起则跳过 `docker compose up` |
+| `--no-open` | 不自动打开浏览器 |
+| `--auto-migrate` | 检测到未应用 migration 时自动 `db:migrate:deploy` |
+
+**端口已被占用**(已有 dev 在另一终端跑)时:graceful 跳过 turbo dev,直接打开浏览器退出 — 不报错。
+
+### 旧版分步启动(仍可用,用于调试)
+
+```bash
+pnpm preflight       # 环境自检
+pnpm infra:up        # docker(postgres / redis / minio)
+pnpm dev             # turbo 并行 web + worker
+# 浏览器手动开 http://localhost:3000
+```
+
+### 登录信息
+
+- 浏览器:http://localhost:3000/zh-CN
+- 用户名:`admin` / 密码:`admin123!@#`(seed 默认,**生产请用 `scripts/set-admin-password.ts` 改密**)
+- ⚠️ **首次启动后必做**:去 `/zh-CN/admin/bindings` 显式选 5 项核心 binding 才能业务跑(Phase 1.5 二十收工后 explicit-choice-only 设计)
 
 详细环境搭建:
 - macOS:[docs/HOME-SETUP.md](docs/HOME-SETUP.md)
@@ -91,10 +106,10 @@ pnpm infra:logs          # 容器日志监控
 |---|---|
 | **前端** | Next.js 15 + React 19 + Tailwind v4(双主题 Cursor 风)+ next-intl(zh/en) |
 | **API** | tRPC v11 + Zod(13 router + ~150 procedure) |
-| **DB** | PostgreSQL 16 + Prisma 5(24 表 + 19 migration) |
-| **队列** | BullMQ 5 + ioredis(W5.5 video-gen 异步 worker)|
+| **DB** | PostgreSQL 16 + Prisma 6(24 表 + **20 migration** + Phase 1.5 LedgerEntryType enum + 预扣退还 + 2 倍率) |
+| **队列** | BullMQ 5 + ioredis(W5.5 video-gen 异步 worker + advisory_xact_lock 防 retry 双写)|
 | **存储** | MinIO(本地)+ S3 兼容(Phase 2 切 R2/OSS) |
-| **AI Provider** | Mock 全链路(picsum / w3.org 样片)+ Claude/Seedance 真接入预留 |
+| **AI Provider** | **真接 OpenAI 兼容中转站**(verify 跑通)+ Claude/Seedance 直连预留 + Mock 全链路兜底 |
 | **桌面** | Tauri 2(apps/desktop 骨架就绪,W7 收尾后真编译) |
 | **Monorepo** | pnpm workspace + Turborepo(2 apps + 7 packages + 1 worker 进程) |
 
@@ -127,7 +142,7 @@ pnpm infra:logs          # 容器日志监控
 
 ## 关键决策记录(ADR)
 
-19 条核心 ADR,涉及:Modular Monolith / Cost Ledger 双写防御 / Mastra over LangGraph / **W5.5 BullMQ 异步化** / **Agent 联动接口预留** / 等。
+28 条核心 ADR,涉及:Modular Monolith / Cost Ledger 双写防御 / Mastra over LangGraph / **W5.5 BullMQ 异步化** / **Agent 联动接口预留** / **ADR-28 Phase 1.5 决议(7 段 §A-§G:moyu→relay 抽象 / entryType 预扣退还 / 2 倍率 / CSV 导出 / 中转站 asset:// / binding 强制显式 / audit r21 修复 + 一键启动)** / 等。
 
 详见 [docs/05-tech-decisions.md](docs/05-tech-decisions.md)。
 

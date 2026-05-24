@@ -1,9 +1,10 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-05-24(**二十收工 · Phase 1.5 代码层 100% + 真接中转站 verify 通过**)
+> 最后更新:2026-05-25(**二十一收工 · Phase 1.5 完整闭环 + 文档全局总成 + 一键启动 ready**)
 > 仓库:https://github.com/henrywei2030/SS
-> **📖 实战前必读**:[docs/W1-W7-followup.md](docs/W1-W7-followup.md)(完整留尾清单 + 12 步启动 checklist)
-> **📖 Phase 1.5 规划**:[docs/integrations/phase-1.5-plan.md](docs/integrations/phase-1.5-plan.md) v2.1 主次重审版(5 项 P0 全完成)
+> **🚀 一键启动**:`pnpm start`(详见 [README.md](README.md#快速启动) / [CLAUDE.md](CLAUDE.md#设备登记))
+> **📖 实战前必读**:[docs/W1-W7-followup.md](docs/W1-W7-followup.md)(P0 已完成,留 Phase 1.5/2/3 续做项)
+> **📖 Phase 1.5 完整决议**:[docs/05-tech-decisions.md ADR-28](docs/05-tech-decisions.md) 7 段(§A-§G)
 
 ---
 
@@ -53,6 +54,7 @@
 - [x] **Phase 1.5 代码层 100% + moyu→relay 全面去特征化 + 真接入 verify**(二十收工)— Phase 1.5 主次重审 v2.1(6→5 P0 压简)/ P0-1 entryType+预扣退还(schema+migration+aigc.generateVideo+worker processor+failPlaceholder)/ P0-2 2 倍率(BaseProvider.calcCostCnyDecimal+OpenAICompatTextProvider 优先 modelRate+seed)/ P0-4 CSV 导出 13 字段(adminRouter.apiUsage.exportCsv+UTF-8 BOM+OperationLog)/ P0-5 RelayAssetProvider + mediaRouter.syncToRelay + aigc 优先 asset:// / moyu→relay 全代码层去特征(providerId×8+env+endpointStyle+文件名+类名+字段+SystemSetting key+meta key)/ DB seed 重建 15 provider + 26 setting / **真接中转站 verify(testConnection 14.9s + script.analyze 37s 真跑)+ smoke 19/19 + typecheck 15/15 + test 85/85** — 2026-05-24
 - [x] **Binding 强制显式选(收工后补丁 #1)**— 用户反馈"测试调试可以,实际用必须后台设置"/ seed.ts 7 binding 默认值改 ''(留 docx.parser) / 5 业务 router fallback 改空时抛 PRECONDITION_FAILED + 引导 /admin/bindings / DB SQL UPDATE 修 8 行 / ADR-28 §F 落地 explicit-choice-only 原则 / smoke 19/19 保持过 — 2026-05-24
 - [x] **Audit r21 深度审查 + 一键启动 pnpm start(收工后补丁 #2)**— 用户要求"深度检查 10 遍 + 全局检视 + 启动流程优化"/ 2 并行 audit agent / 修真 P0(aigc enqueue 失败 PREPAY 悬挂)+ 真 P1(worker REFUND 双写 race 用 advisory_xact_lock)+ 5 项 P1/P2 微优化 / 新建 `scripts/start.mjs` 跨平台一键启动(preflight + docker + migration + 检测端口 + turbo dev + wait + open browser + Ctrl+C 优雅停,verify 跑通)/ docs/03 + docs/04 更新 Phase 1.5 字段 / ADR-28 §G 落地 / typecheck 15/15 + test 85/85 — 2026-05-24
+- [x] **文档全局总成 + 一键启动写进设备切换流程**(二十一收工)— README badge/累计/快速启动主推 pnpm start / CLAUDE.md 设备登记 + 切换设备流程加 7 步 + 4 flag + graceful 说明 / CHANGELOG 加 0.1.0 二十/二十一收工完整段 / W1-W7-followup P0 标"已完成 / 替换 Phase 1.5" / phase-1.5-plan 顶部完成戳 + verify checkmark / 0 代码改动 / 6 文档刷新 — 2026-05-25
 - [ ] **W5.6 进阶**(留 Phase 2)— 音频波形(wavesurfer.js)/ AI 自动打标(BPM/时长)/ pgvector 向量搜索
 - [ ] **Polish 剩余**(留 Phase 2)— 34 处硬编码颜色 / a11y / listBindings N+1 / OperationLog 命名规范
 - [ ] **W8 团队实战**(下次启动)— 5 人冷启动 + 配 API Key 真接 Seedance + 1 集 7 镜头

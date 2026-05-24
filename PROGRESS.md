@@ -5,6 +5,49 @@
 
 ---
 
+## 2026-05-25(周一,win-laptop · 二十一次收工)— Phase 1.5 完整闭环后的全局文档总成 + 启动流程归档
+
+**完成 — 文档全面刷新 + 一键启动写进设备切换流程**
+
+### 文档全局更新(0 代码改动 · 6 文档刷新)
+- ✅ **README.md** — badge 改 W7 ✅ + Phase 1.5 ✅ / 累计指标 19 → 28 ADR / 19 → 20 migrations / 15 → 20+ 收工 / 加 typecheck 15/15 + test 85/85 + smoke 19/19
+- ✅ **README.md 快速启动改写** — 主推 `pnpm start` 一键启动(替代旧 3 终端)+ 保留分步调试模式 + 加 4 flag 表 + 端口占用 graceful 说明 + admin/bindings 强制配置提醒
+- ✅ **CLAUDE.md 设备登记 / 切换设备流程** — 加 `pnpm start` 详细 7 步流程 + 4 flag + graceful 跳过 + 注释"pnpm dev 已 turbo 并行,不需单独 worker 终端"
+- ✅ **CHANGELOG.md** — 加 0.1.0 2026-05-25 二十一收工条目 + 2026-05-24 二十收工 + 补丁 #1 + #2 (Phase 1.5 + binding + audit r21) 完整段
+- ✅ **docs/W1-W7-followup.md** — P0 实战阻塞项 5 条标"已完成 / 替换为 Phase 1.5 P0-6",加 历史 audit trail 注释
+- ✅ **docs/integrations/phase-1.5-plan.md** — 顶部加完成时间戳 + verify checkmark + 关联 ADR-28 §A-§G + 3 commits
+
+### 启动流程总结(写进 CLAUDE.md 切换设备提醒)
+| 阶段 | 命令 | 时机 |
+|---|---|---|
+| **首次接入新设备** | `pnpm install` → `pnpm setup:env` → `pnpm db:migrate:deploy && pnpm db:seed` | 1 次 |
+| **每天开工 / 切换设备** | **`pnpm start`**(一键,7 步自动) | 每天 |
+| 分步调试 | `pnpm preflight` → `pnpm infra:up` → `pnpm dev` | 偶尔 |
+| 收工 | 说"收工",Claude Code 自动 TODO/PROGRESS + commit + push | 每天 |
+
+**进行中**
+- 🚧 (无在途,Phase 1.5 代码 100% + 文档总成 100%)
+
+**问题 / 待决策**
+- ❓ W8 实战时机(用户决定):配 binding + 中转站 token + 5 人冷启动会议
+- ❓ Phase 2 启动:ADR-26 Agent 联动落地(Mastra 编排)+ ADR-22 / ADR-28 §G 留尾
+
+**下次接着做**
+- 📌 **W8 实战 checklist**:用户去 /admin/bindings 显式配 5 项 binding → /admin/providers 录入新中转站 token + 改 apiUrl → relay-real-test 验证 → 1 集 7 镜头实战
+- 📌 或者启动 Phase 2:ADR-26 hook 落地 + ADR-28 §G 留尾(cacheRate / groupRate / maskSecret polish / asset group auto-create / token 模型白名单)
+
+**质量**
+- 6 文档刷新(README / CHANGELOG / CLAUDE / W1-W7-followup / phase-1.5-plan / PROGRESS+TODO)+ 0 代码改动
+- 0 schema / 0 typecheck / 0 test 影响
+- 文档 ↔ 代码完全对齐(audit B 0 stale 警告)
+
+**累计**
+- **21 次收工 / 60+ debug / Phase 1.5 代码层 100% / 真接中转站 verify pass / 一键启动 ready**
+- 28 ADR / 20 migration / ~110 audit / 85 单测 / smoke 19/19 / typecheck 15/15
+- 11 workspace 包 / 1 跨平台 start script
+
+---
+
 ## 2026-05-24(周日,win-laptop · 二十次收工)— Phase 1.5 P0 完整落地 + moyu→relay 全面去特征化 + 真接入 verify 19/19
 
 **完成 — Phase 1.5 代码层 100% ready,真接中转站全链路通**

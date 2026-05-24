@@ -189,20 +189,35 @@ Phase 1 阶段 Provider API Key **暂不需要**在每台设备录入。理由:
 
 ---
 
-## 🌅 每天的"开工"流程（首次完成后）
+## 🌅 每天的"开工"流程(首次完成后)
+
+**推荐(一键启动)** — 2026-05-25 后引入:
 
 ```bash
 cd ~/Project/starsalign-studio
 git pull                                       # 拉最新代码 + TODO/PROGRESS
-pnpm infra:up                                  # 起 Docker（如未运行）
-corepack pnpm --filter @ss/web dev             # 起 web
+pnpm start                                     # 一键:preflight + docker + migration + turbo dev + 自动开浏览器
 ```
 
-然后在 Code 终端里：
+`pnpm start` 自动跑完 7 步,Ctrl+C 优雅停 turbo dev。详见 [CLAUDE.md 设备登记](../CLAUDE.md#设备登记)。
+
+可选 flag:`--skip-preflight` / `--skip-infra`(docker 已起)/ `--no-open`(不开浏览器)/ `--auto-migrate`(自动跑未应用 migration)。
+
+**旧分步模式**(仍可用,排查问题时):
+
+```bash
+git pull
+pnpm preflight                                 # 环境自检
+pnpm infra:up                                  # 起 Docker
+pnpm dev                                       # turbo 并行 web + worker
+# 浏览器手动开 http://localhost:3000/zh-CN
+```
+
+然后在 Code 终端里:
 
 > **开工**
 
-我会自动：
+我会自动:
 - 读 PROGRESS.md 最新条目 → 找到"下次接着做"
 - 读 TODO.md → 识别进行中
 - 跑 `git status` + `git log -5`
