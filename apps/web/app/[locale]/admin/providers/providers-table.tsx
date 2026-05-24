@@ -3,10 +3,13 @@ import { useTranslations } from 'next-intl';
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Eye,
   EyeOff,
   KeyRound,
   Loader2,
+  Plus,
   Sparkles,
   Trash2,
 } from 'lucide-react';
@@ -28,9 +31,9 @@ import {
 } from '@/components/ui/dialog';
 import { formatCny, cn } from '@/lib/utils';
 
-// ----------------------------------------------------------------------------
+// ============================================================================
 // 类型
-// ----------------------------------------------------------------------------
+// ============================================================================
 
 type Provider = {
   providerId: string;
@@ -40,357 +43,401 @@ type Provider = {
   apiUrl: string | null;
   apiKeyMasked: string | null;
   apiKeyConfigured: boolean;
-  apiKeySource: 'db' | 'env' | 'none';
+  apiKeySource: 'db' | 'env' | 'relay' | 'none';
   apiKeyUpdatedAt: Date | null;
   apiKeyUpdatedBy: string | null;
   unitPriceCny: number;
   unitName: string;
-  // Phase 1.5.1 — backend listProviderConfigs 新加字段
   modelRate: number | null;
   outputRate: number | null;
   defaultModel: string | null;
   source: 'relay' | 'subscription' | 'direct' | 'local' | null;
+  relayProviderId: string | null;
+  relayProviderName: string | null;
+  relayProviderDisplayName: string | null;
 };
 
-const KIND_ORDER_RELAY = ['TEXT', 'IMAGE', 'VIDEO', 'AUDIO', 'COMPLIANCE'] as const;
-const KIND_ORDER_DIRECT: Record<string, number> = {
-  VIDEO: 1,
-  IMAGE: 2,
-  TEXT: 3,
-  COMPLIANCE: 4,
-  AUDIO: 5,
-  EMBEDDING: 6,
+type RelayProvider = {
+  id: string;
+  name: string;
+  displayName: string;
+  apiUrl: string | null;
+  catalogKey: string | null;
+  apiKeyMasked: string | null;
+  apiKeyUpdatedAt: Date | null;
+  apiKeyUpdatedBy: string | null;
+  apiKeyConfigured: boolean;
+  isActive: boolean;
+  notes: string | null;
+  attachedProviderCount: number;
+  attachedActiveCount: number;
+  createdAt: Date;
+  updatedAt: Date;
 };
 
-const KIND_META: Record<
-  string,
-  { emoji: string; label: string; subtitle: string }
-> = {
-  TEXT: { emoji: '💬', label: 'LLM 文本模型', subtitle: '剧本分析 / 分镜生成 / 资产拆解' },
-  IMAGE: { emoji: '🎨', label: '图像模型', subtitle: '资产首图 / 三视图 / 全景' },
-  VIDEO: { emoji: '🎬', label: '视频模型', subtitle: 'AIGC 抽卡' },
-  AUDIO: { emoji: '🎵', label: '音频模型', subtitle: 'TTS / 配乐' },
-  COMPLIANCE: { emoji: '🛡️', label: '合规模型', subtitle: '人物合规 / 内容审核' },
-  EMBEDDING: { emoji: '🧠', label: 'Embedding 模型', subtitle: '向量检索 / 语义匹配' },
+type CatalogModel = {
+  modelId: string;
+  providerIdSuffix: string;
+  displayName: string;
+  vendor: string;
+  description: string;
+  modelRate?: number;
+  outputRate?: number;
+  unitPriceCny?: number;
+  unitName?: string;
+  group?: string;
+  protocol?: string;
+  endpointStyle?: string;
+  isDefault: boolean;
 };
 
-// ----------------------------------------------------------------------------
+type Catalog = {
+  name: string;
+  displayName: string;
+  defaultApiUrl: string;
+  totalModels: number;
+  defaultCount: number;
+  candidateCount: number;
+  models: Partial<Record<string, CatalogModel[]>>;
+};
+
+const KIND_ORDER = ['TEXT', 'IMAGE', 'VIDEO', 'AUDIO', 'COMPLIANCE'] as const;
+const KIND_META: Record<string, { emoji: string; label: string }> = {
+  TEXT: { emoji: '💬', label: 'LLM 文本模型' },
+  IMAGE: { emoji: '🎨', label: '图像模型' },
+  VIDEO: { emoji: '🎬', label: '视频模型' },
+  AUDIO: { emoji: '🎵', label: '音频模型' },
+  COMPLIANCE: { emoji: '🛡️', label: '合规模型' },
+  EMBEDDING: { emoji: '🧠', label: 'Embedding' },
+};
+
+// ============================================================================
 // 主组件
-// ----------------------------------------------------------------------------
+// ============================================================================
 
 export function ProvidersTable(): React.ReactElement {
-  const t = useTranslations();
-  const { data: providers, isLoading, refetch: refetchProviders } =
+  const { data: providers, refetch: refetchProviders } =
     trpc.admin.provider.list.useQuery();
-  const { data: credential, refetch: refetchCredential } =
-    trpc.admin.relay.getCredential.useQuery();
-
-  const { relayByKind, directProviders } = React.useMemo(() => {
-    if (!providers) return { relayByKind: {}, directProviders: [] };
-    const relay: Record<string, Provider[]> = {};
-    const direct: Provider[] = [];
-    for (const p of providers) {
-      if (p.providerId.startsWith('relay-')) {
-        (relay[p.kind] ??= []).push(p);
-      } else {
-        direct.push(p);
-      }
-    }
-    // 排序 relay 每组按 providerId
-    for (const k of Object.keys(relay)) {
-      relay[k]!.sort((a, b) => a.providerId.localeCompare(b.providerId));
-    }
-    // 直连按 kind 优先级
-    direct.sort(
-      (a, b) =>
-        (KIND_ORDER_DIRECT[a.kind] ?? 99) - (KIND_ORDER_DIRECT[b.kind] ?? 99) ||
-        a.providerId.localeCompare(b.providerId),
-    );
-    return { relayByKind: relay, directProviders: direct };
-  }, [providers]);
-
-  if (isLoading) {
-    return <Card className="h-96 animate-pulse" />;
-  }
+  const { data: relays, refetch: refetchRelays } =
+    trpc.admin.relay.list.useQuery();
+  const { data: catalogs } = trpc.admin.catalog.list.useQuery();
 
   const onAnyChange = (): void => {
     void refetchProviders();
-    void refetchCredential();
+    void refetchRelays();
   };
+
+  // 按 kind 分类所有 provider(中转站 + 直连一起)
+  const providersByKind = React.useMemo(() => {
+    if (!providers) return {} as Record<string, Provider[]>;
+    const map: Record<string, Provider[]> = {};
+    for (const p of providers) {
+      (map[p.kind] ??= []).push(p as Provider);
+    }
+    for (const k of Object.keys(map)) {
+      map[k]!.sort((a, b) => {
+        // 中转站在前,直连在后
+        const aRelay = a.relayProviderId !== null ? 0 : 1;
+        const bRelay = b.relayProviderId !== null ? 0 : 1;
+        if (aRelay !== bRelay) return aRelay - bRelay;
+        return a.providerId.localeCompare(b.providerId);
+      });
+    }
+    return map;
+  }, [providers]);
+
+  if (!providers || !relays || !catalogs) {
+    return <Card className="h-96 animate-pulse" />;
+  }
 
   return (
     <div className="space-y-8">
-      {/* 1. 中转站凭证(顶部) */}
-      <RelayCredentialSection
-        credential={credential ?? null}
+      {/* 1. 中转站凭证列表(顶部) */}
+      <RelayCredentialsSection
+        relays={relays as RelayProvider[]}
+        catalogs={catalogs as Catalog[]}
         onChange={onAnyChange}
-        t={t}
       />
 
-      {/* 2. 中转站模型(按 kind 分类) */}
-      <RelayModelsSection
-        relayByKind={relayByKind}
-        hasCredential={credential?.hasCredential ?? false}
+      {/* 2. 模型按 kind 分类(中转站精选 + 候选下拉 + 直连内嵌) */}
+      <ModelsSection
+        providersByKind={providersByKind}
+        relays={relays as RelayProvider[]}
+        catalogs={catalogs as Catalog[]}
         onChange={onAnyChange}
-        t={t}
-      />
-
-      {/* 3. 直连 Provider(高亮) */}
-      <DirectProvidersSection
-        providers={directProviders}
-        onChange={onAnyChange}
-        t={t}
       />
     </div>
   );
 }
 
-// ----------------------------------------------------------------------------
-// Section 1: 中转站凭证
-// ----------------------------------------------------------------------------
+// ============================================================================
+// Section 1: 中转站凭证列表
+// ============================================================================
 
-type Credential = {
-  apiUrl: string;
-  apiKeyMasked: string | null;
-  apiKeyUpdatedAt: Date | null;
-  apiKeyUpdatedBy: string | null;
-  hasCredential: boolean;
-  attachedProviderCount: number;
-  inconsistent: boolean;
-};
-
-function RelayCredentialSection({
-  credential,
+function RelayCredentialsSection({
+  relays,
+  catalogs,
   onChange,
-  t: _t,
 }: {
-  credential: Credential | null;
+  relays: RelayProvider[];
+  catalogs: Catalog[];
   onChange: () => void;
-  t: ReturnType<typeof useTranslations>;
 }): React.ReactElement {
-  const [apiUrl, setApiUrl] = React.useState('');
-  const [apiKey, setApiKey] = React.useState('');
-  const [showKey, setShowKey] = React.useState(false);
-
-  React.useEffect(() => {
-    if (credential?.apiUrl && apiUrl === '') setApiUrl(credential.apiUrl);
-  }, [credential?.apiUrl, apiUrl]);
-
-  const setCred = trpc.admin.relay.setCredential.useMutation({
-    onSuccess: () => {
-      setApiKey('');
-      onChange();
-    },
-  });
-  const clearCred = trpc.admin.relay.clearCredential.useMutation({
-    onSuccess: () => {
-      setApiKey('');
-      onChange();
-    },
-  });
-
-  const canSubmit = apiUrl.length > 0 && apiKey.length >= 8 && !setCred.isPending;
-
+  const [showAdd, setShowAdd] = React.useState(false);
   return (
     <section>
-      <div className="mb-3 flex items-center gap-2">
-        <span className="text-base">📦</span>
-        <h2 className="text-base font-semibold">中转站凭证 · Relay Credential</h2>
-        <span className="text-xs text-[hsl(var(--color-muted-foreground))]">
-          一个 token 共享所有 relay-* 模型
-        </span>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-base">📦</span>
+          <h2 className="text-base font-semibold">中转站凭证 · Relay Credentials</h2>
+          <span className="text-xs text-[hsl(var(--color-muted-foreground))]">
+            每个凭证 = 1 token 共享多模型 · 当前 {relays.length} 个
+          </span>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => setShowAdd(true)} className="gap-1.5">
+          <Plus className="size-4" />
+          添加中转站
+        </Button>
       </div>
 
-      <Card className="p-4">
-        {/* 当前状态 */}
-        <div className="mb-4 grid gap-2 sm:grid-cols-3">
-          <StatBlock
-            label="状态"
-            value={
-              credential?.hasCredential ? (
-                <Badge variant="success" className="gap-1">
-                  <CheckCircle2 className="size-3" /> 已配
-                </Badge>
-              ) : (
-                <Badge variant="destructive">未配 · 所有 relay-* 模型无法启用</Badge>
-              )
-            }
-          />
-          <StatBlock
-            label="共享给"
-            value={
-              <span className="font-mono text-sm">
-                {credential?.attachedProviderCount ?? 0} 个 relay-* 模型
-              </span>
-            }
-          />
-          <StatBlock
-            label="上次更新"
-            value={
-              <span className="text-xs text-[hsl(var(--color-muted-foreground))]">
-                {credential?.apiKeyUpdatedAt
-                  ? new Date(credential.apiKeyUpdatedAt).toLocaleString()
-                  : '—'}
-              </span>
-            }
-          />
-        </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        {relays.map((r) => (
+          <RelayCard key={r.id} relay={r} onChange={onChange} />
+        ))}
+      </div>
 
-        {credential?.inconsistent && (
-          <div className="mb-4 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
-            <div>
-              <div className="font-medium text-amber-900 dark:text-amber-200">
-                检测到中转站凭证不一致
-              </div>
-              <div className="mt-0.5 text-amber-800/80 dark:text-amber-300/80">
-                部分 relay-* provider 的 apiUrl / apiKey 跟其他不同(历史 setApiKey 遗留)。
-                重新填下方表单点"批量同步"即可修复 — 会把同 token 同步到所有 8 个 relay-* 模型。
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 当前已配 mask 显示 */}
-        {credential?.hasCredential && (
-          <div className="mb-4 rounded-md bg-[hsl(var(--color-secondary)/0.5)] px-3 py-2 text-sm">
-            <span className="text-xs text-[hsl(var(--color-muted-foreground))]">当前:</span>{' '}
-            <span className="font-mono">{credential.apiUrl}</span>
-            <span className="mx-2 text-[hsl(var(--color-muted-foreground))]">·</span>
-            <span className="font-mono">{credential.apiKeyMasked}</span>
-          </div>
-        )}
-
-        {/* 表单 */}
-        <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
-          <div className="grid gap-1.5">
-            <Label htmlFor="relay-url">Base URL</Label>
-            <Input
-              id="relay-url"
-              value={apiUrl}
-              onChange={(e) => setApiUrl(e.target.value)}
-              placeholder="https://<your-relay-host>/v1"
-              className="font-mono text-xs"
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="relay-key">API Key</Label>
-            <div className="flex gap-1.5">
-              <Input
-                id="relay-key"
-                type={showKey ? 'text' : 'password'}
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-..."
-                className="font-mono"
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                type="button"
-                onClick={() => setShowKey((v) => !v)}
-                className="shrink-0 px-2"
-                aria-label={showKey ? '隐藏' : '显示'}
-              >
-                {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-              </Button>
-            </div>
-          </div>
-          <div className="flex items-end gap-2">
-            <Button
-              onClick={() => setCred.mutate({ apiUrl, apiKey })}
-              disabled={!canSubmit}
-              className="gap-1.5"
-            >
-              {setCred.isPending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <KeyRound className="size-4" />
-              )}
-              批量同步
-            </Button>
-            {credential?.hasCredential && (
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => clearCred.mutate()}
-                disabled={clearCred.isPending}
-                className="gap-1.5"
-              >
-                {clearCred.isPending ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Trash2 className="size-4" />
-                )}
-                清除
-              </Button>
-            )}
-          </div>
-        </div>
-
-        {setCred.error && (
-          <p className="mt-3 rounded-md bg-[hsl(var(--color-destructive)/0.15)] px-3 py-2 text-sm text-[hsl(var(--color-destructive))]">
-            {setCred.error.message}
-          </p>
-        )}
-        {setCred.data && (
-          <p className="mt-3 rounded-md bg-green-500/15 px-3 py-2 text-sm text-green-700 dark:text-green-300">
-            ✓ 批量同步成功 · 已应用到 {setCred.data.affectedCount} 个 relay-* 模型
-          </p>
-        )}
-
-        <p className="mt-3 text-xs text-[hsl(var(--color-muted-foreground))]">
-          适用于任意 OpenAI 兼容中转站(OpenRouter / Poe / OneAPI 自部署 等)。Token 经 AES-256-GCM 加密入库,仅服务端解密。
-        </p>
-      </Card>
+      {showAdd && (
+        <AddRelayDialog
+          catalogs={catalogs}
+          existingNames={relays.map((r) => r.name)}
+          onClose={() => setShowAdd(false)}
+          onSaved={() => {
+            onChange();
+            setShowAdd(false);
+          }}
+        />
+      )}
     </section>
   );
 }
 
-// ----------------------------------------------------------------------------
-// Section 2: 中转站模型(按 kind 分类)
-// ----------------------------------------------------------------------------
-
-function RelayModelsSection({
-  relayByKind,
-  hasCredential,
+function RelayCard({
+  relay,
   onChange,
-  t: _t,
 }: {
-  relayByKind: Record<string, Provider[]>;
-  hasCredential: boolean;
+  relay: RelayProvider;
   onChange: () => void;
-  t: ReturnType<typeof useTranslations>;
 }): React.ReactElement {
-  const totalCount = Object.values(relayByKind).reduce((s, arr) => s + arr.length, 0);
-  const activeCount = Object.values(relayByKind)
-    .flat()
-    .filter((p) => p.isActive).length;
+  const [editingKey, setEditingKey] = React.useState(false);
+  const [editingUrl, setEditingUrl] = React.useState(false);
+  const [newUrl, setNewUrl] = React.useState(relay.apiUrl ?? '');
+  const [newKey, setNewKey] = React.useState('');
+  const [showKey, setShowKey] = React.useState(false);
 
+  const setApiKey = trpc.admin.relay.setApiKey.useMutation({
+    onSuccess: () => {
+      setNewKey('');
+      setEditingKey(false);
+      onChange();
+    },
+  });
+  const clearApiKey = trpc.admin.relay.clearApiKey.useMutation({ onSuccess: onChange });
+  const updateRelay = trpc.admin.relay.update.useMutation({
+    onSuccess: () => {
+      setEditingUrl(false);
+      onChange();
+    },
+  });
+  const deleteRelay = trpc.admin.relay.delete.useMutation({ onSuccess: onChange });
+
+  const toggleActive = (): void => {
+    updateRelay.mutate({ id: relay.id, isActive: !relay.isActive });
+  };
+
+  return (
+    <Card className={cn('p-4', !relay.isActive && 'opacity-60')}>
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-medium">🏷 {relay.displayName}</span>
+            {relay.isActive ? (
+              <Badge variant="success" className="text-[10px]">已启用</Badge>
+            ) : (
+              <Badge variant="secondary" className="text-[10px]">停用</Badge>
+            )}
+            {relay.catalogKey && (
+              <Badge variant="default" className="text-[10px]">
+                catalog: {relay.catalogKey}
+              </Badge>
+            )}
+          </div>
+          <div className="mt-0.5 font-mono text-xs text-[hsl(var(--color-muted-foreground))]">
+            {relay.name}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <ToggleSwitch checked={relay.isActive} onChange={toggleActive} loading={updateRelay.isPending} />
+          {relay.attachedProviderCount === 0 && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                if (confirm(`删除中转站 "${relay.displayName}"?(没有关联模型,安全)`))
+                  deleteRelay.mutate({ id: relay.id, confirmDelete: true });
+              }}
+              disabled={deleteRelay.isPending}
+              className="size-7 p-0 text-red-600"
+              aria-label="删除"
+            >
+              <Trash2 className="size-3.5" />
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* apiUrl */}
+      <div className="mt-2 text-xs">
+        <span className="text-[hsl(var(--color-muted-foreground))]">URL:</span>{' '}
+        {editingUrl ? (
+          <div className="mt-1 flex gap-1">
+            <Input
+              value={newUrl}
+              onChange={(e) => setNewUrl(e.target.value)}
+              placeholder="https://your-relay/v1"
+              className="h-7 font-mono text-xs"
+            />
+            <Button
+              size="sm"
+              onClick={() => updateRelay.mutate({ id: relay.id, apiUrl: newUrl })}
+              disabled={!newUrl || updateRelay.isPending}
+              className="h-7 px-2"
+            >
+              保存
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditingUrl(false)} className="h-7 px-2">
+              取消
+            </Button>
+          </div>
+        ) : (
+          <span className="cursor-pointer font-mono hover:underline" onClick={() => setEditingUrl(true)}>
+            {relay.apiUrl || <span className="text-red-500">未设置(点击编辑)</span>}
+          </span>
+        )}
+      </div>
+
+      {/* apiKey */}
+      <div className="mt-2 text-xs">
+        <span className="text-[hsl(var(--color-muted-foreground))]">Key:</span>{' '}
+        {editingKey ? (
+          <div className="mt-1 flex gap-1">
+            <div className="flex-1 flex gap-1">
+              <Input
+                type={showKey ? 'text' : 'password'}
+                value={newKey}
+                onChange={(e) => setNewKey(e.target.value)}
+                placeholder="sk-..."
+                className="h-7 font-mono text-xs"
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setShowKey((v) => !v)}
+                className="h-7 px-2"
+                aria-label={showKey ? '隐藏' : '显示'}
+              >
+                {showKey ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
+              </Button>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => setApiKey.mutate({ id: relay.id, apiKey: newKey })}
+              disabled={newKey.length < 8 || setApiKey.isPending}
+              className="h-7 px-2"
+            >
+              保存
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditingKey(false)} className="h-7 px-2">
+              取消
+            </Button>
+          </div>
+        ) : relay.apiKeyConfigured ? (
+          <>
+            <span className="font-mono">{relay.apiKeyMasked}</span>
+            <Button size="sm" variant="ghost" onClick={() => setEditingKey(true)} className="ml-2 h-6 px-2">
+              更换
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                if (confirm('清除 API Key?所有关联模型将无法用'))
+                  clearApiKey.mutate({ id: relay.id });
+              }}
+              className="h-6 px-2 text-red-600"
+              disabled={clearApiKey.isPending}
+            >
+              清除
+            </Button>
+          </>
+        ) : (
+          <>
+            <span className="text-red-500">未配置</span>
+            <Button size="sm" variant="outline" onClick={() => setEditingKey(true)} className="ml-2 h-6 px-2 gap-1">
+              <KeyRound className="size-3" /> 设置
+            </Button>
+          </>
+        )}
+      </div>
+
+      <div className="mt-2 text-xs text-[hsl(var(--color-muted-foreground))]">
+        关联 {relay.attachedProviderCount} 个模型({relay.attachedActiveCount} 启用)
+        {relay.apiKeyUpdatedAt &&
+          ` · ${new Date(relay.apiKeyUpdatedAt).toLocaleString()}`}
+      </div>
+      {setApiKey.error && (
+        <p className="mt-2 text-xs text-red-600">{setApiKey.error.message}</p>
+      )}
+      {updateRelay.error && (
+        <p className="mt-2 text-xs text-red-600">{updateRelay.error.message}</p>
+      )}
+    </Card>
+  );
+}
+
+// ============================================================================
+// Section 2: 模型按 kind 分类(中转站精选 + 候选下拉 + 直连内嵌)
+// ============================================================================
+
+function ModelsSection({
+  providersByKind,
+  relays,
+  catalogs,
+  onChange,
+}: {
+  providersByKind: Record<string, Provider[]>;
+  relays: RelayProvider[];
+  catalogs: Catalog[];
+  onChange: () => void;
+}): React.ReactElement {
   return (
     <section>
       <div className="mb-3 flex items-center gap-2">
         <span className="text-base">🌐</span>
-        <h2 className="text-base font-semibold">中转站模型 · Relay Models</h2>
+        <h2 className="text-base font-semibold">模型列表 · Models</h2>
         <span className="text-xs text-[hsl(var(--color-muted-foreground))]">
-          {activeCount} / {totalCount} 启用 · 启用后才出现在 /admin/bindings 选项
+          按类别分组 · 启用后才出现在 /admin/bindings 候选
         </span>
       </div>
 
-      {!hasCredential && (
-        <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
-          <div className="text-amber-900 dark:text-amber-200">
-            未配中转站凭证 — 启用按钮已禁用,先在上方表单填 Base URL + API Key 批量同步
-          </div>
-        </div>
-      )}
-
       <div className="space-y-4">
-        {KIND_ORDER_RELAY.map((kind) => {
-          const list = relayByKind[kind] ?? [];
-          if (list.length === 0) return null;
-          const meta = KIND_META[kind] ?? { emoji: '🔧', label: kind, subtitle: '' };
+        {KIND_ORDER.map((kind) => {
+          const list = providersByKind[kind] ?? [];
+          const relayList = list.filter((p) => p.relayProviderId !== null);
+          const directList = list.filter((p) => p.relayProviderId === null);
+          const meta = KIND_META[kind] ?? { emoji: '🔧', label: kind };
+          // 如果该类别完全没模型 + 无可加 catalog 也无添加直连 → 跳过显示
+          const hasCatalogModels = catalogs.some((c) => (c.models[kind] ?? []).length > 0);
+          if (list.length === 0 && !hasCatalogModels) return null;
           return (
             <Card key={kind} className="overflow-hidden">
               <div className="border-b border-[hsl(var(--color-border))] bg-[hsl(var(--color-secondary)/0.3)] px-4 py-2">
@@ -398,20 +445,49 @@ function RelayModelsSection({
                   <span>{meta.emoji}</span>
                   <span>{meta.label}</span>
                   <span className="text-xs font-normal text-[hsl(var(--color-muted-foreground))]">
-                    · {meta.subtitle} · {list.length} 个模型
+                    · {list.length} 个 · {list.filter((p) => p.isActive).length} 启用
                   </span>
                 </div>
               </div>
-              <div>
-                {list.map((p) => (
-                  <RelayModelRow
-                    key={p.providerId}
-                    provider={p}
-                    canEnable={hasCredential}
-                    onChange={onChange}
-                  />
-                ))}
-              </div>
+
+              {/* 中转站子区 */}
+              {relayList.length > 0 && (
+                <div className="border-b border-[hsl(var(--color-border)/0.5)]">
+                  {relayList.map((p) => (
+                    <ModelRow key={p.providerId} provider={p} onChange={onChange} />
+                  ))}
+                </div>
+              )}
+
+              {/* 从 catalog 添加中转站模型 */}
+              {hasCatalogModels && relays.length > 0 && (
+                <CatalogAddRow
+                  kind={kind}
+                  relays={relays}
+                  catalogs={catalogs}
+                  existingSuffixes={new Set(
+                    list
+                      .filter((p) => p.relayProviderId !== null)
+                      .map((p) => p.defaultModel || p.providerId),
+                  )}
+                  onChange={onChange}
+                />
+              )}
+
+              {/* 直连子区(amber 高亮) */}
+              {directList.length > 0 && (
+                <div className="border-t-4 border-amber-500/40 bg-amber-500/5">
+                  <div className="px-4 py-1 text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                    ⭐ 直连(独立 API Key)
+                  </div>
+                  {directList.map((p) => (
+                    <ModelRow key={p.providerId} provider={p} onChange={onChange} isDirect />
+                  ))}
+                </div>
+              )}
+
+              {/* 添加直连按钮 */}
+              <AddDirectRow kind={kind} onChange={onChange} />
             </Card>
           );
         })}
@@ -420,25 +496,45 @@ function RelayModelsSection({
   );
 }
 
-function RelayModelRow({
+// ============================================================================
+// 子组件:模型行(中转站 + 直连共用)
+// ============================================================================
+
+function ModelRow({
   provider,
-  canEnable,
   onChange,
+  isDirect = false,
 }: {
   provider: Provider;
-  canEnable: boolean;
   onChange: () => void;
+  isDirect?: boolean;
 }): React.ReactElement {
-  const setActive = trpc.admin.provider.setActive.useMutation({ onSuccess: onChange });
+  const [editingKey, setEditingKey] = React.useState(false);
+  const [newKey, setNewKey] = React.useState('');
+  const [showKey, setShowKey] = React.useState(false);
 
-  // 提取关键计费参数显示
+  const setActive = trpc.admin.provider.setActive.useMutation({ onSuccess: onChange });
+  const setProviderKey = trpc.admin.provider.setApiKey.useMutation({
+    onSuccess: () => {
+      setNewKey('');
+      setEditingKey(false);
+      onChange();
+    },
+  });
+
   const priceLabel = formatModelPrice(provider);
+  const canEnable = provider.apiKeyConfigured;
 
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-[hsl(var(--color-border)/0.4)] px-4 py-3 last:border-b-0 hover:bg-[hsl(var(--color-secondary)/0.2)]">
+    <div className="flex flex-col gap-2 border-b border-[hsl(var(--color-border)/0.4)] px-4 py-3 last:border-b-0 hover:bg-[hsl(var(--color-secondary)/0.2)] sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium">{provider.displayName}</span>
+          {provider.relayProviderDisplayName && (
+            <Badge variant="default" className="text-[10px]">
+              via {provider.relayProviderName}
+            </Badge>
+          )}
         </div>
         <div className="mt-0.5 font-mono text-xs text-[hsl(var(--color-muted-foreground))]">
           {provider.providerId}
@@ -446,8 +542,86 @@ function RelayModelRow({
         <div className="mt-1 text-xs text-[hsl(var(--color-muted-foreground))]">
           {priceLabel}
         </div>
+        {/* 直连显示 apiUrl + apiKey */}
+        {isDirect && (
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+            {provider.apiUrl && (
+              <span className="font-mono text-[hsl(var(--color-muted-foreground))]">
+                {provider.apiUrl}
+              </span>
+            )}
+            {provider.apiKeyConfigured ? (
+              <>
+                <span className="font-mono">{provider.apiKeyMasked}</span>
+                <Badge
+                  variant={provider.apiKeySource === 'db' ? 'default' : 'warning'}
+                  className="text-[10px]"
+                >
+                  {provider.apiKeySource === 'db' ? 'DB' : provider.apiKeySource}
+                </Badge>
+              </>
+            ) : (
+              <Badge variant="destructive" className="text-[10px]">未配 Key</Badge>
+            )}
+          </div>
+        )}
       </div>
-      <div className="flex shrink-0 items-center gap-3">
+
+      <div className="flex shrink-0 items-center gap-2">
+        {isDirect && (
+          <>
+            {editingKey ? (
+              <div className="flex items-center gap-1">
+                <Input
+                  type={showKey ? 'text' : 'password'}
+                  value={newKey}
+                  onChange={(e) => setNewKey(e.target.value)}
+                  placeholder="sk-..."
+                  className="h-7 w-40 font-mono text-xs"
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setShowKey((v) => !v)}
+                  className="h-7 px-2"
+                >
+                  {showKey ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    setProviderKey.mutate({
+                      providerId: provider.providerId,
+                      apiKey: newKey,
+                    })
+                  }
+                  disabled={newKey.length < 8 || setProviderKey.isPending}
+                  className="h-7 px-2"
+                >
+                  保存
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setEditingKey(false)}
+                  className="h-7 px-2"
+                >
+                  取消
+                </Button>
+              </div>
+            ) : (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setEditingKey(true)}
+                className="gap-1 h-7"
+              >
+                <KeyRound className="size-3.5" />
+                {provider.apiKeyConfigured ? '更换' : '设置'}
+              </Button>
+            )}
+          </>
+        )}
         <span
           className={cn(
             'text-xs',
@@ -471,170 +645,583 @@ function RelayModelRow({
   );
 }
 
-// ----------------------------------------------------------------------------
-// Section 3: 直连 Provider(高亮)
-// ----------------------------------------------------------------------------
+// ============================================================================
+// 子组件:从 catalog 添加(下拉 + 选模型 + 关联中转站)
+// ============================================================================
 
-function DirectProvidersSection({
-  providers,
+function CatalogAddRow({
+  kind,
+  relays,
+  catalogs,
+  existingSuffixes,
   onChange,
-  t: _t,
 }: {
-  providers: Provider[];
+  kind: string;
+  relays: RelayProvider[];
+  catalogs: Catalog[];
+  existingSuffixes: Set<string>;
   onChange: () => void;
-  t: ReturnType<typeof useTranslations>;
 }): React.ReactElement {
-  const [editing, setEditing] = React.useState<Provider | null>(null);
-  if (providers.length === 0) return <></>;
-
-  // 直连按 kind 分组
-  const grouped: Record<string, Provider[]> = {};
-  for (const p of providers) {
-    (grouped[p.kind] ??= []).push(p);
-  }
-
-  const activeCount = providers.filter((p) => p.isActive).length;
-
+  const [open, setOpen] = React.useState(false);
   return (
-    <section>
-      <div className="mb-3 flex items-center gap-2">
-        <Sparkles className="size-4 text-amber-500" />
-        <h2 className="text-base font-semibold">直连 Provider · Direct (独立 API Key)</h2>
-        <span className="text-xs text-[hsl(var(--color-muted-foreground))]">
-          {activeCount} / {providers.length} 启用 · 每个独立配置
-        </span>
+    <>
+      <div className="border-b border-[hsl(var(--color-border)/0.5)] px-4 py-2">
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => setOpen(true)}
+          className="gap-1.5 text-xs text-[hsl(var(--color-muted-foreground))]"
+        >
+          <Plus className="size-3.5" />
+          从中转站候选库添加更多 {KIND_META[kind]?.label}
+        </Button>
       </div>
-
-      <div className="space-y-3">
-        {Object.entries(grouped).map(([kind, list]) => {
-          const meta = KIND_META[kind] ?? { emoji: '🔧', label: kind, subtitle: '' };
-          return (
-            <Card
-              key={kind}
-              className="overflow-hidden border-l-4 border-amber-500/70"
-            >
-              <div className="border-b border-[hsl(var(--color-border))] bg-amber-500/5 px-4 py-2">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <span>{meta.emoji}</span>
-                  <span>{meta.label}</span>
-                  <Badge variant="warning" className="text-[10px]">
-                    独立 API Key
-                  </Badge>
-                </div>
-              </div>
-              <div>
-                {list.map((p) => (
-                  <DirectProviderRow
-                    key={p.providerId}
-                    provider={p}
-                    onEditKey={() => setEditing(p)}
-                    onChange={onChange}
-                  />
-                ))}
-              </div>
-            </Card>
-          );
-        })}
-      </div>
-
-      {editing && (
-        <SetApiKeyDialog
-          provider={editing}
-          onClose={() => setEditing(null)}
+      {open && (
+        <CatalogPickerDialog
+          kind={kind}
+          relays={relays}
+          catalogs={catalogs}
+          existingSuffixes={existingSuffixes}
+          onClose={() => setOpen(false)}
           onSaved={() => {
             onChange();
-            setEditing(null);
+            setOpen(false);
           }}
         />
       )}
-    </section>
+    </>
   );
 }
 
-function DirectProviderRow({
-  provider,
-  onEditKey,
-  onChange,
+function CatalogPickerDialog({
+  kind,
+  relays,
+  catalogs,
+  existingSuffixes,
+  onClose,
+  onSaved,
 }: {
-  provider: Provider;
-  onEditKey: () => void;
-  onChange: () => void;
+  kind: string;
+  relays: RelayProvider[];
+  catalogs: Catalog[];
+  existingSuffixes: Set<string>;
+  onClose: () => void;
+  onSaved: () => void;
 }): React.ReactElement {
-  const setActive = trpc.admin.provider.setActive.useMutation({ onSuccess: onChange });
+  const [selectedRelayId, setSelectedRelayId] = React.useState<string>(
+    relays[0]?.id ?? '',
+  );
+  const selectedRelay = relays.find((r) => r.id === selectedRelayId);
+  const catalog = catalogs.find((c) => c.name === selectedRelay?.catalogKey);
+  const models = (catalog?.models[kind] ?? []) as CatalogModel[];
+
+  const createFromCatalog = trpc.admin.provider.createFromCatalog.useMutation({
+    onSuccess: onSaved,
+  });
+
+  const filtered = models.filter((m) => !existingSuffixes.has(m.providerIdSuffix));
 
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-[hsl(var(--color-border)/0.4)] px-4 py-3 last:border-b-0 hover:bg-[hsl(var(--color-secondary)/0.2)]">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="font-medium">{provider.displayName}</span>
-        </div>
-        <div className="mt-0.5 font-mono text-xs text-[hsl(var(--color-muted-foreground))]">
-          {provider.providerId}
-        </div>
-        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-[hsl(var(--color-muted-foreground))]">
-            {formatCny(provider.unitPriceCny)}/{provider.unitName}
-          </span>
-          {provider.apiUrl && (
-            <>
-              <span className="text-[hsl(var(--color-muted-foreground))]">·</span>
-              <span className="font-mono text-[hsl(var(--color-muted-foreground))]">
-                {provider.apiUrl}
-              </span>
-            </>
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>
+            {KIND_META[kind]?.emoji} 从中转站候选库添加 {KIND_META[kind]?.label}
+          </DialogTitle>
+          <DialogDescription>
+            选模型 → 关联到某个中转站凭证 → 自动加入列表(默认停用,需手动启用)
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <div className="grid gap-1.5">
+            <Label>关联中转站凭证</Label>
+            <select
+              value={selectedRelayId}
+              onChange={(e) => setSelectedRelayId(e.target.value)}
+              className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-3 py-1.5 text-sm"
+            >
+              {relays.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.displayName} ({r.name}) {r.catalogKey ? `[catalog: ${r.catalogKey}]` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {!catalog && (
+            <p className="rounded-md bg-amber-500/15 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+              选中的中转站没有 catalog(catalogKey 为 null)— 改用"+ 添加直连"自定义
+            </p>
+          )}
+
+          {catalog && filtered.length === 0 && (
+            <p className="rounded-md bg-[hsl(var(--color-secondary))] px-3 py-2 text-xs text-[hsl(var(--color-muted-foreground))]">
+              该类别下所有 catalog 模型已添加 ✓
+            </p>
+          )}
+
+          {catalog && filtered.length > 0 && (
+            <div className="max-h-96 overflow-y-auto rounded-md border border-[hsl(var(--color-border))]">
+              {filtered.map((m) => (
+                <div
+                  key={m.providerIdSuffix}
+                  className="flex items-center justify-between border-b border-[hsl(var(--color-border)/0.4)] px-3 py-2 last:border-b-0 hover:bg-[hsl(var(--color-secondary)/0.3)]"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{m.displayName}</span>
+                      <Badge variant="default" className="text-[10px]">
+                        {m.vendor}
+                      </Badge>
+                      {m.isDefault && (
+                        <Badge variant="success" className="text-[10px]">
+                          精选
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="mt-0.5 text-xs text-[hsl(var(--color-muted-foreground))]">
+                      {m.description}
+                    </div>
+                    <div className="mt-1 font-mono text-[10px] text-[hsl(var(--color-muted-foreground))]">
+                      {m.modelId} ·{' '}
+                      {m.modelRate != null
+                        ? `¥${m.modelRate}/M · 输出 ${m.outputRate ?? 1}×`
+                        : `¥${m.unitPriceCny ?? 0}/${m.unitName ?? '?'}`}
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      createFromCatalog.mutate({
+                        relayProviderId: selectedRelayId,
+                        catalogKey: catalog.name,
+                        providerIdSuffix: m.providerIdSuffix,
+                      })
+                    }
+                    disabled={createFromCatalog.isPending}
+                    className="gap-1 shrink-0"
+                  >
+                    <Plus className="size-3.5" />
+                    添加
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {createFromCatalog.error && (
+            <p className="rounded-md bg-red-500/15 px-3 py-2 text-xs text-red-700">
+              {createFromCatalog.error.message}
+            </p>
           )}
         </div>
-        <div className="mt-1 flex items-center gap-2 text-xs">
-          {provider.apiKeyConfigured ? (
-            <>
-              <span className="font-mono">{provider.apiKeyMasked ?? '••••'}</span>
-              <Badge
-                variant={provider.apiKeySource === 'db' ? 'default' : 'warning'}
-                className="text-[10px]"
-              >
-                {provider.apiKeySource === 'db' ? 'DB' : 'ENV'}
-              </Badge>
-            </>
-          ) : (
-            <Badge variant="destructive" className="text-[10px]">
-              未配
-            </Badge>
-          )}
-        </div>
-      </div>
-      <div className="flex shrink-0 items-center gap-3">
-        <Button size="sm" variant="ghost" onClick={onEditKey} className="gap-1">
-          <KeyRound className="size-3.5" />
-          {provider.apiKeyConfigured ? '更换' : '设置'}
-        </Button>
-        <div className="flex items-center gap-2">
-          <span
-            className={cn(
-              'text-xs',
-              provider.isActive
-                ? 'font-medium text-green-700 dark:text-green-400'
-                : 'text-[hsl(var(--color-muted-foreground))]',
-            )}
-          >
-            {provider.isActive ? '已启用' : '停用'}
-          </span>
-          <ToggleSwitch
-            checked={provider.isActive}
-            disabled={!provider.apiKeyConfigured && !provider.isActive}
-            loading={setActive.isPending}
-            onChange={(v) =>
-              setActive.mutate({ providerId: provider.providerId, isActive: v })
-            }
-          />
-        </div>
-      </div>
-    </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            完成
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
-// ----------------------------------------------------------------------------
+// ============================================================================
+// 子组件:添加直连 Provider
+// ============================================================================
+
+function AddDirectRow({
+  kind,
+  onChange,
+}: {
+  kind: string;
+  onChange: () => void;
+}): React.ReactElement {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <>
+      <div className="border-t-4 border-amber-500/40 bg-amber-500/5 px-4 py-2">
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => setOpen(true)}
+          className="gap-1.5 text-xs text-amber-700 dark:text-amber-400"
+        >
+          <Sparkles className="size-3.5" />+ 添加直连 {KIND_META[kind]?.label}(独立 API Key)
+        </Button>
+      </div>
+      {open && (
+        <AddDirectDialog
+          kind={kind}
+          onClose={() => setOpen(false)}
+          onSaved={() => {
+            onChange();
+            setOpen(false);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function AddDirectDialog({
+  kind,
+  onClose,
+  onSaved,
+}: {
+  kind: string;
+  onClose: () => void;
+  onSaved: () => void;
+}): React.ReactElement {
+  const [providerId, setProviderId] = React.useState('');
+  const [displayName, setDisplayName] = React.useState('');
+  const [apiUrl, setApiUrl] = React.useState('');
+  const [apiKey, setApiKey] = React.useState('');
+  const [unitPrice, setUnitPrice] = React.useState('0');
+  const [unitName, setUnitName] = React.useState<
+    'second' | 'image' | 'ktoken' | 'request' | 'frame'
+  >('ktoken');
+  const [protocol, setProtocol] = React.useState<
+    'openai-compat' | 'anthropic-native' | 'volcengine-native'
+  >('openai-compat');
+  const [defaultModel, setDefaultModel] = React.useState('');
+  const [showKey, setShowKey] = React.useState(false);
+
+  const create = trpc.admin.provider.create.useMutation();
+  const setKey = trpc.admin.provider.setApiKey.useMutation();
+  const setActive = trpc.admin.provider.setActive.useMutation();
+
+  const handleSave = async (): Promise<void> => {
+    try {
+      await create.mutateAsync({
+        providerId,
+        displayName,
+        kind: kind as 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'COMPLIANCE' | 'EMBEDDING',
+        apiUrl,
+        unitPriceCny: Number(unitPrice),
+        unitName,
+        defaultParams: {
+          protocol,
+          defaultModel: defaultModel || providerId,
+          source: 'direct',
+        },
+      });
+      if (apiKey.length >= 8) {
+        await setKey.mutateAsync({ providerId, apiKey });
+        await setActive.mutateAsync({ providerId, isActive: true });
+      }
+      onSaved();
+    } catch {
+      // create.error 已显示
+    }
+  };
+
+  const canSubmit =
+    providerId.length >= 3 &&
+    displayName.length >= 1 &&
+    apiUrl.length >= 1 &&
+    !create.isPending;
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>⭐ 添加直连 {KIND_META[kind]?.label}</DialogTitle>
+          <DialogDescription>
+            自定义 base URL + API Key,kind={kind},不通过中转站(独立配置)
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-3">
+          <div className="grid gap-1.5">
+            <Label htmlFor="d-pid">providerId</Label>
+            <Input
+              id="d-pid"
+              value={providerId}
+              onChange={(e) => setProviderId(e.target.value.toLowerCase())}
+              placeholder="claude-opus-4-7-direct"
+              className="font-mono text-xs"
+            />
+            <p className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
+              kebab-case · 全局唯一标识
+            </p>
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="d-name">显示名</Label>
+            <Input
+              id="d-name"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="Claude Opus 4.7(Anthropic 直连)"
+            />
+          </div>
+
+          <div className="grid gap-1.5 sm:grid-cols-2">
+            <div className="grid gap-1.5">
+              <Label htmlFor="d-url">Base URL</Label>
+              <Input
+                id="d-url"
+                value={apiUrl}
+                onChange={(e) => setApiUrl(e.target.value)}
+                placeholder="https://api.anthropic.com/v1"
+                className="font-mono text-xs"
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="d-key">API Key</Label>
+              <div className="flex gap-1">
+                <Input
+                  id="d-key"
+                  type={showKey ? 'text' : 'password'}
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="sk-ant-..."
+                  className="font-mono text-xs"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  onClick={() => setShowKey((v) => !v)}
+                  className="shrink-0 px-2"
+                >
+                  {showKey ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-1.5 sm:grid-cols-3">
+            <div className="grid gap-1.5">
+              <Label>协议</Label>
+              <select
+                value={protocol}
+                onChange={(e) => setProtocol(e.target.value as typeof protocol)}
+                className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-2 py-1.5 text-xs"
+              >
+                <option value="openai-compat">openai-compat</option>
+                <option value="anthropic-native">anthropic-native</option>
+                <option value="volcengine-native">volcengine-native</option>
+              </select>
+            </div>
+            <div className="grid gap-1.5">
+              <Label>单价(CNY)</Label>
+              <Input
+                value={unitPrice}
+                onChange={(e) => setUnitPrice(e.target.value)}
+                className="font-mono text-xs"
+                placeholder="0.025"
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label>单位</Label>
+              <select
+                value={unitName}
+                onChange={(e) => setUnitName(e.target.value as typeof unitName)}
+                className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-2 py-1.5 text-xs"
+              >
+                <option value="ktoken">ktoken</option>
+                <option value="image">image</option>
+                <option value="second">second</option>
+                <option value="request">request</option>
+                <option value="frame">frame</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="d-model">defaultModel(可选,空 = 用 providerId)</Label>
+            <Input
+              id="d-model"
+              value={defaultModel}
+              onChange={(e) => setDefaultModel(e.target.value)}
+              placeholder="claude-opus-4-7"
+              className="font-mono text-xs"
+            />
+          </div>
+
+          {create.error && (
+            <p className="rounded-md bg-red-500/15 px-3 py-2 text-xs text-red-700">
+              {create.error.message}
+            </p>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            取消
+          </Button>
+          <Button onClick={handleSave} disabled={!canSubmit}>
+            {create.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Plus className="size-4" />
+            )}
+            创建{apiKey.length >= 8 ? ' + 启用' : ''}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ============================================================================
+// 子组件:添加中转站凭证
+// ============================================================================
+
+function AddRelayDialog({
+  catalogs,
+  existingNames,
+  onClose,
+  onSaved,
+}: {
+  catalogs: Catalog[];
+  existingNames: string[];
+  onClose: () => void;
+  onSaved: () => void;
+}): React.ReactElement {
+  const [name, setName] = React.useState('');
+  const [displayName, setDisplayName] = React.useState('');
+  const [apiUrl, setApiUrl] = React.useState('');
+  const [catalogKey, setCatalogKey] = React.useState('');
+  const [notes, setNotes] = React.useState('');
+
+  const create = trpc.admin.relay.create.useMutation({ onSuccess: onSaved });
+
+  // 选 catalog 后自动填 displayName + apiUrl
+  React.useEffect(() => {
+    if (!catalogKey) return;
+    const c = catalogs.find((x) => x.name === catalogKey);
+    if (!c) return;
+    if (!displayName) setDisplayName(c.displayName);
+    if (!apiUrl) setApiUrl(c.defaultApiUrl);
+    if (!name) setName(catalogKey);
+  }, [catalogKey, catalogs, displayName, apiUrl, name]);
+
+  const canSubmit =
+    name.length >= 2 &&
+    displayName.length >= 1 &&
+    !existingNames.includes(name) &&
+    !create.isPending;
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>📦 添加中转站凭证</DialogTitle>
+          <DialogDescription>
+            添加新中转站后,可从其 catalog 选模型添加到列表 · 同 token 共享多模型
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-3">
+          <div className="grid gap-1.5">
+            <Label>选择 catalog(可选,自动填默认 URL)</Label>
+            <select
+              value={catalogKey}
+              onChange={(e) => setCatalogKey(e.target.value)}
+              className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-3 py-1.5 text-sm"
+            >
+              <option value="">(自定义,无 catalog)</option>
+              {catalogs.map((c) => (
+                <option key={c.name} value={c.name}>
+                  {c.displayName} · {c.totalModels} 模型
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid gap-1.5 sm:grid-cols-2">
+            <div className="grid gap-1.5">
+              <Label htmlFor="r-name">name(唯一标识)</Label>
+              <Input
+                id="r-name"
+                value={name}
+                onChange={(e) => setName(e.target.value.toLowerCase())}
+                placeholder="moyu-prod / poe-personal"
+                className="font-mono text-xs"
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="r-display">显示名</Label>
+              <Input
+                id="r-display"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="主用 moyu / 备用 OpenRouter"
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="r-url">Base URL</Label>
+            <Input
+              id="r-url"
+              value={apiUrl}
+              onChange={(e) => setApiUrl(e.target.value)}
+              placeholder="https://your-relay/v1"
+              className="font-mono text-xs"
+            />
+            <p className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
+              创建后再去卡片上"设置 API Key"(分两步,防误存空 token)
+            </p>
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="r-notes">备注(可选)</Label>
+            <Input
+              id="r-notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="¥10 月限额 / 备用 token / 等"
+            />
+          </div>
+
+          {existingNames.includes(name) && (
+            <p className="text-xs text-red-600">name "{name}" 已存在</p>
+          )}
+          {create.error && (
+            <p className="rounded-md bg-red-500/15 px-3 py-2 text-xs text-red-700">
+              {create.error.message}
+            </p>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            取消
+          </Button>
+          <Button
+            onClick={() =>
+              create.mutate({
+                name,
+                displayName,
+                apiUrl: apiUrl || undefined,
+                catalogKey: catalogKey || undefined,
+                notes: notes || undefined,
+              })
+            }
+            disabled={!canSubmit}
+          >
+            {create.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Plus className="size-4" />
+            )}
+            创建
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ============================================================================
 // 工具组件
-// ----------------------------------------------------------------------------
+// ============================================================================
 
 function ToggleSwitch({
   checked,
@@ -667,33 +1254,13 @@ function ToggleSwitch({
           checked ? 'translate-x-5' : 'translate-x-0.5',
         )}
       >
-        {loading && (
-          <Loader2 className="size-5 animate-spin p-0.5 text-gray-600" />
-        )}
+        {loading && <Loader2 className="size-5 animate-spin p-0.5 text-gray-600" />}
       </span>
     </button>
   );
 }
 
-function StatBlock({
-  label,
-  value,
-}: {
-  label: string;
-  value: React.ReactNode;
-}): React.ReactElement {
-  return (
-    <div className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-3 py-2">
-      <div className="text-[10px] uppercase text-[hsl(var(--color-muted-foreground))]">
-        {label}
-      </div>
-      <div className="mt-1">{value}</div>
-    </div>
-  );
-}
-
 function formatModelPrice(p: Provider): React.ReactNode {
-  // 优先显示中转站 2 倍率(modelRate / outputRate)
   if (p.modelRate != null && p.modelRate > 0) {
     const outputCost = p.modelRate * (p.outputRate ?? 1);
     return (
@@ -707,7 +1274,6 @@ function formatModelPrice(p: Provider): React.ReactNode {
       </span>
     );
   }
-  // 否则显示 unitPriceCny / unitName
   return (
     <span>
       {formatCny(p.unitPriceCny)}/{p.unitName}
@@ -715,119 +1281,8 @@ function formatModelPrice(p: Provider): React.ReactNode {
   );
 }
 
-// ----------------------------------------------------------------------------
-// SetApiKey Dialog(直连 Provider 用,保留原对话框)
-// ----------------------------------------------------------------------------
-
-function SetApiKeyDialog({
-  provider,
-  onClose,
-  onSaved,
-}: {
-  provider: Provider;
-  onClose: () => void;
-  onSaved: () => void;
-}): React.ReactElement {
-  const t = useTranslations();
-  const [value, setValue] = React.useState('');
-  const [showKey, setShowKey] = React.useState(false);
-
-  const setKey = trpc.admin.provider.setApiKey.useMutation({ onSuccess: onSaved });
-  const clearKey = trpc.admin.provider.clearApiKey.useMutation({ onSuccess: onSaved });
-
-  return (
-    <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t('modules.admin.providerKey.setKey')}</DialogTitle>
-          <DialogDescription>
-            <span className="text-[hsl(var(--color-foreground))]">
-              {provider.displayName}
-            </span>
-            <span className="ml-2 font-mono text-xs">{provider.providerId}</span>
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex flex-col gap-4">
-          <div className="grid gap-2">
-            <Label>当前值 / Current</Label>
-            {provider.apiKeyConfigured ? (
-              <code className="block rounded-md bg-[hsl(var(--color-secondary))] px-3 py-2 font-mono text-sm">
-                {provider.apiKeyMasked ?? '••••••••'}
-              </code>
-            ) : (
-              <Badge variant="destructive" className="w-fit">
-                {t('modules.admin.providerKey.notSet')}
-              </Badge>
-            )}
-          </div>
-
-          <div className="grid gap-2">
-            <Label htmlFor="apikey">新的 API Key / New API Key</Label>
-            <div className="flex gap-2">
-              <Input
-                id="apikey"
-                type={showKey ? 'text' : 'password'}
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                placeholder="sk-..."
-                autoFocus
-                className="font-mono"
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                type="button"
-                onClick={() => setShowKey((v) => !v)}
-                className="shrink-0"
-              >
-                {showKey ? '隐藏' : '显示'}
-              </Button>
-            </div>
-            <p className="text-xs text-[hsl(var(--color-muted-foreground))]">
-              ⚠️ 此 Key 将通过 AES-256-GCM 加密存储到数据库,仅在服务端解密使用。
-            </p>
-          </div>
-
-          {setKey.error && (
-            <p className="rounded-md bg-[hsl(var(--color-destructive)/0.15)] px-3 py-2 text-sm text-[hsl(var(--color-destructive))]">
-              {setKey.error.message}
-            </p>
-          )}
-        </div>
-
-        <DialogFooter className="flex justify-between sm:justify-between">
-          {provider.apiKeyConfigured && provider.apiKeySource === 'db' && (
-            <Button
-              variant="destructive"
-              onClick={() => clearKey.mutate({ providerId: provider.providerId })}
-              disabled={clearKey.isPending}
-              className={cn('gap-1.5', 'mr-auto')}
-            >
-              <Trash2 className="size-4" />
-              {t('modules.admin.providerKey.clearKey')}
-            </Button>
-          )}
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={onClose} disabled={setKey.isPending}>
-              {t('actions.cancel')}
-            </Button>
-            <Button
-              onClick={() =>
-                setKey.mutate({ providerId: provider.providerId, apiKey: value })
-              }
-              disabled={!value || value.length < 8 || setKey.isPending}
-            >
-              {setKey.isPending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <KeyRound className="size-4" />
-              )}
-              {t('actions.save')}
-            </Button>
-          </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
+// 防止 unused import 警告(部分组件未用 ChevronRight/Down 但保留)
+void ChevronDown;
+void ChevronRight;
+void AlertTriangle;
+void CheckCircle2;

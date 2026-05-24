@@ -20,13 +20,21 @@ import {
   getTextProvider,
   getImageProvider,
   getVideoProvider,
-  // Phase 1.5.1 中转站凭证统一管理(2026-05-25)
-  getRelayCredentialSummary,
-  setRelayCredential,
-  clearRelayCredential,
+  // Phase 1.5.1 multi-credential RelayProvider 管理(2026-05-25 升级)
+  listRelayProviders,
+  createRelayProvider,
+  updateRelayProvider,
+  setRelayProviderApiKey,
+  clearRelayProviderApiKey,
+  deleteRelayProvider,
 } from '@ss/adapters/provider';
 import { prisma } from '@ss/db';
-import { sanitizeErrorMsg } from '@ss/shared';
+import {
+  sanitizeErrorMsg,
+  listCatalogSummaries,
+  findRelayModel,
+  getRelayModels,
+} from '@ss/shared';
 
 import { router, adminProcedure, rateLimit } from '../trpc.js';
 import { logOperation } from '../middleware/audit.js';
@@ -219,6 +227,103 @@ const providerRouter = router({
       return { success: true };
     }),
 
+  /**
+   * Phase 1.5.1(2026-05-25):从中转站 catalog 选模型 → 创建 ProviderConfig 行
+   *
+   * 输入 catalogKey('moyu' / 'poe' / 'openrouter')+ providerIdSuffix('claude-sonnet-4-5')
+   * 内部 lookup catalog 拿模型元数据 → 创建 ProviderConfig 关联到 RelayProvider
+   * 默认 isActive=false,用户在 UI 显式 toggle 启用
+   */
+  createFromCatalog: adminProcedure
+    .input(
+      z.object({
+        relayProviderId: z.string().cuid(), // 关联到哪个 RelayProvider 行
+        catalogKey: z.string(), // 'moyu' / 'poe' / 'openrouter'
+        providerIdSuffix: z.string(), // 'claude-sonnet-4-5'
+        // 可选:用户改 providerId 前缀(默认 = catalogKey + '-' + providerIdSuffix)
+        providerIdPrefix: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const found = findRelayModel(input.catalogKey, input.providerIdSuffix);
+      if (!found) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: `catalog ${input.catalogKey}/${input.providerIdSuffix} 不存在`,
+        });
+      }
+      const relayCfg = await ctx.prisma.relayProvider.findUnique({
+        where: { id: input.relayProviderId },
+      });
+      if (!relayCfg) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '中转站凭证不存在' });
+      }
+
+      const prefix = input.providerIdPrefix ?? relayCfg.name;
+      const providerId = `${prefix}-${input.providerIdSuffix}`.toLowerCase();
+
+      const existing = await ctx.prisma.providerConfig.findUnique({
+        where: { providerId },
+      });
+      if (existing) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: `providerId "${providerId}" 已存在 — 已添加过这个模型`,
+        });
+      }
+
+      const m = found.model;
+      const kind = found.kind;
+
+      // 构造 defaultParams
+      const defaultParams: Record<string, unknown> = {
+        defaultModel: m.modelId,
+        source: 'relay',
+      };
+      if (m.protocol) defaultParams.protocol = m.protocol;
+      if (m.endpointStyle) defaultParams.endpointStyle = m.endpointStyle;
+      if (m.defaultSize) defaultParams.defaultSize = m.defaultSize;
+      if (m.maxDuration !== undefined) defaultParams.maxDuration = m.maxDuration;
+      if (m.defaultDuration !== undefined)
+        defaultParams.defaultDuration = m.defaultDuration;
+
+      const created = await ctx.prisma.providerConfig.create({
+        data: {
+          providerId,
+          displayName: `${m.displayName}(via ${relayCfg.displayName})`,
+          kind,
+          // apiUrl / apiKey 都从 RelayProvider 继承(不存自己的)
+          apiUrl: null,
+          apiKeyEnc: null,
+          apiKeyMasked: null,
+          unitPriceCny: (m.unitPriceCny ?? 0).toString(),
+          unitName: (m.unitName ?? 'ktoken') as string,
+          maxConcurrent: 5,
+          rateLimitRpm: 60,
+          // Prisma InputJsonValue 跟 Record<string, unknown> 类型推断不兼容,cast 安全(已 zod parse)
+          defaultParams: defaultParams as object,
+          modelRate: m.modelRate != null ? m.modelRate.toString() : null,
+          outputRate: m.outputRate != null ? m.outputRate.toString() : null,
+          isActive: false, // 默认停用,等用户 toggle 启用
+          relayProviderId: input.relayProviderId,
+        },
+      });
+      await logOperation(
+        ctx,
+        'provider.createFromCatalog',
+        'provider',
+        providerId,
+        null,
+        {
+          catalogKey: input.catalogKey,
+          providerIdSuffix: input.providerIdSuffix,
+          relayProviderId: input.relayProviderId,
+          kind,
+        },
+      );
+      return created;
+    }),
+
   updatePricing: adminProcedure
     .input(
       z.object({
@@ -375,42 +480,160 @@ const providerRouter = router({
 // ---------------------------------------------------------------------------
 
 const relayRouter = router({
-  /** 返中转站凭证摘要(取所有 relay-* 中第一条 hasKey 的作为代表) */
-  getCredential: adminProcedure.query(async () => {
-    return getRelayCredentialSummary();
+  /** 列出所有中转站凭证(多中转站管理) */
+  list: adminProcedure.query(async () => {
+    return listRelayProviders();
   }),
 
-  /** 批量同步中转站凭证到所有 relay-* provider */
-  setCredential: adminProcedure
+  /** 创建中转站凭证(名称 kebab-case 唯一,displayName 用户可见) */
+  create: adminProcedure
     .input(
       z.object({
-        apiUrl: z.string().url().max(255),
+        name: z
+          .string()
+          .min(2)
+          .max(50)
+          .regex(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/, 'name 必须 kebab-case'),
+        displayName: z.string().min(1).max(100),
+        apiUrl: z.string().url().max(255).optional(),
+        catalogKey: z.string().max(50).optional(),
+        notes: z.string().max(500).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (input.apiUrl) {
+        const urlErr = validateApiUrl(input.apiUrl);
+        if (urlErr)
+          throw new TRPCError({ code: 'BAD_REQUEST', message: `apiUrl 被拒:${urlErr}` });
+      }
+      try {
+        const created = await createRelayProvider({
+          name: input.name,
+          displayName: input.displayName,
+          apiUrl: input.apiUrl,
+          catalogKey: input.catalogKey,
+          notes: input.notes,
+          updatedBy: ctx.user.id,
+        });
+        await logOperation(ctx, 'relay.provider.create', 'relayProvider', created.id, null, {
+          name: created.name,
+          displayName: created.displayName,
+          catalogKey: created.catalogKey,
+        });
+        return created;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes('Unique constraint')) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: `中转站 name "${input.name}" 已存在,换一个或先 delete 旧的`,
+          });
+        }
+        throw new TRPCError({ code: 'BAD_REQUEST', message: msg });
+      }
+    }),
+
+  /** 更新中转站基本字段 */
+  update: adminProcedure
+    .input(
+      z.object({
+        id: z.string().cuid(),
+        displayName: z.string().min(1).max(100).optional(),
+        apiUrl: z.string().url().max(255).optional(),
+        notes: z.string().max(500).optional(),
+        isActive: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { id, ...data } = input;
+      if (data.apiUrl) {
+        const urlErr = validateApiUrl(data.apiUrl);
+        if (urlErr)
+          throw new TRPCError({ code: 'BAD_REQUEST', message: `apiUrl 被拒:${urlErr}` });
+      }
+      await updateRelayProvider(id, data, ctx.user.id);
+      await logOperation(ctx, 'relay.provider.update', 'relayProvider', id, null, data);
+      return { success: true };
+    }),
+
+  /** 设置某中转站的 API Key */
+  setApiKey: adminProcedure
+    .input(
+      z.object({
+        id: z.string().cuid(),
         apiKey: z.string().min(8, 'API Key 至少 8 字符'),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      // SSRF 防御:apiUrl 拒内网/metadata
-      const urlErr = validateApiUrl(input.apiUrl);
-      if (urlErr) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: `apiUrl 被拒:${urlErr}` });
-      }
-      const result = await setRelayCredential(input.apiUrl, input.apiKey, ctx.user.id);
-      await logOperation(ctx, 'relay.credential.set', 'relayCredential', 'default', null, {
-        apiUrl: input.apiUrl,
+      await setRelayProviderApiKey(input.id, input.apiKey, ctx.user.id);
+      await logOperation(ctx, 'relay.provider.setApiKey', 'relayProvider', input.id, null, {
         keyMasked: '••••' + input.apiKey.slice(-4),
-        affectedCount: result.affectedCount,
       });
-      return { success: true, affectedCount: result.affectedCount };
+      return { success: true };
     }),
 
-  /** 清除中转站凭证(同时自动停用所有 relay-* provider) */
-  clearCredential: adminProcedure.mutation(async ({ ctx }) => {
-    const result = await clearRelayCredential(ctx.user.id);
-    await logOperation(ctx, 'relay.credential.clear', 'relayCredential', 'default', null, {
-      affectedCount: result.affectedCount,
-    });
-    return { success: true, affectedCount: result.affectedCount };
+  /** 清除某中转站的 API Key */
+  clearApiKey: adminProcedure
+    .input(z.object({ id: z.string().cuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await clearRelayProviderApiKey(input.id, ctx.user.id);
+      await logOperation(
+        ctx,
+        'relay.provider.clearApiKey',
+        'relayProvider',
+        input.id,
+        null,
+        null,
+      );
+      return { success: true };
+    }),
+
+  /** 删除中转站(拒删:关联 active ProviderConfig 时) */
+  delete: adminProcedure
+    .input(z.object({ id: z.string().cuid(), confirmDelete: z.literal(true) }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        await deleteRelayProvider(input.id);
+        await logOperation(
+          ctx,
+          'relay.provider.delete',
+          'relayProvider',
+          input.id,
+          null,
+          null,
+        );
+        return { success: true };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: msg });
+      }
+    }),
+});
+
+// ---------------------------------------------------------------------------
+// admin.catalog — 静态中转站模型 catalog(2026-05-25 Phase 1.5.1)
+//
+// 数据源:packages/shared/data/relay-catalogs.json
+// 用法:UI 显示某中转站下的精选 / 候选模型 → 用户选 → admin.provider.createFromCatalog 落 DB
+// ---------------------------------------------------------------------------
+
+const catalogRouter = router({
+  /** 列出所有已知中转站的 catalog 摘要(含每类 model 列表 + isDefault 标记) */
+  list: adminProcedure.query(async () => {
+    return listCatalogSummaries();
   }),
+
+  /** 取某中转站某类别的模型列表 */
+  listModels: adminProcedure
+    .input(
+      z.object({
+        catalogKey: z.string(),
+        kind: z.enum(['TEXT', 'IMAGE', 'VIDEO', 'AUDIO', 'COMPLIANCE']),
+      }),
+    )
+    .query(async ({ input }) => {
+      return getRelayModels(input.catalogKey, input.kind);
+    }),
 });
 
 // ---------------------------------------------------------------------------
@@ -1903,6 +2126,7 @@ const dashboardRouter = router({
 
 export const adminRouter = router({
   relay: relayRouter,
+  catalog: catalogRouter,
   dashboard: dashboardRouter,
   provider: providerRouter,
   style: styleRouter,

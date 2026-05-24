@@ -67,35 +67,63 @@ interface ResolvedConfig {
 }
 
 async function loadConfig(providerId: string): Promise<ResolvedConfig> {
+  // Phase 1.5.1:include relayProvider 关联,中转站凭证用
   const row = await prisma.providerConfig.findUnique({
     where: { providerId },
+    include: { relayProvider: true },
   });
   if (!row || !row.isActive) {
     throw new Error(`Provider not configured or inactive: ${providerId}`);
   }
 
   let apiKey = '';
-  if (row.apiKeyEnc) {
-    try {
-      apiKey = decryptSecret(row.apiKeyEnc);
-    } catch (e) {
-      console.error(`[providers] decrypt failed for ${providerId}:`, e);
+  let apiUrl: string;
+  let cacheKeyExtra = '';
+
+  // Phase 1.5.1:relayProviderId 非空 → 从 RelayProvider 拉 apiKey/apiUrl
+  if (row.relayProviderId && row.relayProvider) {
+    if (!row.relayProvider.isActive) {
+      throw new Error(
+        `Provider ${providerId} 关联的中转站 "${row.relayProvider.name}" 已停用 — 去 /admin/providers 启用`,
+      );
     }
-  }
-  if (!apiKey && row.apiKeyRef) {
-    apiKey = process.env[row.apiKeyRef] ?? '';
-  }
-  if (!apiKey) {
-    throw new Error(
-      `Provider ${providerId} has no API key. Set it in Admin UI or env (${row.apiKeyRef ?? 'N/A'}).`,
-    );
+    if (row.relayProvider.apiKeyEnc) {
+      try {
+        apiKey = decryptSecret(row.relayProvider.apiKeyEnc);
+      } catch (e) {
+        console.error(
+          `[providers] decrypt relayProvider key failed for ${row.relayProvider.name}:`,
+          e,
+        );
+      }
+    }
+    apiUrl = row.relayProvider.apiUrl ?? '';
+    cacheKeyExtra = `relay|${row.relayProvider.id}|${row.relayProvider.apiKeyUpdatedAt?.getTime() ?? 0}|${row.relayProvider.updatedAt.getTime()}`;
+  } else {
+    // 直连 Provider:apiKey/apiUrl 从 ProviderConfig 自己的字段拉
+    if (row.apiKeyEnc) {
+      try {
+        apiKey = decryptSecret(row.apiKeyEnc);
+      } catch (e) {
+        console.error(`[providers] decrypt failed for ${providerId}:`, e);
+      }
+    }
+    if (!apiKey && row.apiKeyRef) {
+      apiKey = process.env[row.apiKeyRef] ?? '';
+    }
+    apiUrl =
+      row.apiUrl ??
+      process.env[`${row.providerId.toUpperCase().replace(/-/g, '_')}_API_URL`] ??
+      '';
+    cacheKeyExtra = `direct|${row.apiKeyUpdatedAt?.getTime() ?? 0}`;
   }
 
-  // 默认 URL fallback
-  const apiUrl =
-    row.apiUrl ??
-    process.env[`${row.providerId.toUpperCase().replace(/-/g, '_')}_API_URL`] ??
-    '';
+  if (!apiKey) {
+    const hint = row.relayProviderId
+      ? `去 /admin/providers 顶部"${row.relayProvider?.displayName ?? '中转站'}"卡片配 Token`
+      : `去 /admin/providers 设置 ${providerId} 的独立 API Key (或配 env ${row.apiKeyRef ?? 'N/A'})`;
+    throw new Error(`Provider ${providerId} has no API key. ${hint}`);
+  }
 
   return {
     providerId: row.providerId,
@@ -105,7 +133,7 @@ async function loadConfig(providerId: string): Promise<ResolvedConfig> {
     unitName: row.unitName,
     defaultParams: (row.defaultParams ?? {}) as Record<string, unknown>,
     maxConcurrent: row.maxConcurrent,
-    cacheKey: `${row.providerId}|${row.updatedAt.getTime()}|${row.apiKeyUpdatedAt?.getTime() ?? 0}`,
+    cacheKey: `${row.providerId}|${row.updatedAt.getTime()}|${cacheKeyExtra}`,
     // Phase 1.5 P0-2:2 倍率(modelRate 非空时 OpenAICompatTextProvider 优先用,否则 unitPriceCny)
     modelRate: row.modelRate != null ? Number(row.modelRate) : undefined,
     outputRate: row.outputRate != null ? Number(row.outputRate) : undefined,
@@ -328,7 +356,7 @@ export interface ProviderSummary {
   apiUrl: string | null;
   apiKeyMasked: string | null;
   apiKeyConfigured: boolean;
-  apiKeySource: 'db' | 'env' | 'none';
+  apiKeySource: 'db' | 'env' | 'relay' | 'none'; // 'relay':apiKey 来自 RelayProvider
   apiKeyUpdatedAt: Date | null;
   apiKeyUpdatedBy: string | null;
   unitPriceCny: number;
@@ -343,28 +371,55 @@ export interface ProviderSummary {
   // Phase 1.5.1 — UI 展示用元数据(从 defaultParams 解出)
   defaultModel: string | null;
   source: 'relay' | 'subscription' | 'direct' | 'local' | null;
+  // Phase 1.5.1 — 中转站凭证关联
+  relayProviderId: string | null;
+  relayProviderName: string | null;
+  relayProviderDisplayName: string | null;
 }
 
 /** 列出所有 Provider 的配置摘要（永不返回明文 Key） */
 export async function listProviderConfigs(): Promise<ProviderSummary[]> {
   const rows = await prisma.providerConfig.findMany({
     orderBy: [{ kind: 'asc' }, { providerId: 'asc' }],
+    include: { relayProvider: true },
   });
   return rows.map((r) => {
+    const dp = (r.defaultParams ?? {}) as Record<string, unknown>;
+    const isRelay = r.relayProviderId !== null && r.relayProvider !== null;
+    // 凭证优先级:RelayProvider(中转站) > ProviderConfig.apiKeyEnc(直连) > env(fallback)
+    const hasRelayKey = isRelay && !!r.relayProvider?.apiKeyEnc;
     const hasDbKey = !!r.apiKeyEnc;
     const hasEnvKey = !!(r.apiKeyRef && process.env[r.apiKeyRef]);
-    const dp = (r.defaultParams ?? {}) as Record<string, unknown>;
+    const configured = hasRelayKey || hasDbKey || hasEnvKey;
+    const source: ProviderSummary['apiKeySource'] = hasRelayKey
+      ? 'relay'
+      : hasDbKey
+        ? 'db'
+        : hasEnvKey
+          ? 'env'
+          : 'none';
+    // 中转站 provider 的 apiUrl / apiKeyMasked 显示从 RelayProvider 继承
+    const effectiveApiUrl = isRelay ? (r.relayProvider?.apiUrl ?? null) : r.apiUrl;
+    const effectiveMasked = isRelay
+      ? (r.relayProvider?.apiKeyMasked ?? null)
+      : r.apiKeyMasked;
+    const effectiveUpdatedAt = isRelay
+      ? (r.relayProvider?.apiKeyUpdatedAt ?? null)
+      : r.apiKeyUpdatedAt;
+    const effectiveUpdatedBy = isRelay
+      ? (r.relayProvider?.apiKeyUpdatedBy ?? null)
+      : r.apiKeyUpdatedBy;
     return {
       providerId: r.providerId,
       displayName: r.displayName,
       kind: r.kind,
       isActive: r.isActive,
-      apiUrl: r.apiUrl,
-      apiKeyMasked: r.apiKeyMasked,
-      apiKeyConfigured: hasDbKey || hasEnvKey,
-      apiKeySource: (hasDbKey ? 'db' : hasEnvKey ? 'env' : 'none') as 'db' | 'env' | 'none',
-      apiKeyUpdatedAt: r.apiKeyUpdatedAt,
-      apiKeyUpdatedBy: r.apiKeyUpdatedBy,
+      apiUrl: effectiveApiUrl,
+      apiKeyMasked: effectiveMasked,
+      apiKeyConfigured: configured,
+      apiKeySource: source,
+      apiKeyUpdatedAt: effectiveUpdatedAt,
+      apiKeyUpdatedBy: effectiveUpdatedBy,
       unitPriceCny: Number(r.unitPriceCny),
       unitName: r.unitName,
       maxConcurrent: r.maxConcurrent,
@@ -377,6 +432,10 @@ export async function listProviderConfigs(): Promise<ProviderSummary[]> {
       // Phase 1.5.1 — UI 元数据
       defaultModel: (dp.defaultModel as string | undefined) ?? null,
       source: (dp.source as 'relay' | 'subscription' | 'direct' | 'local' | undefined) ?? null,
+      // Phase 1.5.1 — 中转站凭证关联
+      relayProviderId: r.relayProviderId,
+      relayProviderName: r.relayProvider?.name ?? null,
+      relayProviderDisplayName: r.relayProvider?.displayName ?? null,
     };
   });
 }
@@ -442,142 +501,188 @@ export async function setProviderActive(
 }
 
 // ---------------------------------------------------------------------------
-// Phase 1.5.1 中转站凭证统一管理(2026-05-25)
+// Phase 1.5.1 中转站凭证 multi-credential(2026-05-25 升级)
 // ---------------------------------------------------------------------------
-// 用户痛点:8 个 relay-* provider 每个单独设 API key 浪费操作;
-//          实际中转站是 1 token 共享所有模型。
-// 设计:用 setRelayCredential 一次性把同 token 批量 sync 到所有 relay-* provider。
-// 不引入新表(SystemSetting 也省了),直接复用 ProviderConfig 行 — loadConfig 不变。
+// 设计:RelayProvider 表(moyu / poe / openrouter / 自定义)独立管理凭证。
+// 1 个 RelayProvider = 1 个 apiUrl + 1 个 token + 关联多个 ProviderConfig。
+// loadConfig 中 relayProviderId 非空时,从 RelayProvider 拉 apiKey/apiUrl。
 // ---------------------------------------------------------------------------
 
-export interface RelayCredentialSummary {
-  apiUrl: string;
+export interface RelayProviderSummary {
+  id: string;
+  name: string;
+  displayName: string;
+  apiUrl: string | null;
+  catalogKey: string | null;
   apiKeyMasked: string | null;
   apiKeyUpdatedAt: Date | null;
   apiKeyUpdatedBy: string | null;
-  hasCredential: boolean;
-  attachedProviderCount: number;
-  inconsistent: boolean; // true:某个 relay-* 的 apiUrl/apiKeyEnc 跟其他不一致(数据迁移/历史 setApiKey 遗留)
+  apiKeyConfigured: boolean;
+  isActive: boolean;
+  notes: string | null;
+  attachedProviderCount: number; // 关联的 ProviderConfig 数
+  attachedActiveCount: number; // 关联的 active ProviderConfig 数
+  createdAt: Date;
+  updatedAt: Date;
 }
 
-/**
- * 读取中转站凭证摘要(取所有 relay-* 中第一条 hasKey 的作为代表)
- * inconsistent=true 提示用户重新 setRelayCredential 修复
- */
-export async function getRelayCredentialSummary(): Promise<RelayCredentialSummary> {
-  const all = await prisma.providerConfig.findMany({
-    where: { providerId: { startsWith: 'relay-' } },
-    select: {
-      providerId: true,
-      apiUrl: true,
-      apiKeyEnc: true,
-      apiKeyMasked: true,
-      apiKeyUpdatedAt: true,
-      apiKeyUpdatedBy: true,
+function invalidateRelayProviderCache(relayProviderId: string): void {
+  // 失效所有关联到该 RelayProvider 的 ProviderConfig 缓存
+  // 简化:扫所有 cache key 不可行(key 是 providerId),需 DB 查后 invalidate
+  // 性能 OK:cache 失效是 set 操作 + 数量有限
+  // 真实现:cache 内不存 relayProviderId,只能 invalidate 整个 cache
+  cache.video.clear();
+  cache.image.clear();
+  cache.text.clear();
+  cache.compliance.clear();
+  void relayProviderId;
+}
+
+/** 列出所有中转站凭证 */
+export async function listRelayProviders(): Promise<RelayProviderSummary[]> {
+  const rows = await prisma.relayProvider.findMany({
+    orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+    include: {
+      providers: {
+        select: { isActive: true },
+      },
     },
   });
-  if (all.length === 0) {
-    return {
-      apiUrl: '',
-      apiKeyMasked: null,
-      apiKeyUpdatedAt: null,
-      apiKeyUpdatedBy: null,
-      hasCredential: false,
-      attachedProviderCount: 0,
-      inconsistent: false,
-    };
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    displayName: r.displayName,
+    apiUrl: r.apiUrl,
+    catalogKey: r.catalogKey,
+    apiKeyMasked: r.apiKeyMasked,
+    apiKeyUpdatedAt: r.apiKeyUpdatedAt,
+    apiKeyUpdatedBy: r.apiKeyUpdatedBy,
+    apiKeyConfigured: !!r.apiKeyEnc,
+    isActive: r.isActive,
+    notes: r.notes,
+    attachedProviderCount: r.providers.length,
+    attachedActiveCount: r.providers.filter((p) => p.isActive).length,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  }));
+}
+
+/** 创建中转站凭证 */
+export async function createRelayProvider(opts: {
+  name: string;
+  displayName: string;
+  apiUrl?: string;
+  catalogKey?: string;
+  notes?: string;
+  updatedBy: string;
+}): Promise<RelayProviderSummary> {
+  if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(opts.name)) {
+    throw new Error('name 必须 kebab-case(小写字母+数字+-,首末非 -)');
   }
-  // 找第一条 hasKey 的作为代表
-  const withKey = all.find((p) => p.apiKeyEnc !== null);
-  const representative = withKey ?? all[0]!;
-  // 检测不一致:有 key 但部分 apiUrl 或 apiKeyMasked 跟其他 hasKey 的不同
-  const withKeys = all.filter((p) => p.apiKeyEnc !== null);
-  const inconsistent =
-    withKeys.length > 0 &&
-    withKeys.some(
-      (p) =>
-        p.apiUrl !== representative.apiUrl ||
-        p.apiKeyMasked !== representative.apiKeyMasked,
-    );
+  const created = await prisma.relayProvider.create({
+    data: {
+      name: opts.name,
+      displayName: opts.displayName,
+      apiUrl: opts.apiUrl,
+      catalogKey: opts.catalogKey,
+      notes: opts.notes,
+      isActive: true,
+      apiKeyUpdatedBy: opts.updatedBy,
+    },
+  });
   return {
-    apiUrl: representative.apiUrl ?? '',
-    apiKeyMasked: representative.apiKeyMasked,
-    apiKeyUpdatedAt: representative.apiKeyUpdatedAt,
-    apiKeyUpdatedBy: representative.apiKeyUpdatedBy,
-    hasCredential: withKey !== undefined,
-    attachedProviderCount: all.length,
-    inconsistent,
+    id: created.id,
+    name: created.name,
+    displayName: created.displayName,
+    apiUrl: created.apiUrl,
+    catalogKey: created.catalogKey,
+    apiKeyMasked: null,
+    apiKeyUpdatedAt: null,
+    apiKeyUpdatedBy: created.apiKeyUpdatedBy,
+    apiKeyConfigured: false,
+    isActive: created.isActive,
+    notes: created.notes,
+    attachedProviderCount: 0,
+    attachedActiveCount: 0,
+    createdAt: created.createdAt,
+    updatedAt: created.updatedAt,
   };
 }
 
-/** 批量同步中转站凭证到所有 relay-* provider(单加密 + updateMany + 失效缓存) */
-export async function setRelayCredential(
-  apiUrl: string,
-  apiKey: string,
+/** 更新中转站凭证(基本字段) */
+export async function updateRelayProvider(
+  id: string,
+  data: {
+    displayName?: string;
+    apiUrl?: string;
+    notes?: string;
+    isActive?: boolean;
+  },
   updatedBy: string,
-): Promise<{ affectedCount: number }> {
-  if (!apiKey || apiKey.length < 8) {
+): Promise<void> {
+  await prisma.relayProvider.update({
+    where: { id },
+    data: { ...data, apiKeyUpdatedBy: updatedBy },
+  });
+  invalidateRelayProviderCache(id);
+}
+
+/** 设置中转站 API Key */
+export async function setRelayProviderApiKey(
+  id: string,
+  plaintext: string,
+  updatedBy: string,
+): Promise<void> {
+  if (!plaintext || plaintext.length < 8) {
     throw new Error('API key too short (min 8 chars)');
   }
-  const apiKeyEnc = encryptSecret(apiKey);
-  const apiKeyMasked = maskSecret(apiKey);
-  const now = new Date();
-
-  const all = await prisma.providerConfig.findMany({
-    where: { providerId: { startsWith: 'relay-' } },
-    select: { providerId: true },
-  });
-
-  await prisma.providerConfig.updateMany({
-    where: { providerId: { startsWith: 'relay-' } },
+  const enc = encryptSecret(plaintext);
+  const masked = maskSecret(plaintext);
+  await prisma.relayProvider.update({
+    where: { id },
     data: {
-      apiUrl,
-      apiKeyEnc,
-      apiKeyMasked,
-      apiKeyUpdatedAt: now,
+      apiKeyEnc: enc,
+      apiKeyMasked: masked,
+      apiKeyUpdatedAt: new Date(),
       apiKeyUpdatedBy: updatedBy,
     },
   });
-
-  // 失效所有 relay-* 缓存
-  for (const p of all) {
-    cache.video.delete(p.providerId);
-    cache.image.delete(p.providerId);
-    cache.text.delete(p.providerId);
-    cache.compliance.delete(p.providerId);
-  }
-
-  return { affectedCount: all.length };
+  invalidateRelayProviderCache(id);
 }
 
-/** 清除所有 relay-* 的凭证 + 自动停用(无 key 后业务调用会失败,显式停用更安全) */
-export async function clearRelayCredential(
+/** 清除中转站 API Key */
+export async function clearRelayProviderApiKey(
+  id: string,
   updatedBy: string,
-): Promise<{ affectedCount: number }> {
-  const all = await prisma.providerConfig.findMany({
-    where: { providerId: { startsWith: 'relay-' } },
-    select: { providerId: true },
-  });
-
-  await prisma.providerConfig.updateMany({
-    where: { providerId: { startsWith: 'relay-' } },
+): Promise<void> {
+  await prisma.relayProvider.update({
+    where: { id },
     data: {
       apiKeyEnc: null,
       apiKeyMasked: null,
       apiKeyUpdatedAt: new Date(),
       apiKeyUpdatedBy: updatedBy,
-      isActive: false, // 无 key 无法用,显式停用
     },
   });
+  invalidateRelayProviderCache(id);
+}
 
-  for (const p of all) {
-    cache.video.delete(p.providerId);
-    cache.image.delete(p.providerId);
-    cache.text.delete(p.providerId);
-    cache.compliance.delete(p.providerId);
+/** 删除中转站凭证(拒删:还有关联 active ProviderConfig 的) */
+export async function deleteRelayProvider(id: string): Promise<void> {
+  const cfg = await prisma.relayProvider.findUnique({
+    where: { id },
+    include: { providers: { select: { providerId: true, isActive: true } } },
+  });
+  if (!cfg) throw new Error('RelayProvider not found');
+  const activeCount = cfg.providers.filter((p) => p.isActive).length;
+  if (activeCount > 0) {
+    throw new Error(
+      `中转站 "${cfg.name}" 还有 ${activeCount} 个 active 模型关联,先停用所有模型再删`,
+    );
   }
-
-  return { affectedCount: all.length };
+  // 软清:把所有关联的 ProviderConfig 的 relayProviderId 设 null + 停用(via onDelete: SetNull)
+  await prisma.relayProvider.delete({ where: { id } });
+  invalidateRelayProviderCache(id);
 }
 
 /** 调试用：列出已注册 + 已缓存 */

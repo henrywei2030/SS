@@ -137,166 +137,15 @@ async function main() {
       rateLimitRpm: 30,
     },
     // ==========================================================================
-    // 第 21 轮 audit:OpenAI 兼容中转站接入(Phase 1.5 推荐入场路径)
+    // Phase 1.5.1(2026-05-25)— 中转站模型不再 hardcode seed
     //
-    // 适用站点:任意 OpenAI 兼容聚合站(OpenRouter / Poe / OneAPI 自部署 / moyu.info 等)
-    // 协议:protocol='openai-compat' + endpointStyle='relay'
+    // 旧:8 个 relay-* 模型 seed 进 ProviderConfig 表(死数据,用户 80% 用不上)
+    // 新:用户在 /admin/providers UI 从 catalog(packages/shared/data/relay-catalogs.json)
+    //     动态选 → 调用 admin.provider.createFromCatalog 落 ProviderConfig 行
+    // 中转站凭证由 RelayProvider 表管理(下方 seed),catalog 含 148+ 候选模型
     //
-    // admin 后台只需:
-    //   1. 在中转站申请一个 sk-xxx token
-    //   2. /admin/providers 把 token 录入这些 providerId(同一 token 共享全部模型)
-    //   3. 把 apiUrl 改成你用的中转站 base URL(默认填示例,空值时 fallback env)
-    //   4. 选要启用的模型(其他保持 isActive=false 节省额度)
-    //
-    // 单价以你的中转站后台计费表为准,这里给参考价(2026-05 快照)
+    // 现有 DB 的 relay-* provider 已由 migration 20260525000000 关联到默认 RelayProvider
     // ==========================================================================
-    {
-      providerId: 'relay-claude-sonnet-4-5',
-      displayName: 'Claude Sonnet 4.5（via 中转站）— 剧本分析推荐',
-      kind: ProviderKind.TEXT,
-      apiUrl: '',  // 中转站 base URL — admin 后台必填(各站不同),isActive=false 时为空
-      apiKeyRef: 'RELAY_API_KEY',
-      unitPriceCny: '0.025',
-      unitName: 'ktoken',
-      maxConcurrent: 10,
-      rateLimitRpm: 100,
-      isActive: false,
-      // Phase 1.5 P0-2:2 倍率(主次重审 v2.1)— modelRate=22 CNY/Mtoken,outputRate=4.909(108/22)
-      modelRate: '22.000000',
-      outputRate: '4.9091',
-      defaultParams: {
-        protocol: 'openai-compat',
-        defaultModel: 'claude-sonnet-4-5-20250929',
-        inputUnitPriceCny: 0.022,
-        outputUnitPriceCny: 0.108,
-      },
-    },
-    {
-      providerId: 'relay-claude-haiku-4-5',
-      displayName: 'Claude Haiku 4.5（via 中转站）— 快速便宜',
-      kind: ProviderKind.TEXT,
-      apiUrl: '',  // 中转站 base URL — admin 后台必填(各站不同),isActive=false 时为空
-      apiKeyRef: 'RELAY_API_KEY',
-      unitPriceCny: '0.005',
-      unitName: 'ktoken',
-      maxConcurrent: 20,
-      rateLimitRpm: 200,
-      isActive: false,
-      // Phase 1.5 P0-2:Haiku 默认 input=output(modelRate=5 CNY/Mtoken,outputRate=1)
-      modelRate: '5.000000',
-      outputRate: '1.0000',
-      defaultParams: {
-        protocol: 'openai-compat',
-        defaultModel: 'claude-haiku-4-5-20251001',
-      },
-    },
-    {
-      providerId: 'relay-deepseek-chat',
-      displayName: 'DeepSeek Chat（via 中转站）— 国产便宜',
-      kind: ProviderKind.TEXT,
-      apiUrl: '',  // 中转站 base URL — admin 后台必填(各站不同),isActive=false 时为空
-      apiKeyRef: 'RELAY_API_KEY',
-      unitPriceCny: '0.002',
-      unitName: 'ktoken',
-      maxConcurrent: 20,
-      rateLimitRpm: 200,
-      isActive: false,
-      // Phase 1.5 P0-2:DeepSeek 输入 1.0 输出 2.0 CNY/Mtoken,outputRate=2(典型)
-      modelRate: '1.000000',
-      outputRate: '2.0000',
-      defaultParams: {
-        protocol: 'openai-compat',
-        defaultModel: 'deepseek-chat',
-      },
-    },
-    {
-      providerId: 'relay-doubao-seedance-1-0-pro',
-      displayName: 'Seedance 1.0 Pro（via 中转站）— 视频生成推荐',
-      kind: ProviderKind.VIDEO,
-      apiUrl: '',  // 中转站 base URL — admin 后台必填(各站不同),isActive=false 时为空
-      apiKeyRef: 'RELAY_API_KEY',
-      unitPriceCny: '1.0',
-      unitName: 'second',
-      maxConcurrent: 5,
-      rateLimitRpm: 30,
-      isActive: false,
-      defaultParams: {
-        endpointStyle: 'relay',
-        defaultModel: 'doubao-seedance-1-0-pro-250528',
-        maxDuration: 10,
-        defaultDuration: 5,
-      },
-    },
-    {
-      providerId: 'relay-doubao-seedance-2-0',
-      displayName: 'Seedance 2.0（via 中转站）— 最新',
-      kind: ProviderKind.VIDEO,
-      apiUrl: '',  // 中转站 base URL — admin 后台必填(各站不同),isActive=false 时为空
-      apiKeyRef: 'RELAY_API_KEY',
-      unitPriceCny: '1.2',
-      unitName: 'second',
-      maxConcurrent: 5,
-      rateLimitRpm: 30,
-      isActive: false,
-      defaultParams: {
-        endpointStyle: 'relay',
-        defaultModel: 'doubao-seedance-2-0-260128',
-        maxDuration: 10,
-        defaultDuration: 5,
-      },
-    },
-    {
-      providerId: 'relay-doubao-seedance-1-0-lite-i2v',
-      displayName: 'Seedance 1.0 Lite i2v（via 中转站）— 图生视频便宜',
-      kind: ProviderKind.VIDEO,
-      apiUrl: '',  // 中转站 base URL — admin 后台必填(各站不同),isActive=false 时为空
-      apiKeyRef: 'RELAY_API_KEY',
-      unitPriceCny: '0.4',
-      unitName: 'second',
-      maxConcurrent: 8,
-      rateLimitRpm: 60,
-      isActive: false,
-      defaultParams: {
-        endpointStyle: 'relay',
-        defaultModel: 'doubao-seedance-1-0-lite-i2v-250428',
-        maxDuration: 5,
-        defaultDuration: 5,
-      },
-    },
-    {
-      providerId: 'relay-doubao-seedream-4-0',
-      displayName: 'Seedream 4.0（via 中转站）— 图片生成推荐',
-      kind: ProviderKind.IMAGE,
-      apiUrl: '',  // 中转站 base URL — admin 后台必填(各站不同),isActive=false 时为空
-      apiKeyRef: 'RELAY_API_KEY',
-      unitPriceCny: '0.10',
-      unitName: 'image',
-      maxConcurrent: 5,
-      rateLimitRpm: 100,
-      isActive: false,
-      defaultParams: {
-        protocol: 'openai-compat',
-        defaultModel: 'doubao-seedream-4-0-250828',
-        defaultSize: '1024x1024',
-      },
-    },
-    {
-      providerId: 'relay-flux-2-dev',
-      displayName: 'FLUX.2-dev（via 中转站）— BlackForest 开源风',
-      kind: ProviderKind.IMAGE,
-      apiUrl: '',  // 中转站 base URL — admin 后台必填(各站不同),isActive=false 时为空
-      apiKeyRef: 'RELAY_API_KEY',
-      unitPriceCny: '0.05',
-      unitName: 'image',
-      maxConcurrent: 5,
-      rateLimitRpm: 100,
-      isActive: false,
-      defaultParams: {
-        protocol: 'openai-compat',
-        defaultModel: 'FLUX.2-dev',
-        defaultSize: '1024x1024',
-      },
-    },
   ];
 
   for (const p of providers) {
@@ -307,6 +156,24 @@ async function main() {
     });
   }
   console.log(`    ✓ ${providers.length} 个 Provider`);
+
+  // ---------- 2.5 默认 RelayProvider 占位(Phase 1.5.1) ----------
+  // 用户启动后会在 /admin/providers UI 看到一个空的 "moyu" 中转站 placeholder
+  // 填 apiUrl + token 后从 catalog 选模型,生成的 ProviderConfig 自动关联到这条
+  console.log('  → 创建默认 RelayProvider 占位(moyu)');
+  await prisma.relayProvider.upsert({
+    where: { name: 'moyu' },
+    create: {
+      name: 'moyu',
+      displayName: 'moyu.info(默认中转站)',
+      apiUrl: '', // 用户填
+      catalogKey: 'moyu',
+      isActive: true,
+      notes: 'seed 默认创建 — 填 apiUrl + apiKey 后从 catalog 添加模型',
+    },
+    update: {}, // 已存在不动(保留用户配过的 token + apiUrl)
+  });
+  console.log('    ✓ 默认 RelayProvider "moyu" 就绪');
 
   // ---------- 3. 提示词模板（核心几个） ----------
   console.log('  → 创建核心 Prompt 模板');

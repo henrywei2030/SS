@@ -1183,10 +1183,61 @@ model ProviderConfig {
   healthScore Float     @default(1.0)
   lastErrorAt DateTime?
 
+  // Phase 1.5.1(2026-05-25):中转站凭证关联
+  // - relayProviderId 非空:此 Provider 走中转站(apiKey/apiUrl 从 RelayProvider 继承,ProviderConfig 自己的不用)
+  // - relayProviderId null:直连 Provider(apiKey/apiUrl 在 ProviderConfig 上独立配)
+  relayProviderId String?
+  relayProvider   RelayProvider? @relation(fields: [relayProviderId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([relayProviderId])
   @@map("provider_configs")
+}
+
+// =============================================================================
+// § 12. 中转站凭证(Phase 1.5.1 · 2026-05-25)
+// =============================================================================
+
+/**
+ * 中转站凭证 — 1 token 共享多模型
+ *
+ * 设计目标:
+ *   - moyu / Poe / OpenRouter / OneAPI 自部署 等多中转站独立管理
+ *   - 1 个凭证 = 1 个 apiUrl + 1 个 token,关联多个 ProviderConfig(via relayProviderId FK)
+ *   - 用户在 admin UI 切换激活中转站 + 显式选择启用哪些模型
+ *
+ * 跟 ProviderConfig 关系:
+ *   - 中转站模型:ProviderConfig.relayProviderId 非空,apiKey/apiUrl 从此表继承
+ *   - 直连模型:ProviderConfig.relayProviderId null,自己存 apiKey/apiUrl
+ *
+ * catalogKey 关联静态 catalog(packages/shared/data/relay-catalogs.json)
+ *   - 'moyu' / 'poe' / 'openrouter' 等已知中转站
+ *   - null:自定义中转站(用户输入 apiUrl + 选模型)
+ */
+model RelayProvider {
+  id              String    @id @default(cuid())
+  name            String    @unique // 'moyu' / 'poe' / 'openrouter' / 'custom-xxx'
+  displayName     String    // 用户可见名,可改('moyu.info' / 'Poe' / 'OpenRouter')
+  apiUrl          String?   // base URL — 用户必填,seed 默认空
+  catalogKey      String?   // 关联静态 catalog 的 key('moyu' / 'poe' / 'openrouter' / null=custom)
+
+  // ---------- 凭证 ----------
+  apiKeyEnc       String?   // AES-256-GCM base64(iv|tag|ciphertext)
+  apiKeyMasked    String?   // UI 显示用('sk-XX••••••••XXXX')
+  apiKeyUpdatedAt DateTime?
+  apiKeyUpdatedBy String?   // userId
+
+  isActive        Boolean   @default(true)
+  notes           String?   // 用户备注(如"主用 / 备用 / ¥10 额度")
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  providers       ProviderConfig[]
+
+  @@map("relay_providers")
 }
 
 // =============================================================================
