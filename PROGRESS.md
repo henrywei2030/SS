@@ -5,6 +5,76 @@
 
 ---
 
+## 2026-05-24(周日,win-laptop · 十八次收工)— 第 19-20 轮 audit 全栈加固(60 次 debug · ADR-27)
+
+**完成 — 用户要求 3 诉求 100% 闭环:升级接口 / 模块独立升级 / 跨模块可追溯**
+
+### Sprint A(Round 1-4)第 19 轮 audit 4 维 + 5 项修
+- ✅ auth email/username router .transform + adapter 双层 lowercase+trim(防绕过软删)
+- ✅ asset.confirmCandidate / unconfirmSlot 加 `pg_advisory_xact_lock('asset_confirm:'+id)`(maturity race)
+- ✅ `sanitizeErrorMsg` helper(@ss/shared)+ 5 处覆盖(processor / asset 2 / storyboard / script / media)
+- ✅ media upload `ALLOWED_MIME_BY_KIND` 白名单(防 SVG XSS / PDF 假冒 IMAGE)
+- ✅ .env.example 补 7 个变量(AUTH_DRIVER / AUTH_TOKEN_TTL_SEC / ADMIN_DEFAULT_PASSWORD / SSE_TOKEN_SECRET / STORAGE_LOCAL_* / WORKER_HEALTH_PORT)
+
+### Sprint A2(Round 5-15)11 维度新 audit(5 agent 并行)+ Sprint B 修
+- ✅ 模块边界 ✓ / Mastra 接入 / OperationLog 命名 / 数据模型 / tRPC 契约 / requestId 链 / BullMQ 健康 / i18n / a11y / 部署 / 二轮深扫
+- ✅ 找到真 bug:unconfirmSlot 缺 advisory lock → 修
+
+### Sprint C(Round 16-25)10 链路验证(3 agent)
+- ✅ 主路径 5(剧本→分镜 / 资产→生成 / AIGC→worker / 登录→项目 / Media→MinIO)
+- ✅ 跨模块 5(分镜→EventBus / AIGC→Library / cost→insights / OperationLog→audit / User 软删)
+- ✅ 修真 bug 4 项:storyboard.publishEpisode/generateForEpisode + asset.generateImage/confirmCandidate **EventBus publish 缺漏全补**(events.ts 定义不再死契约)
+- ✅ auth.changePassword 加 audit log(链路 10 verify 发现)
+
+### Sprint D(Round 26-29)升级接口落地
+- ✅ **D-1 requestId 全链路贯通**(5 文件):HTTP X-Request-Id / UUID → ctx → tRPC errorFormatter → 入队 Job → worker `[req=xxx]` 前缀 → response header → 前端 toast 后缀
+- ✅ **D-2 AgentTool meta 5 mutation 首批**:asset.create / asset.generateImage / storyboard.generateForEpisode / aigc.generateVideo / script.upload
+- ✅ **D-3 EventBus dev trace log**:`[eventbus] publish topic=X eventId=Y subscribers=N`(SS_EVENTBUS_TRACE=0 关)
+- ✅ **D-4 模块边界文档**:`docs/MODULES.md` + 4 package README(api / core / queue / adapters)
+
+### R2 Sprint F(Round 1-10)client-side + 性能 + 升级 hook 落地度(5 agent)
+- ✅ aigc.getGroupDetail mediaIds size guard 1000 上限(防异常膨胀)
+- ✅ **8 mutation 补 .meta 完成 13/13 100% 覆盖**:project.create / project.addMember / asset.batchCreate / asset.breakdown / script.analyze / storyboard.publishEpisode / storyboard.mergeShots / aigc.bindAssetToGroup
+- ✅ Tauri capabilities 预设 DRAFT:`apps/desktop/src-tauri/capabilities/default.json`(Phase 1.5 启用)
+
+### R2 Sprint G(Round 11-20)前端 requestId UI 闭环
+- ✅ `apps/web/lib/trpc/error-toast.ts` showTrpcError 自动附 ` · req=xxxxxxxx` 后缀
+- ✅ `TrpcProvider` 加 mutationCache.onError 全局兜底 toast(silent meta 可关)
+- ✅ TRPCMeta interface 加 export 修 TS4023(build 失败 typecheck 不报)
+
+### R2 Sprint H(Round 21-30)收尾
+- ✅ **ADR-27 第 19-20 轮 audit 全栈加固决议** — 5 段决议 + 影响 + Phase 2 留尾(占位推 ADR-30/31/32)
+- ✅ `docs/MODULES.md` 加 § 4.6 Tauri 真编译步骤 + § 4.2 13/13 100% 清单
+- ✅ 终回归 typecheck 15/15 + test 10/10 (25 测) + pnpm audit 无 vuln
+
+**进行中**
+- 🚧 (60 次 debug 全部完成,W1-W7 加固到 Phase 1.5 ready,无在途)
+
+**问题 / 待决策**
+- ❓ Phase 1.5 起点选:真接 Claude/Seedance Provider(配 Key)vs W8 团队冷启动实战
+- ❓ Schema 加 `@@index([projectId, createdAt])` migration 时机(留 Phase 2 跟其他 schema 改一起)
+- ❓ React Error Boundary + 401 全局 redirect + Optimistic update 留 Phase 2(UI 设计驱动)
+
+**下次接着做**
+- 📌 **W8 实战 checklist 12 步**(详见 docs/W1-W7-followup.md)
+- 📌 配 Claude API Key → 跑 script.analyze → storyboard.generateForEpisode 验证 requestId 真贯通日志
+- 📌 配 Seedance Key → 真抽视频 → SSE / Worker `[req=xxx]` 跨进程 grep 验证
+- 📌 用户拿 toast 中 req=xxxxxxxx 报 bug → 运维 grep 全链路日志
+
+**质量**
+- 18 文件改 + 7 新文件 = 25 文件,+529/-27 行
+- typecheck 15 task 全过 / test 25 测全过 / pnpm audit 无 vuln
+- 零 schema 改动(刻意,避 migration 简化部署)
+- 零回归
+
+**累计**
+- **18 次收工 / 60+ 次 debug / W1-W7 + 19-20 轮 audit 加固完成**
+- 27 ADR / 19 migration / ~80 audit / 110+ 单测全过
+- 11 workspace 包 + 5 package README + MODULES.md 模块边界文档
+- **13/13 核心 mutation 100% `.meta(agentTool)` 覆盖**(ADR-26+27 落地)
+
+---
+
 ## 2026-05-24(周日,win-laptop · 十七次收工)— W1-W7 待完成事项详细盘点 + W8 启动 checklist
 
 **完成 — 实战前的完整留尾清单 + 启动检查清单**

@@ -29,7 +29,8 @@ export async function logOperation(
       },
     });
   } catch (e) {
-    console.error('[audit] failed to write OperationLog:', e);
+    // 第 19 轮 audit P1:audit log 失败也印 requestId,跨链路追溯
+    console.error(`[audit][req=${ctx.requestId ?? '-'}] failed to write OperationLog (action=${action}):`, e);
   }
 }
 

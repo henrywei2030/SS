@@ -28,6 +28,8 @@ import {
   type VideoGenProgressEvent,
 } from '@ss/queue/types';
 import { EVENTS } from '@ss/shared/events';
+// 第 18 轮 audit P1:errorMsg 入库 + SSE + OperationLog 前脱敏,防真接 Provider 后 URL/token 泄漏
+import { sanitizeErrorMsg } from '@ss/shared';
 
 /**
  * P0-3 idempotency check 结果(processor 入口防 stalled re-queue / BullMQ retry 双写)
@@ -95,8 +97,11 @@ export async function processVideoGenJob(
     webSearchEnabled,
     refVideoUrl,
     refAudioUrl,
+    requestId,
   } = job.data;
 
+  // 第 19 轮 audit P1:所有 worker console 日志加 requestId 前缀,跨进程追溯
+  const reqTag = requestId ? `[req=${requestId}]` : '';
   const channel = videoGenChannel(attemptId);
   const redis = getPrimaryRedis();
   const publish = async (event: VideoGenProgressEvent): Promise<void> => {
@@ -108,7 +113,7 @@ export async function processVideoGenJob(
   };
 
   console.log(
-    `[${workerId}] processing attempt=${attemptId} provider=${providerId} group=${groupNumber} (job=${job.id} try=${job.attemptsMade + 1}/${job.opts.attempts ?? 1})`,
+    `[${workerId}]${reqTag} processing attempt=${attemptId} provider=${providerId} group=${groupNumber} (job=${job.id} try=${job.attemptsMade + 1}/${job.opts.attempts ?? 1})`,
   );
 
   // P0-3 idempotency check(防 stalled re-queue / retry 双写 MediaItem + ledger)
@@ -160,9 +165,12 @@ export async function processVideoGenJob(
       },
     );
   } catch (e) {
-    const errMsg = e instanceof Error ? e.message : String(e);
+    // 第 18 轮 audit P1:errMsg 是 SSE/DB/OperationLog 的对外字符串,必须脱敏。
+    // 原始 e 仍在下面 console.error 中保留,供 worker 日志 debug 用。
+    const errMsg = sanitizeErrorMsg(e);
     const unrecoverable = isUnrecoverableError(e);
     const finishedAt = new Date();
+    console.error(`[${workerId}]${reqTag} provider.generate failed (raw):`, e);
 
     // self-audit:DB 写入失败也必须 publish 'failed',防前端永远 loading。
     // 把 $transaction 用 try/catch 兜底,即使写库挂了 publish 仍能发出。

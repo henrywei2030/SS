@@ -34,9 +34,11 @@ export class LocalAuthAdapter implements AuthAdapter {
   }
 
   async login(creds: LoginCredentials): Promise<{ user: SessionUser; token: string }> {
+    // 第 18 轮 audit P0 防御性兜底:即使 router 没 transform 也归一化(adapter 独立可用)
+    const identifier = creds.identifier.toLowerCase().trim();
     const user = await prisma.user.findFirst({
       where: {
-        OR: [{ email: creds.identifier }, { username: creds.identifier }],
+        OR: [{ email: identifier }, { username: identifier }],
         deletedAt: null,
       },
     });
@@ -66,11 +68,14 @@ export class LocalAuthAdapter implements AuthAdapter {
     if (input.password.length < 8) {
       throw new ValidationError('password must be at least 8 characters');
     }
+    // 第 18 轮 audit P0 防御性兜底:adapter 独立可用,即使 router 没 transform 也归一化
+    const email = input.email.toLowerCase().trim();
+    const username = input.username.toLowerCase().trim();
     // W1-W7 audit:必须过滤 deletedAt 防软删账号永久占用 email/username
     // 原版漏过滤 → 用户软删后该邮箱永远不能再注册(管理员无法重新建账号)
     const existing = await prisma.user.findFirst({
       where: {
-        OR: [{ email: input.email }, { username: input.username }],
+        OR: [{ email }, { username }],
         deletedAt: null,
       },
     });
@@ -79,8 +84,8 @@ export class LocalAuthAdapter implements AuthAdapter {
     const passwordHash = await hash(input.password, 10);
     const user = await prisma.user.create({
       data: {
-        email: input.email,
-        username: input.username,
+        email,
+        username,
         displayName: input.displayName,
         passwordHash,
         locale: input.locale ?? 'zh-CN',

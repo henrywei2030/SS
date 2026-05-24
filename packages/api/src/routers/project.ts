@@ -172,6 +172,15 @@ export const projectRouter = router({
 
   /** 创建项目 */
   create: protectedProcedure
+    // 第 20 轮 audit / ADR-27:Mastra agent 创建新项目接入点
+    .meta({
+      agentTool: {
+        description: '创建一个新项目(自动添加 owner 为 OWNER 成员)',
+        sideEffects: ['db.create:Project', 'db.create:ProjectMember', 'OperationLog.write'],
+        costEstimateCny: 0,
+        requireConfirm: false,
+      },
+    })
     .input(createProjectSchema)
     .mutation(async ({ ctx, input }) => {
       const project = await ctx.prisma.project.create({
@@ -338,6 +347,15 @@ export const projectRouter = router({
 
   /** 添加成员 — 必须是已注册激活用户 */
   addMember: protectedProcedure
+    // 第 20 轮 audit / ADR-27:Mastra agent 加成员前必须确认人选(防误邀请到敏感项目)
+    .meta({
+      agentTool: {
+        description: '将某 user 加为项目成员,role 决定权限(OWNER/ADMIN/LEADER/MEMBER/VIEWER)',
+        sideEffects: ['db.create:ProjectMember', 'OperationLog.write'],
+        costEstimateCny: 0,
+        requireConfirm: true,
+      },
+    })
     .input(
       z.object({
         projectId: z.string().cuid(),

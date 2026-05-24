@@ -7,6 +7,8 @@ import { z } from 'zod';
 import { getAuthAdapter } from '@ss/adapters/auth';
 
 import { router, publicProcedure, protectedProcedure, rateLimit } from '../trpc.js';
+// 第 19 轮 audit P1:changePassword 加 audit log(链路 10 verify 时发现缺漏)
+import { logOperation } from '../middleware/audit.js';
 
 export const authRouter = router({
   // W7 audit R8 P0:auth.login 加 rate limit(防撞密码),per-IP 5 次 / 60s
@@ -21,7 +23,8 @@ export const authRouter = router({
     )
     .input(
       z.object({
-        identifier: z.string().min(1, '请输入邮箱或用户名'),
+        // 第 18 轮 audit P0:identifier 强制归一化 → 防 "Alice@x" / "alice@x" 绕过 @unique 注册多账号
+        identifier: z.string().min(1, '请输入邮箱或用户名').transform((s) => s.toLowerCase().trim()),
         password: z.string().min(1, '请输入密码'),
       }),
     )
@@ -33,8 +36,9 @@ export const authRouter = router({
   signup: publicProcedure
     .input(
       z.object({
-        email: z.string().email(),
-        username: z.string().min(3).max(40),
+        // 第 18 轮 audit P0:email/username 强制 lowercase+trim,跟 login 一致防绕过软删
+        email: z.string().email().transform((s) => s.toLowerCase().trim()),
+        username: z.string().min(3).max(40).transform((s) => s.toLowerCase().trim()),
         displayName: z.string().min(1).max(60),
         // 密码强度:8 字符以上 + 至少含字母 + 数字(防"12345678" / "password" 等弱密码)
         password: z
@@ -91,6 +95,11 @@ export const authRouter = router({
     .mutation(async ({ ctx, input }) => {
       const auth = getAuthAdapter();
       await auth.changePassword(ctx.user.id, input.oldPassword, input.newPassword);
+      // 第 19 轮 audit P1:audit 链路 10 verify 时发现 changePassword 没记日志
+      // 不记 password 内容(显然),只记 actor + ts;管理员审计可见
+      await logOperation(ctx, 'auth.password.change', 'user', ctx.user.id, null, {
+        changedAt: new Date().toISOString(),
+      });
       return { success: true };
     }),
 });

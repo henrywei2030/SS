@@ -896,8 +896,85 @@ export const tools = collectAgentTools(appRouter);
 
 ---
 
+## ADR-27 · 第 19-20 轮 audit 全栈加固决议(2026-05-24)
+
+### 背景
+
+W1-W7 MVP 100% 完成,实战前用户要求"60 轮 debug"加固(2×30 轮),核心三诉求:
+1. 所有模块留升级接口(后期每步骤可让 agent 执行)
+2. 模块独立升级不影响其他(功能/参数/UI 解耦)
+3. 跨模块流程清晰可追溯(出错可 trace)
+
+### 决议(本轮真落地)
+
+**A. requestId 全链路贯通(可追溯 #3)**
+- `route.ts` 生成 UUID(或读 X-Request-Id header)→ ctx.requestId
+- tRPC errorFormatter 透传到 error.data.requestId
+- aigc 入队 → VideoGenJobDataSchema.requestId → worker `[req=xxx]` 前缀
+- 前端 `lib/trpc/error-toast.ts` showTrpcError 自动附 ` · req=xxxx` 后缀
+- response header `x-request-id` 回吐供客户端读取
+- 用户报 bug 附 requestId,运维 `grep "req=xxx"` 看全链路日志
+
+**B. AgentTool meta 13 mutation 100% 覆盖(升级接口 #1)**
+- `trpc.ts` `initTRPC.meta<TRPCMeta>()` + AgentToolMeta interface
+- 13 个核心 mutation 全加 `.meta({ agentTool: { description, sideEffects, costEstimateCny, requireConfirm } })`:
+  - asset.create / asset.generateImage / asset.batchCreate / asset.breakdown
+  - storyboard.generateForEpisode / storyboard.publishEpisode / storyboard.mergeShots
+  - aigc.generateVideo / aigc.bindAssetToGroup
+  - script.upload / script.analyze
+  - project.create / project.addMember
+- Phase 2 Mastra 启动:写 `packages/agent/tools.ts` 扫所有 `.meta.agentTool` → Mastra tool registry,**零业务改动**
+
+**C. EventBus 协作完整(模块解耦 #2)**
+- `in-process.ts` 加 dev-mode trace log + subscriber count
+- 4 个 router publish 缺漏补:STORYBOARD_GENERATED / STORYBOARD_PUBLISHED / ASSET_GENERATED / ASSET_CONFIRMED
+- events.ts type contract 不再死契约,真触发订阅方
+- 模块解耦:订阅方只看 topic + payload type,不直接 import 发布方
+
+**D. 模块边界文档(独立升级 #2)**
+- `docs/MODULES.md` 全景 + 依赖图 ASCII + 协作契约 + 升级 hook 清单
+- 4 个 package README:api / core / queue / adapters
+- Tauri capabilities 预设 `apps/desktop/src-tauri/capabilities/default.json`(DRAFT 状态,Phase 1.5 启用)
+
+**E. 安全 + 性能修(沿带项)**
+- auth email/username lowercase + trim(防绕过软删)
+- confirmCandidate / unconfirmSlot advisory_xact_lock(并发 maturity race)
+- errorMsg sanitize 5 处(防真接 Provider 后 URL/token 泄漏)
+- media upload MIME ↔ kind 白名单(防 SVG XSS / PDF 假冒)
+- aigc.getGroupDetail mediaIds size guard(防异常 1000+ 膨胀)
+- changePassword 加 audit log(链路 10 verify 发现)
+- .env.example 补 7 个变量(AUTH_DRIVER / AUTH_TOKEN_TTL_SEC / SSE_TOKEN_SECRET / STORAGE_LOCAL_*等)
+
+### 影响
+
+- **代码改动**:25 文件 +600/-30 行
+- **新增文档**:6 个(MODULES.md / 4 README / capabilities/default.json)
+- **零 schema 迁移**:刻意避免 migration 简化部署
+- **零回归**:typecheck 15 task 全过 / test 25 测全过
+
+### 留尾(明确转 Phase 2)
+
+- React Error Boundary + 401 全局 redirect(本轮加了 mutationCache 全局 toast,但未做 redirect)
+- Optimistic update + 客户端 zod 校验 + form reset 强制
+- recharts lazy load(分析页 bundle)
+- 公开注册指引 / cost pre-check / SSE polling fallback / 失败 errorCode 枚举
+- 大文件 chunked upload / AIGC 来源 breadcrumb
+- schema 加 `@@index([projectId, createdAt])` GenerationAttempt(留 Phase 2 跟其他 schema 改一起 migration)
+- OperationLog action 渐进迁移到 `<module>.<entity>.<verb>` 三段式(无硬编码约束,新代码用三段式即可)
+- Project owner 软删后 transfer ownership UI(当前 owner 唯一无法转,无人会软删自己 — 业务不阻塞)
+- Tauri capabilities 真启用(Phase 1.5 Rust toolchain ready 后)
+
+### 关联
+
+- **ADR-22** Mastra 选型(本 ADR 段 B 是其执行预备的 100% 覆盖)
+- **ADR-25** W5.5 异步生成(本 ADR 段 A requestId 贯通到 worker 的依据)
+- **ADR-26** Agent 联动接口预留(本 ADR 段 B 落地)
+- **本轮所有改动**:见 git log `feat(audit-r19+r20):` 这次 commit
+
+---
+
 ## 待补充的决策(占位)
 
-📋 ADR-27 · 桌面端 vs 移动端的代码共享策略(Phase 2 拆分时)
-📋 ADR-28 · 私有部署 vs SaaS 双轨的数据隔离策略(Phase 2)
-📋 ADR-29 · 海外多区域部署(Phase 3 国际化时)
+📋 ADR-30 · 桌面端 vs 移动端的代码共享策略(Phase 2 拆分时)
+📋 ADR-31 · 私有部署 vs SaaS 双轨的数据隔离策略(Phase 2)
+📋 ADR-32 · 海外多区域部署(Phase 3 国际化时)

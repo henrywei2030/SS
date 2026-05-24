@@ -16,6 +16,9 @@ import { z } from 'zod';
 import { generateStoryboard, mergeShots, type MergeableShot } from '@ss/core/storyboard';
 import { parseScriptText } from '@ss/core/script';
 import { EVENTS } from '@ss/shared/events';
+import { getEventBus } from '@ss/adapters/eventbus';
+// 第 18 轮 audit P1:LLM 失败错误信息脱敏(防真接 Claude 后泄漏 API URL/token)
+import { sanitizeErrorMsg } from '@ss/shared';
 
 import { router, protectedProcedure, rateLimit } from '../trpc.js';
 import type { Context } from '../context.js';
@@ -512,6 +515,15 @@ export const storyboardRouter = router({
    * - 组的 number 用首尾镜号拼接（如 "1-8"）
    */
   mergeShots: protectedProcedure
+    // 第 20 轮 audit / ADR-27:合并镜头改变 ShotGroup 结构,Mastra agent 需 confirm 防误操作
+    .meta({
+      agentTool: {
+        description: '把 N 个相邻镜头(shotIds)合并到一个 ShotGroup,自动算 number=首-末',
+        sideEffects: ['db.create:ShotGroup', 'db.update:Shot.groupId', 'OperationLog.write'],
+        costEstimateCny: 0,
+        requireConfirm: true,
+      },
+    })
     .input(
       z.object({
         shotIds: z.array(z.string().cuid()).min(2, '至少选 2 个镜头才能合并'),
@@ -773,6 +785,23 @@ export const storyboardRouter = router({
    *   5. 触发 EVENTS.STORYBOARD_GENERATED
    */
   generateForEpisode: protectedProcedure
+    // 第 19 轮 audit / ADR-27:Mastra agent 调用前必看 episode 状态 + LLM 配额
+    .meta({
+      agentTool: {
+        description: '为指定 Episode 自动分镜:剧本拆场 → LLM 生成镜头 → 自动合并组,调 Claude/豆包',
+        sideEffects: [
+          'extern.api:TextProvider',
+          'db.create:Scene',
+          'db.create:Shot',
+          'db.create:ShotGroup',
+          'db.create:GenerationAttempt',
+          'cost.deduct',
+          'eventbus.publish:STORYBOARD_GENERATED',
+        ],
+        costEstimateCny: 5.0,
+        requireConfirm: false,
+      },
+    })
     // W7 audit R8 P0:per-user 5 次 / 60s — 整集 LLM 调用最贵,严控
     .use(
       rateLimit({
@@ -1038,7 +1067,9 @@ export const storyboardRouter = router({
           });
         } catch (e) {
           const finishedAt = new Date();
-          const errMsg = e instanceof Error ? e.message : String(e);
+          // 第 18 轮 audit P1:errMsg 入 attempt.errorMsg + 推回前端前脱敏
+          console.error('[storyboard.generateForEpisode] LLM failed (raw):', e);
+          const errMsg = sanitizeErrorMsg(e);
           await ctx.prisma.generationAttempt.update({
             where: { id: attempt.id },
             data: {
@@ -1121,6 +1152,18 @@ export const storyboardRouter = router({
         errors,
       });
 
+      // 第 19 轮 audit P1:真 publish 给订阅方(events.ts 已定义,router 之前漏调)
+      // 失败不影响主流程返回,catch 内只 log(订阅方掉线不应让主 mutation 失败)
+      await getEventBus()
+        .publish(
+          EVENTS.STORYBOARD_GENERATED,
+          { episodeId: ep.id, shotCount: createdShotIds.length },
+          { publisherId: 'storyboard.generateForEpisode' },
+        )
+        .catch((err) => {
+          console.error('[storyboard.generateForEpisode] eventbus publish failed:', err);
+        });
+
       return {
         eventName: EVENTS.STORYBOARD_GENERATED,
         episodeId: ep.id,
@@ -1143,6 +1186,21 @@ export const storyboardRouter = router({
   // -------- 发布 --------
 
   publishEpisode: protectedProcedure
+    // 第 20 轮 audit / ADR-27:发布是 episode-level 不可逆动作,Mastra agent 必须 human-in-loop
+    .meta({
+      agentTool: {
+        description: '发布整集分镜:status DRAFT/IN_PROGRESS → IN_PROGRESS + publishedVersion+1 + shot/group → PUBLISHED;触发下游 W6 剪辑订阅',
+        sideEffects: [
+          'db.update:Episode',
+          'db.updateMany:Shot',
+          'db.updateMany:ShotGroup',
+          'eventbus.publish:STORYBOARD_PUBLISHED',
+          'OperationLog.write',
+        ],
+        costEstimateCny: 0,
+        requireConfirm: true,
+      },
+    })
     .input(z.object({ episodeId: z.string().cuid() }))
     .mutation(async ({ ctx, input }) => {
       const ep = await loadEpisodeOrThrow(ctx, input.episodeId);
@@ -1229,6 +1287,26 @@ export const storyboardRouter = router({
       });
 
       await logOperation(ctx, 'storyboard.publish', 'episode', ep.id, ep, updated);
+
+      // 第 19 轮 audit P0:真 publish 给订阅方(events.ts 定义但 router 之前漏调,W6 剪辑 / Phase 2 Auto-Salvage 订阅方都收不到)
+      const shotIds = await ctx.prisma.shot.findMany({
+        where: { episodeId: ep.id, deletedAt: null },
+        select: { id: true },
+      });
+      await getEventBus()
+        .publish(
+          EVENTS.STORYBOARD_PUBLISHED,
+          {
+            episodeId: ep.id,
+            projectId: ep.projectId,
+            version: updated.publishedVersion,
+            shotIds: shotIds.map((s) => s.id),
+          },
+          { publisherId: 'storyboard.publishEpisode' },
+        )
+        .catch((err) => {
+          console.error('[storyboard.publishEpisode] eventbus publish failed:', err);
+        });
 
       return {
         eventName: EVENTS.STORYBOARD_PUBLISHED,

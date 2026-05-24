@@ -15,6 +15,8 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
 import { getStorageAdapter, buildStorageKey } from '@ss/adapters/storage';
+// 第 18 轮 audit P1:base64 解码错误信息脱敏 + MIME 白名单守门
+import { sanitizeErrorMsg } from '@ss/shared';
 
 import { router, protectedProcedure } from '../trpc.js';
 import { logOperation } from '../middleware/audit.js';
@@ -31,6 +33,22 @@ const KIND_ENUM = z.enum(['IMAGE', 'VIDEO', 'AUDIO', 'THREE_D', 'OTHER']);
 const SCOPE_ENUM = z.enum(['PUBLIC', 'PROJECT', 'PERSONAL']);
 
 const UPLOAD_MAX_BYTES = 100 * 1024 * 1024; // 100MB
+
+/**
+ * 第 18 轮 audit P1:upload 的 mimeType ↔ kind 必须交叉校验,
+ * 防 SVG 上传成 IMAGE 触发 XSS、PDF 假冒 IMAGE 等。
+ * - IMAGE 故意不收 image/svg+xml(SVG XSS 已知风险,Phase 2 启用 DOMPurify 后再考虑放开)
+ * - VIDEO/AUDIO 列常见 codec
+ * - THREE_D 主流 mime 不统一,放宽到 model/* 或 application/octet-stream
+ * - OTHER 兜底放宽(Phase 1 不挡,Phase 2 按业务细化)
+ */
+const ALLOWED_MIME_BY_KIND: Record<'IMAGE' | 'VIDEO' | 'AUDIO' | 'THREE_D' | 'OTHER', RegExp> = {
+  IMAGE: /^image\/(jpeg|jpg|png|webp|gif|avif|heic|heif|bmp)$/i,
+  VIDEO: /^video\/(mp4|webm|quicktime|x-matroska|x-msvideo|ogg)$/i,
+  AUDIO: /^audio\/(mpeg|mp3|wav|wave|x-wav|aac|ogg|webm|flac|x-m4a|mp4)$/i,
+  THREE_D: /^(model\/.+|application\/octet-stream)$/i,
+  OTHER: /.+/,
+};
 
 export const mediaRouter = router({
   /**
@@ -204,7 +222,16 @@ export const mediaRouter = router({
       } catch (e) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
-          message: `base64 解码失败: ${e instanceof Error ? e.message : String(e)}`,
+          message: `base64 解码失败: ${sanitizeErrorMsg(e)}`,
+        });
+      }
+
+      // 第 18 轮 audit P1:mimeType ↔ kind 交叉校验(SVG XSS / PDF 假冒 IMAGE 等)
+      const allowedMime = ALLOWED_MIME_BY_KIND[input.kind];
+      if (!allowedMime.test(mimeType)) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `kind=${input.kind} 不允许 mimeType=${mimeType}(SVG/PDF 等需走 OTHER 或对应 kind)`,
         });
       }
 

@@ -66,6 +66,12 @@ export const VideoGenJobDataSchema = z.object({
 
   /** 仅用于日志追溯,不参与业务决策 */
   groupNumber: z.string(),
+
+  /**
+   * 第 19 轮 audit P1:requestId 贯通 tRPC ctx → 入队 Job → worker console.log
+   * 用户报 bug 给 requestId,运维 `grep "req=xxx"` 即可看全链路日志(从 web 到 worker)
+   */
+  requestId: z.string().optional(),
 });
 export type VideoGenJobData = z.infer<typeof VideoGenJobDataSchema>;
 

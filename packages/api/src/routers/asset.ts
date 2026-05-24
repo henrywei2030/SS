@@ -20,6 +20,10 @@ import {
   type GenerationSlot,
 } from '@ss/core/asset';
 import { getImageProvider } from '@ss/adapters/provider';
+import { getEventBus } from '@ss/adapters/eventbus';
+// 第 18 轮 audit P1:errMsg 入库 + throw 前脱敏,防真接 NanoBanana / GPT Image 后泄漏 URL/token
+// 第 19 轮 audit P1:加 EventBus publish(ASSET_GENERATED / ASSET_CONFIRMED),events.ts 定义但漏调
+import { sanitizeErrorMsg, EVENTS } from '@ss/shared';
 
 import { router, protectedProcedure } from '../trpc.js';
 import type { Context } from '../context.js';
@@ -321,6 +325,15 @@ export const assetRouter = router({
 
   /** 单个手动创建 */
   create: protectedProcedure
+    // 第 19 轮 audit / ADR-26+27:Mastra agent 自动注册接入点
+    .meta({
+      agentTool: {
+        description: '创建一个新的美术资产(角色/场景/道具/特效)',
+        sideEffects: ['db.create:Asset', 'OperationLog.write'],
+        costEstimateCny: 0,
+        requireConfirm: false,
+      },
+    })
     .input(
       DraftInputSchema.extend({
         projectId: z.string().cuid(),
@@ -350,6 +363,15 @@ export const assetRouter = router({
 
   /** 批量创建 — 拆解结果一次性入库,跳过重名 */
   batchCreate: protectedProcedure
+    // 第 20 轮 audit / ADR-27:批量创建(从 breakdown 草稿一次性入库)
+    .meta({
+      agentTool: {
+        description: '批量创建美术资产(从 LLM breakdown 草稿一次性入库,最多 100 个)',
+        sideEffects: ['db.createMany:Asset', 'OperationLog.write'],
+        costEstimateCny: 0,
+        requireConfirm: false,
+      },
+    })
     .input(
       z.object({
         projectId: z.string().cuid(),
@@ -523,6 +545,15 @@ export const assetRouter = router({
    * (避免 LLM 乱拆把脏数据直接写库,人工把关一遍)
    */
   breakdown: protectedProcedure
+    // 第 20 轮 audit / ADR-27:LLM 调用,有真成本,Mastra agent 需 budget 决策
+    .meta({
+      agentTool: {
+        description: '调 Claude/豆包 从剧本拆解出角色/场景/道具/特效,返回草稿(不入库)',
+        sideEffects: ['extern.api:TextProvider', 'cost.deduct', 'db.create:GenerationAttempt'],
+        costEstimateCny: 0.3,
+        requireConfirm: false,
+      },
+    })
     .input(
       z.object({
         projectId: z.string().cuid(),
@@ -630,7 +661,9 @@ export const assetRouter = router({
         });
       } catch (e) {
         const finishedAt = new Date();
-        const errMsg = e instanceof Error ? e.message : String(e);
+        // 第 18 轮 audit P1:errMsg 入 attempt.errorMsg + TRPCError + log 前脱敏
+        console.error('[asset.breakdown] LLM failed (raw):', e);
+        const errMsg = sanitizeErrorMsg(e);
         await ctx.prisma.generationAttempt.update({
           where: { id: attempt.id },
           data: {
@@ -740,6 +773,21 @@ export const assetRouter = router({
    * W4-MM.6 替换:把占位换成真实 ImageProvider.generate() + MinIO 上传 + storageKey
    */
   generateImage: protectedProcedure
+    // 第 19 轮 audit / ADR-27:扣费 + 调外部 Provider,Mastra agent 调用需 budget 决策
+    .meta({
+      agentTool: {
+        description: '为资产某槽位(portrait / threeView 等)抽卡生成参考图,调 NanoBanana/GPT-Image/豆包',
+        sideEffects: [
+          'extern.api:ImageProvider',
+          'cost.deduct',
+          'db.create:GenerationAttempt',
+          'db.create:MediaItem',
+          'db.create:CostLedgerEntry',
+        ],
+        costEstimateCny: 0.5,
+        requireConfirm: false,
+      },
+    })
     .input(
       z.object({
         assetId: z.string().cuid(),
@@ -825,7 +873,10 @@ export const assetRouter = router({
         // W1-W5 audit P0(B2):失败路径也必须留 attempt + ledger 行,
         // 否则抽卡率(成功 / (成功+失败))分母会缺,Phase 2 ROI 监控失真
         const failedAt = new Date();
-        const errMsg = e instanceof Error ? e.message : String(e);
+        // 第 18 轮 audit P1:errMsg 入库 + throw 前脱敏(防真接 Provider 后泄漏 URL/token)
+        // 原始 e 通过 TRPCError.cause 透传,服务端日志仍可见
+        console.error('[asset.generateImage] provider failed (raw):', e);
+        const errMsg = sanitizeErrorMsg(e);
         const failedAttempt = await ctx.prisma.generationAttempt.create({
           data: {
             projectId: asset.projectId,
@@ -994,6 +1045,20 @@ export const assetRouter = router({
         projectId: asset.projectId,
       });
 
+      // 第 19 轮 audit P1:真 publish ASSET_GENERATED(events.ts 定义但 router 漏调)
+      // 每个 mediaId 推一条,订阅方按 mediaItemId 跟踪
+      for (const mediaId of mediaIds) {
+        await getEventBus()
+          .publish(
+            EVENTS.ASSET_GENERATED,
+            { assetId: asset.id, version: 0, mediaItemId: mediaId },
+            { publisherId: 'asset.generateImage' },
+          )
+          .catch((err) => {
+            console.error('[asset.generateImage] eventbus publish failed:', err);
+          });
+      }
+
       // 为 UI 方便,返回 candidates 数组(每张图对应一个伪 attempt — 实际 1 个 attempt 多图)
       const candidates = mediaIds.map((mediaId) => ({
         mediaId,
@@ -1155,7 +1220,11 @@ export const assetRouter = router({
       const fieldName = SLOT_FIELD[input.slot];
 
       // 事务内重新读 + 计算 + 更新,防并发 confirm 不同 slot 时基于陈旧状态算 maturity
+      // 第 18 轮 audit P1:加 advisory_xact_lock(asset.id) 串行化同一 asset 的并发 confirm,
+      // 否则两个并发不同 slot 在 Read Committed 下各自 fresh 读看不到对方 update,
+      // 最终 maturity 字段只反映最后一个 update 的视角(漏算对方新增 slot)
       const updated = await ctx.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'asset_confirm:' + asset.id})::bigint)`;
         const fresh = await tx.asset.findFirstOrThrow({
           where: { id: asset.id, deletedAt: null },
         });
@@ -1177,6 +1246,17 @@ export const assetRouter = router({
         maturity: newMaturity,
         projectId: asset.projectId,
       });
+
+      // 第 19 轮 audit P1:真 publish ASSET_CONFIRMED(events.ts 定义但 router 漏调)
+      await getEventBus()
+        .publish(
+          EVENTS.ASSET_CONFIRMED,
+          { assetId: asset.id, confirmedBy: ctx.user.id },
+          { publisherId: 'asset.confirmCandidate' },
+        )
+        .catch((err) => {
+          console.error('[asset.confirmCandidate] eventbus publish failed:', err);
+        });
 
       return updated;
     }),
@@ -1275,7 +1355,10 @@ export const assetRouter = router({
       const fieldName = SLOT_FIELD[input.slot];
 
       // 事务内重新读 + 计算 + 更新 — 同 confirmCandidate
+      // 第 19 轮 audit P1:加 advisory_xact_lock(跟 confirmCandidate 配套),
+      // 否则 confirm A + unconfirm B 并发时 maturity 会基于陈旧状态算
       const updated = await ctx.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'asset_confirm:' + asset.id})::bigint)`;
         const fresh = await tx.asset.findFirstOrThrow({
           where: { id: asset.id, deletedAt: null },
         });

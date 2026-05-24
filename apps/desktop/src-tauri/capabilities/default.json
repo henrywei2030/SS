@@ -1,0 +1,28 @@
+{
+  "$schema": "https://schema.tauri.app/config/2/capability",
+  "_comment_zh": "Tauri 2 Capabilities 最小化预设 — 第 20 轮 audit Phase 1.5 启用前预留",
+  "_comment_en": "Tauri 2 Capabilities minimum preset — provisioned for Phase 1.5 enablement",
+  "_status": "DRAFT — 当前 Tauri 2 默认空 capabilities = 严格拒绝(最安全)。Phase 1.5 真编译时按需启用,改 tauri.conf.json 加 \"capabilities\": [\"capabilities/default.json\"]",
+
+  "identifier": "default",
+  "description": "StarsAlign Studio 桌面端默认能力 — 严守最小权限原则",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:webview:default",
+    "core:app:default",
+    "core:event:default",
+    "core:menu:default",
+    "core:resources:default",
+    "core:image:default"
+  ],
+  "_disabled_by_default": {
+    "_comment": "Phase 1.5+ 按需添加,严格 review 每项必要性",
+    "fs:read": "若需读用户本地剧本 .docx/.txt 文件,加 fs:allow-read-file (限定 $HOME/Documents/StarsAlign/*)",
+    "fs:write": "若需缓存生成视频到本地,加 fs:allow-write-file (限定 $APPDATA/StarsAlign/cache/*)",
+    "shell:execute": "若需调本地 ffmpeg/whisper 等,加 shell:allow-execute (白名单具体 cmd + 参数 regex)",
+    "http:default": "若 web 内嵌 fetch 跨域,严格白名单 domain",
+    "dialog:open": "若用系统文件选择对话框,加 dialog:allow-open"
+  }
+}

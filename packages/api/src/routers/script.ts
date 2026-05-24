@@ -12,6 +12,8 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
 import { parseScriptText } from '@ss/core/script';
+// 第 18 轮 audit P1:LLM 失败错误信息脱敏入库
+import { sanitizeErrorMsg } from '@ss/shared';
 
 import { router, protectedProcedure } from '../trpc.js';
 import type { Context } from '../context.js';
@@ -145,6 +147,19 @@ export const scriptRouter = router({
    * 若同 episode 的当前剧本 content hash 与本次相同 → 不新建，返回 existing
    */
   upload: protectedProcedure
+    // 第 19 轮 audit / ADR-27:script 上传是 W3 分镜的前置入口
+    .meta({
+      agentTool: {
+        description: '上传剧本到指定 Episode:幂等(content hash 同则不新建版本),触发 generate 前置',
+        sideEffects: [
+          'db.create:Script(版本)',
+          'db.update:Episode.softLock',
+          'OperationLog.write',
+        ],
+        costEstimateCny: 0,
+        requireConfirm: false,
+      },
+    })
     .input(
       z.object({
         projectId: z.string().cuid(),
@@ -550,6 +565,20 @@ export const scriptRouter = router({
    *  原版直接默认 'claude-sonnet-4-5',绕过 binding,admin 改 binding 不生效。
    */
   analyze: protectedProcedure
+    // 第 20 轮 audit / ADR-27:剧本分析 LLM 调用(8 维评分),Mastra agent 需看预算
+    .meta({
+      agentTool: {
+        description: '调 LLM 对剧本做 8 维分析(剧情/角色/节奏/对白/...)+ overallScore',
+        sideEffects: [
+          'extern.api:TextProvider',
+          'cost.deduct',
+          'db.create:GenerationAttempt',
+          'db.create:ScriptAnalysis',
+        ],
+        costEstimateCny: 0.5,
+        requireConfirm: false,
+      },
+    })
     .input(
       z.object({
         scriptId: z.string().cuid(),
@@ -662,7 +691,9 @@ export const scriptRouter = router({
         return { analysis, status: 'done' };
       } catch (e) {
         const finishedAt = new Date();
-        const errMsg = e instanceof Error ? e.message : String(e);
+        // 第 18 轮 audit P1:errMsg 入 attempt.errorMsg 前脱敏
+        console.error('[script.analyze] LLM failed (raw):', e);
+        const errMsg = sanitizeErrorMsg(e);
         await ctx.prisma.generationAttempt.update({
           where: { id: attempt.id },
           data: {

@@ -4,6 +4,8 @@
  * W7 audit R8 P0:CSRF 防御 — 对 mutation(POST)校验 Origin / Sec-Fetch-Site,
  * 拒非同源 / 跨站请求。GET(query)不需要(cookie 走 sameSite=lax 足够)。
  */
+import { randomUUID } from 'node:crypto';
+
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 import { cookies, headers } from 'next/headers';
 
@@ -53,6 +55,11 @@ const handler = async (req: Request): Promise<Response> => {
     }
   }
 
+  // 第 19 轮 audit P1:每请求生成 requestId 贯穿 ctx → audit log → 入队 Job → worker
+  // 用户报"抽卡失败"时可附 requestId,运维 grep 日志即可 trace 全链路
+  // X-Request-Id header 也支持(反代/客户端传入优先)
+  const requestId = hdrs.get('x-request-id') ?? randomUUID();
+
   return fetchRequestHandler({
     endpoint: '/api/trpc',
     req,
@@ -66,11 +73,15 @@ const handler = async (req: Request): Promise<Response> => {
           req.headers.get('x-real-ip') ??
           null,
         userAgent: req.headers.get('user-agent'),
+        requestId,
       }),
     onError({ error, path }) {
-      if (process.env.NODE_ENV === 'development') {
-        console.error(`[trpc] ${path}: ${error.message}`);
-      }
+      // 失败必印 requestId,生产 / dev 都印(用户拿 requestId 报 bug 时这是入口)
+      console.error(`[trpc][req=${requestId}] ${path ?? '<no-path>'}: ${error.message}`);
+    },
+    responseMeta() {
+      // 把 requestId 回吐到 response header,前端可读取展示给用户
+      return { headers: { 'x-request-id': requestId } };
     },
   });
 };

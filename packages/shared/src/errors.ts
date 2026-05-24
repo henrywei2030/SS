@@ -52,3 +52,22 @@ export class ComplianceError extends SsError {
     super('COMPLIANCE_REJECTED', reason, 451);
   }
 }
+
+/**
+ * 第 18 轮 audit P1:对外暴露 errorMsg 前脱敏
+ *
+ * Why:真接 Seedance/Claude 等 Provider 后,Error.message 可能包含 API URL / token / 内部 path,
+ *      Worker 直接 SSE 推给前端 + 入库 attempt.errorMsg 会泄漏。
+ * What:去 URL / 长 hex / 长 base64 / 深 path,截断到 maxLen。
+ * 原始 error 在 worker console.error 仍可见,开发者 debug 用日志。
+ */
+export function sanitizeErrorMsg(err: unknown, maxLen = 200): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  return raw
+    .replace(/https?:\/\/[^\s]+/g, '[URL]')
+    .replace(/\b[a-f0-9]{32,}\b/gi, '[HASH]')
+    .replace(/\b[A-Za-z0-9+/=]{40,}={0,2}\b/g, '[B64]')
+    .replace(/(\/[^\s/]+){3,}/g, '[PATH]')
+    .slice(0, maxLen)
+    .trim();
+}

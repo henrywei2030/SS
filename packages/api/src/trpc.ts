@@ -11,16 +11,47 @@ import type { Context } from './context.js';
 import { checkRateLimit, type RateLimitOpts } from './middleware/rate-limit.js';
 
 // ---------------------------------------------------------------------------
+// AgentTool 元数据 — ADR-26 落地 + ADR-27(本轮)
+//
+// 给每个核心 mutation 加 `.meta({ agentTool: {...} })`,Phase 2 Mastra agent 启动时:
+//   - 扫所有 procedure.meta.agentTool 自动注册成 Mastra tool registry
+//   - description / sideEffects / examples / costEstimate 让 agent 理解工具
+//   - requireConfirm:true 给 reject/delete 类,human-in-loop 必须二次确认
+//
+// Phase 1 只是占位 + 写 description,真的扫描/注册等 Phase 2 Mastra 启动
+// ---------------------------------------------------------------------------
+
+export interface AgentToolMeta {
+  /** 简短描述,Mastra agent 看这个决定何时用这个工具 */
+  description: string;
+  /** 副作用清单 — 让 agent 知道会改什么(db.create / db.update / extern.api / cost) */
+  sideEffects: string[];
+  /** 估算单次成本(CNY),agent 做预算决策用 */
+  costEstimateCny?: number;
+  /** true 时 agent 必须 human-in-loop 二次确认(reject/delete/publish 类) */
+  requireConfirm?: boolean;
+  /** 示例输入,Mastra fewshot 训练用(可选) */
+  examples?: Array<Record<string, unknown>>;
+}
+
+// 必须 export 否则 TS declaration emit 时 router 类型推断会报 TS4023
+export interface TRPCMeta {
+  agentTool?: AgentToolMeta;
+}
+
+// ---------------------------------------------------------------------------
 // tRPC 实例
 // ---------------------------------------------------------------------------
 
-const t = initTRPC.context<Context>().create({
+const t = initTRPC.context<Context>().meta<TRPCMeta>().create({
   transformer: superjson, // 支持 Date / Decimal / BigInt 透明传输
-  errorFormatter({ shape, error }) {
+  errorFormatter({ shape, error, ctx }) {
     return {
       ...shape,
       data: {
         ...shape.data,
+        // 第 19 轮 audit P1:错误响应携带 requestId 给前端,用户拿 requestId 报 bug 时可全链路追溯
+        requestId: ctx?.requestId,
         ssCode:
           error.cause instanceof SsError ? error.cause.code : undefined,
         zodIssues:

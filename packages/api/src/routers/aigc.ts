@@ -316,6 +316,8 @@ export const aigcRouter = router({
       });
 
       // 3. 收集所有引用的 mediaId 一次性查 MediaItem
+      // 第 20 轮 audit P2:加 size guard(防异常用例 1000+ binding 单次 IN 查询塞爆)
+      const MEDIA_IDS_QUERY_LIMIT = 1000;
       const mediaIds = new Set<string>();
       for (const b of bindings) {
         const a = b.asset;
@@ -332,6 +334,11 @@ export const aigcRouter = router({
           a.voiceMediaId,
         ]) {
           if (id) mediaIds.add(id);
+          if (mediaIds.size >= MEDIA_IDS_QUERY_LIMIT) break;
+        }
+        if (mediaIds.size >= MEDIA_IDS_QUERY_LIMIT) {
+          console.warn(`[aigc.getGroupDetail] mediaIds 触发 ${MEDIA_IDS_QUERY_LIMIT} 上限 (group=${grp.id} bindings=${bindings.length}),部分槽位预览可能不全`);
+          break;
         }
       }
       const medias =
@@ -823,6 +830,15 @@ export const aigcRouter = router({
    * usageType 默认按 asset.type 推导(CHARACTER→APPEAR / SCENE→ENVIRONMENT / PROP→APPEAR)
    */
   bindAssetToGroup: protectedProcedure
+    // 第 20 轮 audit / ADR-27:绑定资产到生成段,影响后续 compileVideoPrompt
+    .meta({
+      agentTool: {
+        description: '绑定一个资产到 ShotGroup,可指定 usageType + refSlotIdx + refKind',
+        sideEffects: ['db.create:AssetUsageBinding', 'OperationLog.write'],
+        costEstimateCny: 0,
+        requireConfirm: false,
+      },
+    })
     .input(
       z.object({
         groupId: z.string().cuid(),
@@ -979,6 +995,20 @@ export const aigcRouter = router({
    * 真 provider 没配置 / 无 key → MockVideoProvider 自动兜底(返公开样片,UI 端到端可演示)
    */
   generateVideo: protectedProcedure
+    // 第 19 轮 audit / ADR-27:最贵的 mutation,Mastra agent 调用前必看预算 + Provider 容量
+    .meta({
+      agentTool: {
+        description: '为一个 ShotGroup 异步抽卡生成视频片段(BullMQ 入队,SSE 推进度),调 Seedance/Volcengine',
+        sideEffects: [
+          'queue.enqueue:VideoGenJob',
+          'db.create:GenerationAttempt',
+          'cost.deduct',
+          'extern.api:VideoProvider',
+        ],
+        costEstimateCny: 2.0,
+        requireConfirm: false,
+      },
+    })
     // W7 audit R8 P0:per-user 10 次 / 60s — 防同用户无限烧 LLM 钱
     .use(
       rateLimit({
@@ -1366,6 +1396,8 @@ export const aigcRouter = router({
           refVideoUrl: input.refVideoUrl,
           refAudioUrl: input.refAudioUrl,
           groupNumber: grp.number,
+          // 第 19 轮 audit P1:requestId 贯通到 worker,运维 grep 日志可看全链路
+          requestId: ctx.requestId,
         });
       } catch (enqueueErr) {
         const errMsg = enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr);

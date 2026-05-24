@@ -47,6 +47,7 @@
 - [x] **W7 收尾 — DB Explorer MVP**(十六收工)— /admin/db-explorer 白名单 21 表 + Prisma 动态反射 + JSON dump
 - [x] **W7 收尾 — EN 文案 review**(十六收工)— zh ↔ en 4 json 全对齐 + characterRole enums 补
 - [x] **README + CHANGELOG**(十六收工)— 完整重写 README(完成度徽章+模块全景+快速启动)+ CHANGELOG 16 次收工日志
+- [x] **第 19-20 轮 audit 60 次 debug**(十八收工)— Sprint A/A2/B/C/D + R2 F/G/H · 修 15+ P0/P1 · 13 mutation .meta 100% · requestId 全链 · EventBus 4 publish 补 · Tauri capabilities DRAFT · 6 模块文档 · ADR-27 — 2026-05-24
 - [ ] **W5.6 进阶**(留 Phase 2)— 音频波形(wavesurfer.js)/ AI 自动打标(BPM/时长)/ pgvector 向量搜索
 - [ ] **Polish 剩余**(留 Phase 2)— 34 处硬编码颜色 / a11y / listBindings N+1 / OperationLog 命名规范
 - [ ] **W8 团队实战**(下次启动)— 5 人冷启动 + 配 API Key 真接 Seedance + 1 集 7 镜头
