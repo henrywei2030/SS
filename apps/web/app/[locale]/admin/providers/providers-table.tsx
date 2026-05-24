@@ -521,6 +521,22 @@ function ModelRow({
       onChange();
     },
   });
+  // Phase 1.5.2:删除按钮 — 从展示界面移除,放回下拉候选(下次可重新加)
+  // 中转站模型:apiKey 在 RelayProvider 上,ProviderConfig 本身无 key → 可直接删
+  // 直连模型 + 有 key:backend 会拒,用户需先在 SetApiKey 对话框清除 Key 再删
+  const deleteProvider = trpc.admin.provider.delete.useMutation({
+    onSuccess: onChange,
+    onError: (err) => alert(err.message),
+  });
+  const handleDelete = (): void => {
+    if (
+      !confirm(
+        `从列表移除 "${provider.displayName}"?\n(可下次从下拉重新添加 · 不会影响中转站凭证)`,
+      )
+    )
+      return;
+    deleteProvider.mutate({ providerId: provider.providerId, confirmDelete: true });
+  };
 
   const priceLabel = formatModelPrice(provider);
   const canEnable = provider.apiKeyConfigured;
@@ -640,6 +656,18 @@ function ModelRow({
             setActive.mutate({ providerId: provider.providerId, isActive: v })
           }
         />
+        {/* Phase 1.5.2:从展示移除(放回下拉候选) */}
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={handleDelete}
+          disabled={deleteProvider.isPending || provider.isActive}
+          className="size-7 p-0 text-red-600 hover:text-red-700"
+          aria-label="从列表移除"
+          title={provider.isActive ? '请先停用再移除' : '从列表移除(下次可从下拉重新加)'}
+        >
+          <Trash2 className="size-3.5" />
+        </Button>
       </div>
     </div>
   );
@@ -875,37 +903,42 @@ function AddDirectDialog({
   onClose: () => void;
   onSaved: () => void;
 }): React.ReactElement {
-  const [providerId, setProviderId] = React.useState('');
+  // Phase 1.5.2 简化(只 4 字段):displayName / baseUrl / apiKey / notes
+  // providerId / protocol / 单价 / 单位 自动生成 — 用户后续可在 admin/api-usage 看真实消费
   const [displayName, setDisplayName] = React.useState('');
   const [apiUrl, setApiUrl] = React.useState('');
   const [apiKey, setApiKey] = React.useState('');
-  const [unitPrice, setUnitPrice] = React.useState('0');
-  const [unitName, setUnitName] = React.useState<
-    'second' | 'image' | 'ktoken' | 'request' | 'frame'
-  >('ktoken');
-  const [protocol, setProtocol] = React.useState<
-    'openai-compat' | 'anthropic-native' | 'volcengine-native'
-  >('openai-compat');
-  const [defaultModel, setDefaultModel] = React.useState('');
+  const [notes, setNotes] = React.useState('');
   const [showKey, setShowKey] = React.useState(false);
 
   const create = trpc.admin.provider.create.useMutation();
   const setKey = trpc.admin.provider.setApiKey.useMutation();
   const setActive = trpc.admin.provider.setActive.useMutation();
 
+  // 自动生成 providerId:displayName slug + kind 后缀(防重)
+  const autoProviderId = React.useMemo(() => {
+    const slug = displayName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40);
+    return slug ? `direct-${slug}` : '';
+  }, [displayName]);
+
   const handleSave = async (): Promise<void> => {
     try {
+      const providerId = autoProviderId;
       await create.mutateAsync({
         providerId,
         displayName,
         kind: kind as 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'COMPLIANCE' | 'EMBEDDING',
         apiUrl,
-        unitPriceCny: Number(unitPrice),
-        unitName,
+        unitPriceCny: 0, // 直连默认 0(不入 cost ledger 精确计费,后续 admin/api-usage 看真实消费)
+        unitName: 'ktoken',
         defaultParams: {
-          protocol,
-          defaultModel: defaultModel || providerId,
+          protocol: 'openai-compat', // 99% 直连用 openai-compat 兼容协议
           source: 'direct',
+          ...(notes ? { notes } : {}),
         },
       });
       if (apiKey.length >= 8) {
@@ -919,127 +952,82 @@ function AddDirectDialog({
   };
 
   const canSubmit =
-    providerId.length >= 3 &&
     displayName.length >= 1 &&
     apiUrl.length >= 1 &&
+    autoProviderId.length >= 3 &&
     !create.isPending;
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>⭐ 添加直连 {KIND_META[kind]?.label}</DialogTitle>
           <DialogDescription>
-            自定义 base URL + API Key,kind={kind},不通过中转站(独立配置)
+            独立 API Key · 4 字段即可(其他参数自动生成)
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-3">
           <div className="grid gap-1.5">
-            <Label htmlFor="d-pid">providerId</Label>
-            <Input
-              id="d-pid"
-              value={providerId}
-              onChange={(e) => setProviderId(e.target.value.toLowerCase())}
-              placeholder="claude-opus-4-7-direct"
-              className="font-mono text-xs"
-            />
-            <p className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
-              kebab-case · 全局唯一标识
-            </p>
-          </div>
-
-          <div className="grid gap-1.5">
-            <Label htmlFor="d-name">显示名</Label>
+            <Label htmlFor="d-name">显示名称 *</Label>
             <Input
               id="d-name"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               placeholder="Claude Opus 4.7(Anthropic 直连)"
+              autoFocus
             />
-          </div>
-
-          <div className="grid gap-1.5 sm:grid-cols-2">
-            <div className="grid gap-1.5">
-              <Label htmlFor="d-url">Base URL</Label>
-              <Input
-                id="d-url"
-                value={apiUrl}
-                onChange={(e) => setApiUrl(e.target.value)}
-                placeholder="https://api.anthropic.com/v1"
-                className="font-mono text-xs"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="d-key">API Key</Label>
-              <div className="flex gap-1">
-                <Input
-                  id="d-key"
-                  type={showKey ? 'text' : 'password'}
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="sk-ant-..."
-                  className="font-mono text-xs"
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  type="button"
-                  onClick={() => setShowKey((v) => !v)}
-                  className="shrink-0 px-2"
-                >
-                  {showKey ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-1.5 sm:grid-cols-3">
-            <div className="grid gap-1.5">
-              <Label>协议</Label>
-              <select
-                value={protocol}
-                onChange={(e) => setProtocol(e.target.value as typeof protocol)}
-                className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-2 py-1.5 text-xs"
-              >
-                <option value="openai-compat">openai-compat</option>
-                <option value="anthropic-native">anthropic-native</option>
-                <option value="volcengine-native">volcengine-native</option>
-              </select>
-            </div>
-            <div className="grid gap-1.5">
-              <Label>单价(CNY)</Label>
-              <Input
-                value={unitPrice}
-                onChange={(e) => setUnitPrice(e.target.value)}
-                className="font-mono text-xs"
-                placeholder="0.025"
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label>单位</Label>
-              <select
-                value={unitName}
-                onChange={(e) => setUnitName(e.target.value as typeof unitName)}
-                className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-2 py-1.5 text-xs"
-              >
-                <option value="ktoken">ktoken</option>
-                <option value="image">image</option>
-                <option value="second">second</option>
-                <option value="request">request</option>
-                <option value="frame">frame</option>
-              </select>
-            </div>
+            {autoProviderId && (
+              <p className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
+                自动生成 providerId:<code className="font-mono">{autoProviderId}</code>
+              </p>
+            )}
           </div>
 
           <div className="grid gap-1.5">
-            <Label htmlFor="d-model">defaultModel(可选,空 = 用 providerId)</Label>
+            <Label htmlFor="d-url">Base URL *</Label>
             <Input
-              id="d-model"
-              value={defaultModel}
-              onChange={(e) => setDefaultModel(e.target.value)}
-              placeholder="claude-opus-4-7"
+              id="d-url"
+              value={apiUrl}
+              onChange={(e) => setApiUrl(e.target.value)}
+              placeholder="https://api.anthropic.com/v1"
               className="font-mono text-xs"
+            />
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="d-key">API Key</Label>
+            <div className="flex gap-1">
+              <Input
+                id="d-key"
+                type={showKey ? 'text' : 'password'}
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="sk-ant-... (可空,创建后再设)"
+                className="font-mono text-xs"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={() => setShowKey((v) => !v)}
+                className="shrink-0 px-2"
+              >
+                {showKey ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
+              </Button>
+            </div>
+            <p className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
+              ≥ 8 字符立即启用 · 空则创建后停用状态(可后续设置)
+            </p>
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="d-notes">备注(可选)</Label>
+            <Input
+              id="d-notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="¥10 月限额 / 主用 / 备用 / 等"
             />
           </div>
 
