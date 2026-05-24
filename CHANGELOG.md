@@ -5,13 +5,45 @@
 
 ---
 
-## [Unreleased] · W7 收尾中
+## [Unreleased] · W8 实战准备
 
 ### 计划
 - Tauri 桌面端真编译(需 Rust toolchain)
 - DB Explorer 编辑模式(当前只读)
-- EN 文案深度 review(当前 key 已对齐,值待润色)
-- 配 API Key 真接 Seedance → W8 实战
+- 配 Claude API Key 真接 → 验证 requestId 真贯通日志
+- 配 Seedance Key → 真出片 → W8 5 人冷启动
+
+---
+
+## 0.1.0 - 2026-05-24(W1-W7 + 19-20 轮 audit 加固 + W8 实战准备)
+
+### 十八次收工 — 第 19-20 轮 audit 全栈加固(`573a659`)— **ADR-27**
+- 🛡️ **60 次 debug 共 7 个 sprint**(Sprint A/A2/B/C/D + R2 F/G/H)
+- 🔒 **5 项 P0/P1 修**(Sprint A):
+  - auth email/username router `.transform` + adapter 双层 lowercase+trim(防绕过软删)
+  - confirmCandidate / unconfirmSlot `advisory_xact_lock`(maturity race)
+  - `sanitizeErrorMsg` helper (@ss/shared) + **5 处覆盖**(防真接 Provider 后 URL/token 泄漏)
+  - media upload `ALLOWED_MIME_BY_KIND` 白名单(防 SVG XSS / PDF 假冒)
+  - `.env.example` 补 7 个变量
+- 🔗 **D-1 requestId 全链 7 节点贯通**:HTTP X-Request-Id / UUID → ctx → tRPC errorFormatter → 入队 Job → worker `[req=xxx]` 前缀 → response header → 前端 toast 后缀
+- 🤖 **D-2 AgentTool meta 13/13 100% 覆盖**(ADR-27):asset.{create,generateImage,batchCreate,breakdown} / storyboard.{generateForEpisode,publishEpisode,mergeShots} / aigc.{generateVideo,bindAssetToGroup} / script.{upload,analyze} / project.{create,addMember} — Phase 2 Mastra 启动时扫 `.meta.agentTool` 自动注册零业务改动
+- 📡 **D-3 EventBus dev trace + 4 publish 缺漏补**:STORYBOARD_GENERATED/PUBLISHED + ASSET_GENERATED/CONFIRMED 真触发订阅方(events.ts 不再死契约)
+- 📚 **D-4 模块边界文档**:`docs/MODULES.md`(全景 + 依赖图 ASCII + 升级 hook 清单)+ 4 package README(api/core/queue/adapters)
+- 🖥️ **R2 Tauri capabilities DRAFT**:`apps/desktop/src-tauri/capabilities/default.json`(Phase 1.5 启用)
+- 💬 **R2 前端 trpc error-toast**:`apps/web/lib/trpc/error-toast.ts` showTrpcError 自动附 ` · req=xxxxxxxx` 后缀 + TrpcProvider 全局 mutationCache fallback
+- 🔧 修 TS4023:TRPCMeta interface 加 export(build 失败但 typecheck 不报)
+- 📝 **ADR-27** 第 19-20 轮 audit 全栈加固决议 → 推 ADR-30/31/32 占位
+- 🧪 **W8 smoke**(`scripts/w8-smoke.mjs`)10/10 全过 — 真服务验证 admin 大写登录 / requestId UUID header / 自定义 X-Request-Id 优先 / error.data.requestId / zod issues / sanitize 错误 / cleanup
+- ✅ typecheck 15/15 + test 25/25 + pnpm audit 无 vuln + DB 4 高频查询全 Index Scan
+- 📊 改动:25 文件 +1164/-27 行(包含 ADR-27 + 6 文档)
+
+### 十七次收工 — W1-W7 待完成事项盘点 + W8 启动 checklist(`20365ca`)
+- 📝 新建 `docs/W1-W7-followup.md` 完整留尾清单(P0 实战阻塞 / Phase 1.5 / Phase 2 / Phase 3 四级 + 12 步 W8 checklist + 完成度精确盘点表)
+
+### 十六次收工 — W7 收尾全交付 + 文档体系 + 全 7 task(`dbcdff7`)
+- ✨ Tauri 桌面端骨架(`apps/desktop`)+ DB Explorer MVP + EN 文案 review + characterRole enums
+- 📝 README + CHANGELOG 完整重写
+- 📦 11 workspace 包:**2 apps + 1 desktop 骨架 + 1 worker + 7 packages**
 
 ---
 
@@ -93,14 +125,15 @@
 |---|---|
 | 收工次数 | 15 次 |
 | Git commits | 30 个 |
-| 文件数 | 200+ |
-| 代码行数 | ~40,000+ |
+| 文件数 | 230+ |
+| 代码行数 | ~42,000+ |
 | Migration | 19 个 |
-| ADR | 19 条 |
-| Audit 修复 | ~75 项(P0/P1/P2) |
-| Tests | 110+ 单测全过零回归 |
-| Workspace 包 | 2 apps + 1 worker + 7 packages |
+| ADR | 27 条(ADR-27 第 19-20 轮全栈加固) |
+| Audit 修复 | ~95 项(P0/P1/P2)— 含 60 次 debug 第 19-20 轮 |
+| Tests | 110+ 单测 + W8 smoke 10/10 全过零回归 |
+| Workspace 包 | **11 个**:2 apps + 1 desktop 骨架 + 1 worker + 7 packages |
 | AI Provider | Mock 全链路 + Claude/Seedance 真接入预留 |
+| Agent 接入 | 13/13 核心 mutation `.meta(agentTool)` 100% 覆盖(Phase 2 Mastra) |
 
 ---
 

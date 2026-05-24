@@ -49,7 +49,7 @@
 |---|---|
 | 加新 router | `src/routers/<name>.ts` + 在 `root.ts` 注册 |
 | 加权限 middleware | `src/middleware/` + 工厂导出 |
-| Mastra agent 接入 | mutation 加 `.meta({ agentTool: {...} })`(已为 5 个核心做,ADR-27 计划逐步覆盖到 13 个) |
+| Mastra agent 接入 | mutation 加 `.meta({ agentTool: {...} })` — **已 100% 覆盖 13 个核心**(ADR-27 + 十八收工);Phase 2 写 `packages/agent/tools.ts` 自动扫 `.meta.agentTool` 注册 Mastra tool registry |
 | 错误码扩展 | `@ss/shared/errors.ts` 加 SsError 子类 + `trpc.ts` HTTP_TO_TRPC 加映射 |
 | audit 字段扩展 | `middleware/audit.ts` 改 logOperation 签名 + schema 加字段(需 migration) |
 
