@@ -46,10 +46,17 @@ export interface TRPCMeta {
 const t = initTRPC.context<Context>().meta<TRPCMeta>().create({
   transformer: superjson, // 支持 Date / Decimal / BigInt 透明传输
   errorFormatter({ shape, error, ctx }) {
+    // 第 20 轮 audit P1 (W8 smoke 发现):生产 mode 必须剥 stack
+    // tRPC v11 默认在 dev mode 会把 stack 透传到 client,生产环境会泄漏代码路径 + 内部结构
+    const isProd = process.env.NODE_ENV === 'production';
+    const baseData = { ...shape.data };
+    if (isProd) {
+      delete (baseData as Record<string, unknown>).stack;
+    }
     return {
       ...shape,
       data: {
-        ...shape.data,
+        ...baseData,
         // 第 19 轮 audit P1:错误响应携带 requestId 给前端,用户拿 requestId 报 bug 时可全链路追溯
         requestId: ctx?.requestId,
         ssCode:

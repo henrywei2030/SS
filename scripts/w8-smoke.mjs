@@ -21,7 +21,27 @@ const BASE = 'http://localhost:3000';
 const ADMIN_USER = 'admin';
 const ADMIN_PASS = 'admin123!@#';
 
-let cookie = '';
+/**
+ * Cookie jar: server 多次 Set-Cookie(如 next-intl NEXT_LOCALE 跟 ss_session 一起)
+ * 需要按 cookie name 合并,不能用字符串拼接覆盖(否则 ss_session 会被冲掉)
+ */
+const cookieJar = new Map();
+function cookieStr() {
+  return Array.from(cookieJar).map(([k, v]) => `${k}=${v}`).join('; ');
+}
+function setCookieFromResponse(rawHeaders) {
+  for (const c of rawHeaders) {
+    const [pair] = c.split(';');
+    const eq = pair.indexOf('=');
+    if (eq < 0) continue;
+    const name = pair.slice(0, eq).trim();
+    const value = pair.slice(eq + 1);
+    cookieJar.set(name, value);
+  }
+}
+function clearCookies() {
+  cookieJar.clear();
+}
 let pass = 0;
 let fail = 0;
 const failures = [];
@@ -49,7 +69,7 @@ async function api(path, opts = {}) {
   const url = `${BASE}${path}`;
   const headers = {
     'Content-Type': 'application/json',
-    Cookie: cookie,
+    Cookie: cookieStr(),
   };
   if (opts.requestId) headers['X-Request-Id'] = opts.requestId;
   if (opts.headers) Object.assign(headers, opts.headers);
@@ -66,7 +86,7 @@ async function api(path, opts = {}) {
       ? [res.headers.get('set-cookie')]
       : [];
   if (setCookieRaw.length > 0) {
-    cookie = setCookieRaw.map((c) => c.split(';')[0]).join('; ');
+    setCookieFromResponse(setCookieRaw);
   }
   const xReqId = res.headers.get('x-request-id');
   const text = await res.text();
@@ -167,10 +187,11 @@ async function trpcMutation(path, input) {
   // 6. unauth 错误 — error.data.requestId 真被透传(本轮 D-1 errorFormatter)
   // ============================================================
   log('🚫', '[6] unauth 错误 — error.data.requestId 透传');
-  const savedCookie = cookie;
-  cookie = ''; // 清 cookie 触发 UNAUTHORIZED
+  const savedCookies = new Map(cookieJar);
+  clearCookies(); // 清 cookie 触发 UNAUTHORIZED
   const unauth = await trpcQuery('me.session');
-  cookie = savedCookie; // 恢复
+  cookieJar.clear();
+  for (const [k, v] of savedCookies) cookieJar.set(k, v); // 恢复
   // error 在 superjson 包下是 unauth.json[0].error.json.data 或 unauth.json.error.json.data
   const errorObj =
     Array.isArray(unauth.json) ? unauth.json[0]?.error : unauth.json?.error;
@@ -253,6 +274,75 @@ async function trpcMutation(path, input) {
     ok(`worker health 200 status=${body.status}`);
   } else {
     bad(`worker health 失败 ${workerHealth.error}`);
+  }
+
+  // ============================================================
+  // 11-15. 各 page SSR 健康检查(W8 step 10 间接验证)
+  // ============================================================
+  // 重新登录拿 cookie(因为 step 7 zod 报错 + step 9 cleanup 可能让 cookie 状态变化)
+  await api('/api/auth/login', {
+    method: 'POST',
+    body: { identifier: ADMIN_USER, password: ADMIN_PASS },
+  });
+
+  const pages = [
+    { name: '[11] / (root redirect)', path: '/', expect: [307, 308] },
+    { name: '[12] /zh-CN/login (public)', path: '/zh-CN/login', expect: [200] },
+    { name: '[13] /zh-CN/projects (auth)', path: '/zh-CN/projects', expect: [200, 307] },
+    { name: '[14] /zh-CN/library (auth)', path: '/zh-CN/library', expect: [200, 307] },
+    { name: '[15] /zh-CN/admin/users (admin)', path: '/zh-CN/admin/users', expect: [200, 307] },
+  ];
+  for (const p of pages) {
+    log('🌐', p.name);
+    const res = await api(p.path);
+    if (p.expect.includes(res.status)) {
+      ok(`${p.path} status=${res.status} reqId=${(res.requestId ?? '').slice(-8)}`);
+    } else {
+      bad(`${p.path} status=${res.status}(期望 ${p.expect.join('/')})`);
+    }
+  }
+
+  // ============================================================
+  // 16. tRPC 仪表查询(insights / reports)
+  // ============================================================
+  log('📊', '[16] tRPC insights 查询');
+  // me.projects 拿一个 projectId
+  const myProjects = await trpcQuery('me.projects');
+  const projs = myProjects.json?.result?.data?.json ?? [];
+  if (projs.length === 0) {
+    log('  ⚠️', 'insights 测试跳过(没有 project)');
+  } else {
+    const pId = projs[0].id;
+    const insights = await trpcQuery('insights.getProjectOverview', { projectId: pId, days: 30 });
+    if (insights.status === 200) {
+      ok(`insights 200 reqId=${(insights.requestId ?? '').slice(-8)}`);
+    } else {
+      bad(`insights 失败 status=${insights.status}`, insights.json);
+    }
+  }
+
+  // ============================================================
+  // 17. SystemSetting 公开 endpoint(verify W1-W5 P2-5 5 条设置接通)
+  // ============================================================
+  log('⚙️ ', '[17] me.systemBranding (5 条 SystemSetting 接通)');
+  const branding = await trpcQuery('me.systemBranding');
+  const brand = branding.json?.result?.data?.json;
+  if (branding.status === 200 && brand?.brandNameCn) {
+    ok(`brand=${brand.brandNameCn} gachaMax=${brand.gachaMaxAttempts} budgetWarnPct=${brand.budgetWarnPct}%`);
+  } else {
+    bad(`systemBranding 失败`, branding.json);
+  }
+
+  // ============================================================
+  // 18. presets 公开 endpoint(verify Preset router 工作)
+  // ============================================================
+  log('🎨', '[18] me.presets (4 类预设)');
+  const presets = await trpcQuery('me.presets');
+  const presetList = presets.json?.result?.data?.json ?? [];
+  if (presets.status === 200 && presetList.length === 4) {
+    ok(`presets 200 ${presetList.length}/4 类 ${presetList.map((p) => p.kind).join(',')}`);
+  } else {
+    bad(`presets 失败 status=${presets.status} count=${presetList.length}`, presets.json);
   }
 
   // ============================================================
