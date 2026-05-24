@@ -60,6 +60,16 @@
     "COMPLIANCE": "合规",
     "EMBEDDING": "向量"
   },
+  "characterRole": {
+    "LEAD_MALE": "主演-男主演",
+    "LEAD_FEMALE": "主演-女主演",
+    "LEAD_ANTAGONIST": "主演-反派",
+    "SUPPORTING_POSITIVE": "配角-正派",
+    "SUPPORTING_NEGATIVE": "配角-反派",
+    "SUPPORTING_NEUTRAL": "配角-中性",
+    "GUEST": "特约演员",
+    "SYSTEM": "系统/旁白"
+  },
   "mediaKind": {
     "IMAGE": "图片",
     "VIDEO": "视频",

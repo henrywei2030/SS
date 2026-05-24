@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "StarsAlign Studio",
+  "version": "0.1.0",
+  "identifier": "com.starsalign.studio",
+  "build": {
+    "beforeDevCommand": "",
+    "beforeBuildCommand": "pnpm --filter @ss/web build",
+    "devUrl": "http://localhost:3000",
+    "frontendDist": "../../web/.next"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "StarsAlign Studio · 星垣工坊",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1200,
+        "minHeight": 720,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false,
+        "alwaysOnTop": false,
+        "skipTaskbar": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Productivity",
+    "shortDescription": "AI 短剧生产平台",
+    "longDescription": "围绕 AI 短剧 / 漫剧 / 真人剧生产流程搭建的下一代制作平台,覆盖剧本→分析→分镜→数字资产→AIGC 抽卡→团队协作→素材库→数据监控全链路。"
+  }
+}

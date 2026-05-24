@@ -1357,6 +1357,105 @@ const reportsRouter = router({
 });
 
 // ---------------------------------------------------------------------------
+// admin.dbExplorer — 数据库浏览器(W7 收尾,替代 Prisma Studio MVP)
+//
+// Phase 1 设计:
+//   - 白名单表(防 SQL injection,Phase 2 加自定义 SQL 模式)
+//   - 只读(view-only,Phase 2 加 inline edit)
+//   - 动态 Prisma model 反射,无需为每个表写一个 router
+//   - JSON dump 模式显示(用户自己复制走),不渲染漂亮表(Phase 2 加列定义)
+// ---------------------------------------------------------------------------
+
+const TABLE_WHITELIST = [
+  'project',
+  'episode',
+  'scene',
+  'shot',
+  'shotGroup',
+  'script',
+  'scriptAnalysis',
+  'asset',
+  'assetUsageBinding',
+  'mediaItem',
+  'user',
+  'projectMember',
+  'episodeAssignment',
+  'invitation',
+  'generationAttempt',
+  'costLedgerEntry',
+  'operationLog',
+  'promptEdit',
+  'systemSetting',
+  'providerConfig',
+  'styleProfile',
+] as const;
+type WhitelistTable = (typeof TABLE_WHITELIST)[number];
+
+const dbExplorerRouter = router({
+  /** 列出所有可浏览的表 + 行数 */
+  listTables: adminProcedure.query(async ({ ctx }) => {
+    const results = await Promise.all(
+      TABLE_WHITELIST.map(async (table) => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const count: number = await (ctx.prisma as any)[table].count();
+          return { table, count, error: null };
+        } catch (e) {
+          return {
+            table,
+            count: 0,
+            error: e instanceof Error ? e.message : String(e),
+          };
+        }
+      }),
+    );
+    return results;
+  }),
+
+  /** 查询某表的分页数据(动态反射 Prisma model,白名单防注入) */
+  queryTable: adminProcedure
+    .input(
+      z.object({
+        table: z.enum(TABLE_WHITELIST),
+        page: z.number().min(1).default(1),
+        pageSize: z.number().min(10).max(100).default(50),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const model = (ctx.prisma as any)[input.table];
+      if (!model || typeof model.findMany !== 'function') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `表 ${input.table} 在 Prisma 中不存在(白名单陈旧)`,
+        });
+      }
+      try {
+        const [rows, total] = await Promise.all([
+          model.findMany({
+            take: input.pageSize,
+            skip: (input.page - 1) * input.pageSize,
+          }),
+          model.count(),
+        ]);
+        return {
+          table: input.table,
+          rows,
+          total,
+          page: input.page,
+          pageSize: input.pageSize,
+          hasMore: input.page * input.pageSize < total,
+        };
+      } catch (e) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: `查询 ${input.table} 失败:${e instanceof Error ? e.message : String(e)}`,
+        });
+      }
+    }),
+});
+
+// ---------------------------------------------------------------------------
 // 聚合
 // ---------------------------------------------------------------------------
 
@@ -1373,4 +1472,5 @@ export const adminRouter = router({
   apiUsage: apiUsageRouter,
   user: userRouter,
   reports: reportsRouter,
+  dbExplorer: dbExplorerRouter,
 });

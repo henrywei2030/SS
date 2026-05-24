@@ -1,6 +1,6 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-05-24(十五收工 · W6 Collab Hub 三波 + W5.6 Media Vault MVP + 6 UX 反馈 + 5 audit + DateTime polish)
+> 最后更新:2026-05-24(十六收工 · W7 收尾全交付 + README/CHANGELOG + Tauri 骨架 + DB Explorer + W1-W7 全完成)
 > 仓库:https://github.com/henrywei2030/SS
 
 ---
@@ -42,7 +42,13 @@
 - [x] **W5.5 第 3 轮 audit 5 项**(十五收工)— 双 worker cutoff 30min / SSE 空 media 兜底 / insights 公式 / SSE token 自动续期 / MediaItem partial unique migration
 - [x] **6 项 UX 反馈修复**(十五收工)— nav team 入口 / scripts redirect / director home 合并
 - [x] **DateTime locale polish**(十五收工)— 11 处 toLocaleString('zh-CN') → 浏览器 default
+- [x] **W7 收尾 — Tauri 桌面端骨架**(十六收工)— apps/desktop + src-tauri 完整配置,Phase 1.5 真编译
+- [x] **W7 收尾 — DB Explorer MVP**(十六收工)— /admin/db-explorer 白名单 21 表 + Prisma 动态反射 + JSON dump
+- [x] **W7 收尾 — EN 文案 review**(十六收工)— zh ↔ en 4 json 全对齐 + characterRole enums 补
+- [x] **README + CHANGELOG**(十六收工)— 完整重写 README(完成度徽章+模块全景+快速启动)+ CHANGELOG 16 次收工日志
 - [ ] **W5.6 进阶**(留 Phase 2)— 音频波形(wavesurfer.js)/ AI 自动打标(BPM/时长)/ pgvector 向量搜索
+- [ ] **Polish 剩余**(留 Phase 2)— 34 处硬编码颜色 / a11y / listBindings N+1 / OperationLog 命名规范
+- [ ] **W8 团队实战**(下次启动)— 5 人冷启动 + 配 API Key 真接 Seedance + 1 集 7 镜头
 
 - [ ] **跨设备协作工作流验证**(多端)
   - [x] 家里 Mac Studio `git pull` + 登录同一 Project + 说 `开工,在 mac-studio` 验证接续 — 2026-05-23

@@ -1,0 +1,25 @@
+[package]
+name = "starsalign-desktop"
+version = "0.1.0"
+description = "StarsAlign Studio Desktop"
+authors = ["StarsAlign Studio"]
+license = "Private"
+repository = "https://github.com/henrywei2030/SS"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "starsalign_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+# 默认空,Phase 2 加 GPU sidecar 等 feature
+default = []

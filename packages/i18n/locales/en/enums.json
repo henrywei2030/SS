@@ -60,6 +60,16 @@
     "COMPLIANCE": "Compliance",
     "EMBEDDING": "Embedding"
   },
+  "characterRole": {
+    "LEAD_MALE": "Lead - Male",
+    "LEAD_FEMALE": "Lead - Female",
+    "LEAD_ANTAGONIST": "Lead - Antagonist",
+    "SUPPORTING_POSITIVE": "Supporting - Positive",
+    "SUPPORTING_NEGATIVE": "Supporting - Negative",
+    "SUPPORTING_NEUTRAL": "Supporting - Neutral",
+    "GUEST": "Guest",
+    "SYSTEM": "System / Narration"
+  },
   "mediaKind": {
     "IMAGE": "Image",
     "VIDEO": "Video",
