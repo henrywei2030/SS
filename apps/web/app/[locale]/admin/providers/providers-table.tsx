@@ -1,10 +1,6 @@
 'use client';
 import { useTranslations } from 'next-intl';
 import {
-  AlertTriangle,
-  CheckCircle2,
-  ChevronDown,
-  ChevronRight,
   Eye,
   EyeOff,
   KeyRound,
@@ -234,6 +230,11 @@ function RelayCard({
   const [newKey, setNewKey] = React.useState('');
   const [showKey, setShowKey] = React.useState(false);
 
+  // Audit 修(F-P0-3):打开编辑时同步当前 relay.apiUrl(防 stale closure)
+  React.useEffect(() => {
+    if (editingUrl) setNewUrl(relay.apiUrl ?? '');
+  }, [editingUrl, relay.apiUrl]);
+
   const setApiKey = trpc.admin.relay.setApiKey.useMutation({
     onSuccess: () => {
       setNewKey('');
@@ -400,6 +401,13 @@ function RelayCard({
       {updateRelay.error && (
         <p className="mt-2 text-xs text-red-600">{updateRelay.error.message}</p>
       )}
+      {/* Audit 修(F-P1-1):clearApiKey 错误也显示 */}
+      {clearApiKey.error && (
+        <p className="mt-2 text-xs text-red-600">{clearApiKey.error.message}</p>
+      )}
+      {deleteRelay.error && (
+        <p className="mt-2 text-xs text-red-600">{deleteRelay.error.message}</p>
+      )}
     </Card>
   );
 }
@@ -459,17 +467,28 @@ function ModelsSection({
                 </div>
               )}
 
-              {/* 从 catalog 添加中转站模型 */}
+              {/* 从 catalog 添加中转站模型 — Audit 修(F-P2-1):existingSuffixes 用 providerIdSuffix 反推
+                  ProviderConfig 没存 providerIdSuffix,但 providerId = `${prefix}-${suffix}`,
+                  按 - 切第一段去掉(prefix=relayProvider.name)剩下就是 suffix */}
               {hasCatalogModels && relays.length > 0 && (
                 <CatalogAddRow
                   kind={kind}
                   relays={relays}
                   catalogs={catalogs}
-                  existingSuffixes={new Set(
-                    list
-                      .filter((p) => p.relayProviderId !== null)
-                      .map((p) => p.defaultModel || p.providerId),
-                  )}
+                  existingSuffixesByRelay={(() => {
+                    const map = new Map<string, Set<string>>();
+                    for (const p of list) {
+                      if (!p.relayProviderId || !p.relayProviderName) continue;
+                      const prefix = `${p.relayProviderName}-`;
+                      const suffix = p.providerId.startsWith(prefix)
+                        ? p.providerId.slice(prefix.length)
+                        : p.providerId;
+                      const existing = map.get(p.relayProviderId) ?? new Set<string>();
+                      existing.add(suffix);
+                      map.set(p.relayProviderId, existing);
+                    }
+                    return map;
+                  })()}
                   onChange={onChange}
                 />
               )}
@@ -681,13 +700,13 @@ function CatalogAddRow({
   kind,
   relays,
   catalogs,
-  existingSuffixes,
+  existingSuffixesByRelay,
   onChange,
 }: {
   kind: string;
   relays: RelayProvider[];
   catalogs: Catalog[];
-  existingSuffixes: Set<string>;
+  existingSuffixesByRelay: Map<string, Set<string>>;
   onChange: () => void;
 }): React.ReactElement {
   const [open, setOpen] = React.useState(false);
@@ -709,7 +728,7 @@ function CatalogAddRow({
           kind={kind}
           relays={relays}
           catalogs={catalogs}
-          existingSuffixes={existingSuffixes}
+          existingSuffixesByRelay={existingSuffixesByRelay}
           onClose={() => setOpen(false)}
           onSaved={() => {
             onChange();
@@ -725,14 +744,14 @@ function CatalogPickerDialog({
   kind,
   relays,
   catalogs,
-  existingSuffixes,
+  existingSuffixesByRelay,
   onClose,
   onSaved,
 }: {
   kind: string;
   relays: RelayProvider[];
   catalogs: Catalog[];
-  existingSuffixes: Set<string>;
+  existingSuffixesByRelay: Map<string, Set<string>>;
   onClose: () => void;
   onSaved: () => void;
 }): React.ReactElement {
@@ -743,11 +762,27 @@ function CatalogPickerDialog({
   const catalog = catalogs.find((c) => c.name === selectedRelay?.catalogKey);
   const models = (catalog?.models[kind] ?? []) as CatalogModel[];
 
-  const createFromCatalog = trpc.admin.provider.createFromCatalog.useMutation({
-    onSuccess: onSaved,
-  });
+  const createFromCatalog = trpc.admin.provider.createFromCatalog.useMutation();
 
+  // Audit 修(F-P2-1):existingSuffixes 关联到当前选中的 RelayProvider — 不同中转站独立去重
+  // 这样 user 切换中转站时,filtered 列表会正确刷新(同 catalogKey 下已加的不重复)
+  const existingSuffixes =
+    existingSuffixesByRelay.get(selectedRelayId) ?? new Set<string>();
   const filtered = models.filter((m) => !existingSuffixes.has(m.providerIdSuffix));
+
+  // 添加成功后:invoke parent refetch 但保持对话框开,允许连续添加
+  const handleAdd = (suffix: string): void => {
+    createFromCatalog.mutate(
+      {
+        relayProviderId: selectedRelayId,
+        catalogKey: catalog!.name,
+        providerIdSuffix: suffix,
+      },
+      {
+        onSuccess: () => onSaved(), // parent refetch + 重渲染 filtered
+      },
+    );
+  };
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -821,13 +856,7 @@ function CatalogPickerDialog({
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() =>
-                      createFromCatalog.mutate({
-                        relayProviderId: selectedRelayId,
-                        catalogKey: catalog.name,
-                        providerIdSuffix: m.providerIdSuffix,
-                      })
-                    }
+                    onClick={() => handleAdd(m.providerIdSuffix)}
                     disabled={createFromCatalog.isPending}
                     className="gap-1 shrink-0"
                   >
@@ -910,6 +939,10 @@ function AddDirectDialog({
   const [apiKey, setApiKey] = React.useState('');
   const [notes, setNotes] = React.useState('');
   const [showKey, setShowKey] = React.useState(false);
+  // Audit 修(F-P0-1):统一 saving 状态防三连 mutation 中按钮解禁导致重复点
+  const [saving, setSaving] = React.useState(false);
+  // Audit 修(F-P0-2):显式承接 setKey/setActive 失败信息(原代码 catch 静默吞)
+  const [extraError, setExtraError] = React.useState<string | null>(null);
 
   const create = trpc.admin.provider.create.useMutation();
   const setKey = trpc.admin.provider.setApiKey.useMutation();
@@ -926,6 +959,8 @@ function AddDirectDialog({
   }, [displayName]);
 
   const handleSave = async (): Promise<void> => {
+    setSaving(true);
+    setExtraError(null);
     try {
       const providerId = autoProviderId;
       await create.mutateAsync({
@@ -942,12 +977,21 @@ function AddDirectDialog({
         },
       });
       if (apiKey.length >= 8) {
-        await setKey.mutateAsync({ providerId, apiKey });
-        await setActive.mutateAsync({ providerId, isActive: true });
+        try {
+          await setKey.mutateAsync({ providerId, apiKey });
+          await setActive.mutateAsync({ providerId, isActive: true });
+        } catch (e) {
+          // create 成功但 setKey/setActive 失败:UI 显示但不阻止"已创建"状态(用户可重设)
+          setExtraError(
+            `Provider 已创建但启用失败:${e instanceof Error ? e.message : String(e)} · 请去列表手动设置 Key + 启用`,
+          );
+        }
       }
       onSaved();
     } catch {
       // create.error 已显示
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -955,7 +999,7 @@ function AddDirectDialog({
     displayName.length >= 1 &&
     apiUrl.length >= 1 &&
     autoProviderId.length >= 3 &&
-    !create.isPending;
+    !saving;
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -1036,14 +1080,20 @@ function AddDirectDialog({
               {create.error.message}
             </p>
           )}
+          {/* Audit 修(F-P0-2):setKey/setActive 失败也展示 */}
+          {extraError && (
+            <p className="rounded-md bg-amber-500/15 px-3 py-2 text-xs text-amber-700">
+              {extraError}
+            </p>
+          )}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" onClick={onClose} disabled={saving}>
             取消
           </Button>
           <Button onClick={handleSave} disabled={!canSubmit}>
-            {create.isPending ? (
+            {saving ? (
               <Loader2 className="size-4 animate-spin" />
             ) : (
               <Plus className="size-4" />
@@ -1262,15 +1312,18 @@ function formatModelPrice(p: Provider): React.ReactNode {
       </span>
     );
   }
+  if (p.unitPriceCny > 0) {
+    return (
+      <span>
+        {formatCny(p.unitPriceCny)}/{p.unitName}
+      </span>
+    );
+  }
+  // Audit 修(F-P1-5):中转站模型 + 单价为 0 时不显示误导性 "¥0/ktoken"
   return (
-    <span>
-      {formatCny(p.unitPriceCny)}/{p.unitName}
+    <span className="italic text-[hsl(var(--color-muted-foreground))]">
+      {p.relayProviderId ? '由中转站计费(看运营商页)' : '免费 / 订阅制'}
     </span>
   );
 }
 
-// 防止 unused import 警告(部分组件未用 ChevronRight/Down 但保留)
-void ChevronDown;
-void ChevronRight;
-void AlertTriangle;
-void CheckCircle2;

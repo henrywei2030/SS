@@ -202,6 +202,18 @@ const providerRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      // Audit 修(B-P1-3):relay 模式 provider 的 apiKey 来自 RelayProvider,
+      // 在这里写 ProviderConfig.apiKeyEnc 会被 loadConfig 忽略 → 数据静默丢失
+      const cfg = await ctx.prisma.providerConfig.findUnique({
+        where: { providerId: input.providerId },
+        select: { relayProviderId: true, relayProvider: { select: { displayName: true } } },
+      });
+      if (cfg?.relayProviderId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `此 Provider 属于中转站 "${cfg.relayProvider?.displayName ?? '中转站'}",请在中转站凭证卡片设置 Key(不能单独设)`,
+        });
+      }
       await setProviderApiKey(input.providerId, input.apiKey, ctx.user.id);
       await logOperation(ctx, 'provider.setApiKey', 'provider', input.providerId, null, {
         keyMasked: '••••' + input.apiKey.slice(-4),
@@ -261,6 +273,14 @@ const providerRouter = router({
 
       const prefix = input.providerIdPrefix ?? relayCfg.name;
       const providerId = `${prefix}-${input.providerIdSuffix}`.toLowerCase();
+
+      // Audit 修(C-P0-2):防御性 kebab-case 校验 — catalog suffix 已规范,但拼接后再 check 防错填
+      if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(providerId)) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: `生成的 providerId "${providerId}" 含非法字符 — 需 kebab-case(只小写字母/数字/-)`,
+        });
+      }
 
       const existing = await ctx.prisma.providerConfig.findUnique({
         where: { providerId },
@@ -383,7 +403,11 @@ const providerRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const startedAt = Date.now();
-      const cfg = await prisma.providerConfig.findUnique({ where: { providerId: input.providerId } });
+      // Audit 修(B-P0-2):include relayProvider — 否则中转站停用 / 无 key 时前置检查不覆盖
+      const cfg = await prisma.providerConfig.findUnique({
+        where: { providerId: input.providerId },
+        include: { relayProvider: true },
+      });
       if (!cfg) {
         return {
           success: false,
@@ -399,6 +423,25 @@ const providerRouter = router({
           latencyMs: 0,
           message: 'Provider 未启用(isActive=false)— 先在 list 启用再测',
         };
+      }
+      // Audit 修(B-P0-2):中转站模型必须检查 RelayProvider 状态
+      if (cfg.relayProviderId && cfg.relayProvider) {
+        if (!cfg.relayProvider.isActive) {
+          return {
+            success: false,
+            providerId: input.providerId,
+            latencyMs: 0,
+            message: `关联中转站 "${cfg.relayProvider.displayName}" 未启用 — 先在顶部中转站卡片启用`,
+          };
+        }
+        if (!cfg.relayProvider.apiKeyEnc) {
+          return {
+            success: false,
+            providerId: input.providerId,
+            latencyMs: 0,
+            message: `关联中转站 "${cfg.relayProvider.displayName}" 未配 API Key — 先设置`,
+          };
+        }
       }
 
       const baseLog = {

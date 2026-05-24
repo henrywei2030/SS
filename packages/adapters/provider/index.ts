@@ -490,10 +490,12 @@ export async function setProviderActive(
   isActive: boolean,
   updatedBy: string,
 ): Promise<void> {
+  // Audit 修(P0-1):isActive 变更跟 apiKey 无关,不污染 apiKeyUpdatedBy(只在 setApiKey 写)
   await prisma.providerConfig.update({
     where: { providerId },
-    data: { isActive, apiKeyUpdatedBy: updatedBy },
+    data: { isActive },
   });
+  void updatedBy; // 保留参数兼容旧 caller,但不写入 apiKey 字段
   cache.video.delete(providerId);
   cache.image.delete(providerId);
   cache.text.delete(providerId);
@@ -620,10 +622,21 @@ export async function updateRelayProvider(
   },
   updatedBy: string,
 ): Promise<void> {
-  await prisma.relayProvider.update({
-    where: { id },
-    data: { ...data, apiKeyUpdatedBy: updatedBy },
+  // Audit 修(P0-1):displayName/apiUrl/notes/isActive 变更不污染 apiKeyUpdatedBy(只 setApiKey 写)
+  // Audit 修(P1-4):停用中转站时级联停用所有关联 ProviderConfig(否则 UI 显示假启用)
+  await prisma.$transaction(async (tx) => {
+    await tx.relayProvider.update({
+      where: { id },
+      data,
+    });
+    if (data.isActive === false) {
+      await tx.providerConfig.updateMany({
+        where: { relayProviderId: id, isActive: true },
+        data: { isActive: false },
+      });
+    }
   });
+  void updatedBy;
   invalidateRelayProviderCache(id);
 }
 
@@ -680,8 +693,16 @@ export async function deleteRelayProvider(id: string): Promise<void> {
       `中转站 "${cfg.name}" 还有 ${activeCount} 个 active 模型关联,先停用所有模型再删`,
     );
   }
-  // 软清:把所有关联的 ProviderConfig 的 relayProviderId 设 null + 停用(via onDelete: SetNull)
-  await prisma.relayProvider.delete({ where: { id } });
+  // Audit 修(P1-1):删除前级联停用关联的非 active provider(防 onDelete:SetNull 后 UI 显示假启用)
+  // 实际上上面已 check activeCount=0,这里是防御性双保险
+  await prisma.$transaction(async (tx) => {
+    await tx.providerConfig.updateMany({
+      where: { relayProviderId: id },
+      data: { isActive: false },
+    });
+    // onDelete: SetNull 会把 relayProviderId 自动设 null
+    await tx.relayProvider.delete({ where: { id } });
+  });
   invalidateRelayProviderCache(id);
 }
 
