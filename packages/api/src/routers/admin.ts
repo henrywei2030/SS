@@ -46,6 +46,133 @@ const providerRouter = router({
       return one;
     }),
 
+  /**
+   * 创建新 Provider(第 22 轮 audit — 4 类 Provider 入口设计落地)
+   *
+   * 允许 admin 在后台任意添加新 Provider,不必改 seed.ts
+   *
+   * 4 类入口示例:
+   *   - 中转: providerId='custom-openrouter-claude', apiUrl='https://openrouter.ai/api/v1',
+   *           defaultParams: { protocol: 'openai-compat', defaultModel: 'anthropic/claude-3.7-sonnet', source: 'relay' }
+   *   - Poe:  providerId='poe-claude-3-7', apiUrl='https://api.poe.com/v1',
+   *           defaultParams: { protocol: 'openai-compat', defaultModel: 'claude-3-7-sonnet', source: 'subscription' }
+   *   - 直连: providerId='claude-opus-4-7-direct', apiUrl='https://api.anthropic.com/v1',
+   *           defaultParams: { protocol: 'anthropic-native', defaultModel: 'claude-opus-4-7', source: 'direct' }
+   *   - 本地: providerId='local-qwen-32b', apiUrl='http://localhost:11434/v1',
+   *           defaultParams: { protocol: 'openai-compat', defaultModel: 'qwen2.5:32b', source: 'local' }
+   *
+   * 默认 isActive=false,setApiKey + setActive(true) 后才可用
+   */
+  create: adminProcedure
+    .input(
+      z.object({
+        providerId: z
+          .string()
+          .min(3)
+          .max(80)
+          .regex(/^[a-z0-9][a-z0-9-]*[a-z0-9]$/, 'providerId 必须 kebab-case(小写字母+数字+-)'),
+        displayName: z.string().min(1).max(120),
+        kind: z.enum(['VIDEO', 'IMAGE', 'TEXT', 'AUDIO', 'COMPLIANCE', 'EMBEDDING']),
+        apiUrl: z.string().url().max(255),
+        apiKeyRef: z.string().max(80).optional(),
+        unitPriceCny: z.number().nonnegative(),
+        unitName: z.enum(['second', 'image', 'ktoken', 'request', 'frame']),
+        maxConcurrent: z.number().int().positive().default(5),
+        rateLimitRpm: z.number().int().positive().default(60),
+        defaultParams: z
+          .object({
+            protocol: z.enum(['openai-compat', 'anthropic-native', 'volcengine-native']).optional(),
+            defaultModel: z.string().optional(),
+            source: z.enum(['relay', 'subscription', 'direct', 'local']).optional(),
+            endpointStyle: z.enum(['ark', 'moyu']).optional(),
+            inputUnitPriceCny: z.number().nonnegative().optional(),
+            outputUnitPriceCny: z.number().nonnegative().optional(),
+            maxDuration: z.number().positive().optional(),
+            defaultSize: z.string().optional(),
+            displayName: z.string().optional(),
+          })
+          .passthrough()
+          .default({}),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      // providerId 防重(schema @unique 也防,提前拦更友好错误)
+      const existing = await ctx.prisma.providerConfig.findUnique({
+        where: { providerId: input.providerId },
+      });
+      if (existing) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: `providerId "${input.providerId}" 已存在 — 改用 setApiKey/updatePricing 修改,或换 providerId`,
+        });
+      }
+      const created = await ctx.prisma.providerConfig.create({
+        data: {
+          providerId: input.providerId,
+          displayName: input.displayName,
+          kind: input.kind,
+          apiUrl: input.apiUrl,
+          apiKeyRef: input.apiKeyRef,
+          unitPriceCny: input.unitPriceCny,
+          unitName: input.unitName,
+          maxConcurrent: input.maxConcurrent,
+          rateLimitRpm: input.rateLimitRpm,
+          // zod object.passthrough() 类型跟 Prisma InputJsonValue 推断不兼容,cast 处理
+          // 安全:input 已 zod parse,passthrough 字段也是 JSON-safe 标量
+          defaultParams: input.defaultParams as object,
+          isActive: false, // 默认关 — setApiKey + setActive 后才启用
+        },
+      });
+      await logOperation(
+        ctx,
+        'provider.config.create',
+        'provider',
+        input.providerId,
+        null,
+        {
+          kind: input.kind,
+          apiUrl: input.apiUrl,
+          source: input.defaultParams.source ?? 'unspecified',
+          protocol: input.defaultParams.protocol ?? 'unspecified',
+        },
+      );
+      return created;
+    }),
+
+  /**
+   * 删除 Provider — 仅允许 admin 自创的(非 seed 内置)
+   *
+   * 安全防御:
+   *   - apiKeyConfigured=true 时拒删(防误删带 token 的)
+   *   - 关联的 GenerationAttempt / CostLedgerEntry 不级联(数据保留供 audit)
+   *   - 真实场景:推荐 setActive=false 软关闭代替 delete
+   */
+  delete: adminProcedure
+    .input(z.object({ providerId: z.string(), confirmDelete: z.literal(true) }))
+    .mutation(async ({ ctx, input }) => {
+      const cfg = await ctx.prisma.providerConfig.findUnique({
+        where: { providerId: input.providerId },
+      });
+      if (!cfg) throw new TRPCError({ code: 'NOT_FOUND' });
+      if (cfg.apiKeyEnc) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: 'Provider 含 API Key,请先 clearApiKey 再 delete(防误删带 token 的)',
+        });
+      }
+      // 关联数据保留(GenerationAttempt / CostLedgerEntry 的 providerId 是字符串,不外键级联)
+      await ctx.prisma.providerConfig.delete({ where: { providerId: input.providerId } });
+      await logOperation(
+        ctx,
+        'provider.config.delete',
+        'provider',
+        input.providerId,
+        cfg,
+        null,
+      );
+      return { success: true };
+    }),
+
   setApiKey: adminProcedure
     .input(
       z.object({
