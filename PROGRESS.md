@@ -5,6 +5,106 @@
 
 ---
 
+## 2026-05-25(周一,win-laptop · 二十二次收工)— /admin/providers 多中转站架构 + 142 catalog + r22/r22.1 双重 audit + 批量测试脚本
+
+**完成 — Phase 1.5.1/1.5.2 落地 + 13 项真 P0/P1 修复(2 轮 audit)+ 107 模型批量测试脚本就绪**
+
+### W8 准备 → /admin/providers UI 重构(commit 8c325c4)
+用户反馈:provider 界面要展示中转站模型主要参数,独立 API Key 要可自定义 base URL + KEY
+
+- ✅ **admin.relay 子 router** — get/set/clearCredential + 批量 sync 到所有 relay-* provider(一次配 token,8 个 relay 模型自动用)
+- ✅ **UI 重构 3 区** — RelayCredentialsSection(中转站凭证统一管理)/ ModelsSection(分类:Claude/GPT/Gemini/视频/图像/合规)/ Direct(直连 4 字段)
+- ✅ **ToggleSwitch 内联组件** + 模型行 isActive 启停(替代旧"启用按钮"二态难辨)
+
+### Phase 1.5.1 多中转站架构(commit db8572e)
+用户决策:"新增 RelayProvider 表" + "静态 JSON 文件"(不动态拉模型列表,减少依赖)
+
+- ✅ **schema** — `RelayProvider` 表(id/name/displayName/apiUrl/apiKeyEnc/apiKeyMasked/catalogKey/isActive/notes)+ `ProviderConfig.relayProviderId` FK(onDelete:SetNull)
+- ✅ **migration `20260525000000_phase151_relay_providers`** — 创表 + index + 数据迁移 DO $ block(把已有 relay-* provider 关联到默认 "moyu" RelayProvider · 用 gen_random_uuid 生成 'rly_<32hex>' id)
+- ✅ **静态 catalog JSON** — `packages/shared/data/relay-catalogs.json`(moyu 142 + poe 3 + openrouter 3)+ `packages/shared/src/relay-catalog.ts` helper(listKnownRelays / getRelayCatalog / getRelayModels / findRelayModel / listCatalogSummaries)
+- ✅ **adapters multi-credential** — loadConfig:relayProviderId 非空时从 RelayProvider 拉 apiKey/apiUrl;listProviderConfigs include relayProvider 关联;listRelayProviders / createRelayProvider / updateRelayProvider / setRelayProviderApiKey / clearRelayProviderApiKey / deleteRelayProvider helpers
+- ✅ **admin.relay 改 multi + admin.catalog router + admin.provider.createFromCatalog**(拼 providerId + kebab 校验)
+- ✅ **seed 迁移** — 删 8 个 relay-* hardcode 改用 catalog · 加 RelayProvider seed 默认 "moyu"
+- ✅ **UI** — 中转站列表(顶部多卡片可切换)+ 精选 3 + 下拉添加 + 直连内嵌(替代旧 8 个写死的 relay-*)
+
+### Phase 1.5.2 catalog 扩 142(commit f7ab868)
+用户反馈:moyu 文本/图像/视频模型选项不完整 + 独立 API Key 太复杂 + 要能删除模型
+
+- ✅ **catalog 扩到 142 完整 moyu 模型**(数据源 docs/integrations/moyu-pricing.md 用户提供 2026-05-24 实测)— 95 TEXT + 12 IMAGE + 35 VIDEO,每个模型 modelRate/outputRate 或 unitPriceCny/unitName
+- ✅ **删除按钮** — RelayCard 加 mutations + 确认对话框 + 列表自动刷新(用户反馈:无法移除多余模型)
+- ✅ **简化直连为 4 字段** — displayName / baseUrl / apiKey / notes(替代旧 kind/protocol/单价/模型 6 字段复杂表单)+ saving state + extraError 提示
+
+### Audit r22:3 并行 agent 深审(commit 7b75ddf)
+用户要求"深度检查 3 遍,优化代码删除冗余" — 启动 frontend / backend / catalog 3 并行 agent
+
+- ✅ **真 P0 × 8**:
+  - setActive 不写 apiKeyUpdatedBy(语义错)
+  - admin.provider.setApiKey 当 relayProviderId 非空拒绝(避免影响多中转站凭证)
+  - testConnection include relayProvider(否则查不到 apiUrl/apiKey)
+  - createFromCatalog defaultParams 类型 cast(Prisma InputJsonValue)
+  - catalog 6 modelId 剥 ` L` 后缀(veo-3 / kimi-k2.6 / claude-3-7-sonnet 等)
+  - IMAGE 4 模型补 unitPriceCny(gpt-image-2:0.30 / gemini-3-pro-image:0.20 / gemini-3.1-flash-image:0.05 / kling-video-o1:2.0)
+  - GenerationAttempt include costEntry 1:1→1:N 改后残留清理
+  - RelayCard useEffect 修 stale closure
+- ✅ **真 P1 × 6**:
+  - updateRelayProvider transaction 内级联停用关联 ProviderConfig
+  - deleteRelayProvider transaction 内级联停用
+  - RelayModelKind 类型扩展(为 EMBEDDING 留位)
+  - cache invalidate 时机(精确化留 Phase 2)
+  - dialog open state 时序
+  - testConnection rate limit 提示文案
+- ✅ **死代码清理** — ProviderConfig.healthScore/lastErrorAt Phase 1 未用 / 重复 modelRate/outputRate 双存设计取舍标 P2 / RelayProvider.notes 字段价值低标 P2
+
+### Audit r22.1:5 遍深审(commit 1f2460a)
+用户报"在下拉列表中点击添加无法添加" + 要求"深度检查 5 遍漏洞"
+
+- ✅ **真 P0(zod cuid)**:用户截图 "Invalid cuid" — 根因 migration 用 `gen_random_uuid()` 生成 'rly_<32hex>' 不是 cuid,zod `.cuid()` 拒收。修 5 处 `.cuid()` → `.min(1)`:createFromCatalog L255 + admin.relay.update/setApiKey/clearApiKey/delete id
+- ✅ **流程改进 × 4**:
+  - 遍 3:CatalogPickerDialog onSaved → onChange 重构(添加成功后 dialog 保持开 · auto refetch · 可连续添加多个)
+  - 遍 4:catalog price 按 kind 智能显示 — `formatCatalogPrice` helper(TEXT/EMBEDDING 优先 ¥X/M · 输出 Y× / IMAGE/VIDEO 优先 ¥X/单位 / fallback "由中转站计费")
+  - 遍 5:existingSuffixesByRelay → existingModelIdsByRelay(用 catalog.modelId 匹配 ProviderConfig.defaultModel · 稳健 vs 旧 prefix 反推)— 旧 migrated relay-* 不以 'moyu-' 开头,prefix 反推失败导致重复添加未防住
+  - AddDirectDialog saving state + extraError(用户体验:点保存按钮立即 disable + 错误文案提示)
+
+### 批量测试脚本就绪(待用户 token)
+用户允许"测试除视频模型以外的 300 个 moyu 模型 API 连接"(catalog 实际 107 非视频)
+
+- ✅ **scripts/relay-batch-test.mjs**(222 行 · 零依赖 Node 24 内置 fetch + AbortController)
+  - 直连 moyu HTTP 绕 admin 5/min rate limit(否则跑 107 个要 21 分钟)
+  - 并发 5 worker + Promise pool + 单请求 timeout 30s
+  - TEXT 95 真调 /chat/completions(max_tokens=1 · 总成本估 < ¥0.01)
+  - IMAGE 12 走 /models 列表探活(不真生成图扣钱)
+  - VIDEO 35 跳过(每次 ¥2+ · 业务流程触发更合理)
+  - 报告:总耗时 / 成功率 / 失败分类(按 statusCode + 前 8 条示例)/ latency p50/p90/p99 / 按 vendor 分组(进度条)/ CSV 详单 `tmp/relay-batch-<ts>.csv`
+  - 安全:RELAY_TOKEN 只读 env · 不入 log/文件 · 跑完强制提示去 moyu 后台 revoke
+  - 可选 env:RELAY_BASE_URL / RELAY_TEST_LIMIT(0=全部 N=随机抽)/ RELAY_CONCURRENCY / RELAY_TIMEOUT_MS / RELAY_SKIP_IMAGE
+- ✅ **.gitignore 加 tmp**(测试输出目录不入 git)
+
+**进行中**
+- 🚧 (无在途 · 等用户给新 moyu token 跑批量测试)
+
+**问题 / 待决策**
+- ❓ **用户测试 token**:旧测试 token 1h 早过期,需用户去 /admin/providers moyu 卡片设新 token + 告诉我跑哪个规模(20 抽样 / 全 107 / 仅 TEXT 95)
+- ❓ **r22.1 用户验证**:zod fix 部署后,用户能否在 catalog 下拉点"添加"成功?(没用户测可能还有别的 UI 路径 bug)
+- ❓ Phase 2 留尾:5 embedding 模型移 EMBEDDING kind / cache invalidate 精确化 / ProviderConfig modelRate/outputRate 双存设计取舍
+
+**下次接着做**
+- 📌 **用户给新 token 后**:`RELAY_TOKEN=sk-xxx node scripts/relay-batch-test.mjs` 跑批量 → 拿到失败模型列表 → 决定下架还是修复
+- 📌 **W8 实战 checklist**:批量测试通过后 → /admin/bindings 显式配 5 项 binding → relay-real-test 单模型 verify → 1 集 7 镜头实战
+- 📌 或 Phase 2:ADR-26 Mastra 编排 + ADR-22 / ADR-28 §G 留尾(cacheRate / groupRate / maskSecret polish / asset group auto-create / token 模型白名单)
+
+**质量**
+- 6 commit(e0d6202 → 1f2460a)+ 1 新脚本就绪(本次会话)
+- typecheck 15/15 全过(每 commit verify)
+- schema:+1 表(RelayProvider)+1 migration(20260525000000)
+- catalog:142 完整 moyu 模型 + 3 poe + 3 openrouter
+
+**累计**
+- **22 次收工 / 60+ debug / Phase 1.5.x 多中转站架构 ready / 107 批量测试脚本就绪**
+- 29 ADR(预留)/ 21 migration / ~120 audit 项 / 85 单测 / smoke 19/19 / typecheck 15/15
+- 11 workspace 包 / 2 跨平台脚本(start.mjs + relay-batch-test.mjs)
+
+---
+
 ## 2026-05-25(周一,win-laptop · 二十一次收工)— Phase 1.5 完整闭环后的全局文档总成 + 启动流程归档
 
 **完成 — 文档全面刷新 + 一键启动写进设备切换流程**

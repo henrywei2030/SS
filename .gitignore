@@ -56,6 +56,7 @@ storage-data
 minio-data
 postgres-data
 redis-data
+tmp
 
 # Cache
 .cache

@@ -1,6 +1,6 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-05-25(**二十一收工 · Phase 1.5 完整闭环 + 文档全局总成 + 一键启动 ready**)
+> 最后更新:2026-05-25(**二十二收工 · /admin/providers 多中转站架构 + 142 catalog + r22/r22.1 双重 audit + 批量测试脚本就绪**)
 > 仓库:https://github.com/henrywei2030/SS
 > **🚀 一键启动**:`pnpm start`(详见 [README.md](README.md#快速启动) / [CLAUDE.md](CLAUDE.md#设备登记))
 > **📖 实战前必读**:[docs/W1-W7-followup.md](docs/W1-W7-followup.md)(P0 已完成,留 Phase 1.5/2/3 续做项)
@@ -55,6 +55,9 @@
 - [x] **Binding 强制显式选(收工后补丁 #1)**— 用户反馈"测试调试可以,实际用必须后台设置"/ seed.ts 7 binding 默认值改 ''(留 docx.parser) / 5 业务 router fallback 改空时抛 PRECONDITION_FAILED + 引导 /admin/bindings / DB SQL UPDATE 修 8 行 / ADR-28 §F 落地 explicit-choice-only 原则 / smoke 19/19 保持过 — 2026-05-24
 - [x] **Audit r21 深度审查 + 一键启动 pnpm start(收工后补丁 #2)**— 用户要求"深度检查 10 遍 + 全局检视 + 启动流程优化"/ 2 并行 audit agent / 修真 P0(aigc enqueue 失败 PREPAY 悬挂)+ 真 P1(worker REFUND 双写 race 用 advisory_xact_lock)+ 5 项 P1/P2 微优化 / 新建 `scripts/start.mjs` 跨平台一键启动(preflight + docker + migration + 检测端口 + turbo dev + wait + open browser + Ctrl+C 优雅停,verify 跑通)/ docs/03 + docs/04 更新 Phase 1.5 字段 / ADR-28 §G 落地 / typecheck 15/15 + test 85/85 — 2026-05-24
 - [x] **文档全局总成 + 一键启动写进设备切换流程**(二十一收工)— README badge/累计/快速启动主推 pnpm start / CLAUDE.md 设备登记 + 切换设备流程加 7 步 + 4 flag + graceful 说明 / CHANGELOG 加 0.1.0 二十/二十一收工完整段 / W1-W7-followup P0 标"已完成 / 替换 Phase 1.5" / phase-1.5-plan 顶部完成戳 + verify checkmark / 0 代码改动 / 6 文档刷新 — 2026-05-25
+- [x] **/admin/providers UI 重构 + 多中转站架构 Phase 1.5.1/1.5.2**(二十二收工)— admin.relay 子 router(get/set/clearCredential)+ 分类 Toggle 启停 + Phase 1.5.1 RelayProvider 表(多 token)+ 静态 catalog JSON + 数据迁移 SQL + Phase 1.5.2 catalog 扩到 142 完整 moyu 模型(95 TEXT + 12 IMAGE + 35 VIDEO)+ 删除按钮 + 简化直连为 4 字段 — 2026-05-25
+- [x] **/admin/providers 双重深度 audit r22 / r22.1**(二十二收工)— r22:3 并行 agent 修真 P0 × 8 + P1 × 6 + 死代码清理(setActive ledger 跨度 / updateRelayProvider transaction 级联 / deleteRelayProvider 级联停用 / catalog 6 modelId 剥 ` L` 后缀 / IMAGE 4 模型补 unitPriceCny / RelayModelKind 扩) · r22.1:5 遍深审修 zod cuid 真 P0(migration 用 gen_random_uuid 不是 cuid,5 处 admin.relay.* .cuid() → .min(1))+ 4 流程改进(添加对话框保持开连续添加 / existingSuffixesByRelay → existingModelIdsByRelay 用 catalog.modelId 匹配 / 按 kind 价格智能显示 / saving state) — 2026-05-25
+- [x] **relay-batch-test.mjs 批量测试脚本就绪**(二十二收工)— 107 非视频模型(95 TEXT + 12 IMAGE)· 直连 moyu HTTP 绕 admin 5/min rate limit · 并发 5 · TEXT 真调 max_tokens=1 总成本 < ¥0.01 · IMAGE 走 /models 探活不真生成 · 报告 ok/fail/latency p50/p90/p99 + 按 vendor 分组 + CSV 详单 · token 只读 env · tmp 加 .gitignore — **待用户给新 token** — 2026-05-25
 - [ ] **W5.6 进阶**(留 Phase 2)— 音频波形(wavesurfer.js)/ AI 自动打标(BPM/时长)/ pgvector 向量搜索
 - [ ] **Polish 剩余**(留 Phase 2)— 34 处硬编码颜色 / a11y / listBindings N+1 / OperationLog 命名规范
 - [ ] **W8 团队实战**(下次启动)— 5 人冷启动 + 配 API Key 真接 Seedance + 1 集 7 镜头
