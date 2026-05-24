@@ -249,7 +249,10 @@ const providerRouter = router({
   createFromCatalog: adminProcedure
     .input(
       z.object({
-        relayProviderId: z.string().cuid(), // 关联到哪个 RelayProvider 行
+        // Audit 修(2026-05-25 r22.1):RelayProvider id 由 migration data migration 用
+        // PostgreSQL gen_random_uuid() 生成(格式 'rly_<32hex>'),不是 cuid 格式。
+        // 改 .min(1) 放宽校验 — 安全性靠 prisma 唯一性约束兜底(找不到行就抛 NOT_FOUND)
+        relayProviderId: z.string().min(1), // 关联到哪个 RelayProvider 行
         catalogKey: z.string(), // 'moyu' / 'poe' / 'openrouter'
         providerIdSuffix: z.string(), // 'claude-sonnet-4-5'
         // 可选:用户改 providerId 前缀(默认 = catalogKey + '-' + providerIdSuffix)
@@ -580,7 +583,8 @@ const relayRouter = router({
   update: adminProcedure
     .input(
       z.object({
-        id: z.string().cuid(),
+        // Audit 修(r22.1):RelayProvider id 可能是 migration 生成的 'rly_<uuid>' 格式
+        id: z.string().min(1),
         displayName: z.string().min(1).max(100).optional(),
         apiUrl: z.string().url().max(255).optional(),
         notes: z.string().max(500).optional(),
@@ -603,7 +607,7 @@ const relayRouter = router({
   setApiKey: adminProcedure
     .input(
       z.object({
-        id: z.string().cuid(),
+        id: z.string().min(1), // r22.1:同上,不限定 cuid 格式
         apiKey: z.string().min(8, 'API Key 至少 8 字符'),
       }),
     )
@@ -617,7 +621,7 @@ const relayRouter = router({
 
   /** 清除某中转站的 API Key */
   clearApiKey: adminProcedure
-    .input(z.object({ id: z.string().cuid() }))
+    .input(z.object({ id: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       await clearRelayProviderApiKey(input.id, ctx.user.id);
       await logOperation(
@@ -633,7 +637,7 @@ const relayRouter = router({
 
   /** 删除中转站(拒删:关联 active ProviderConfig 时) */
   delete: adminProcedure
-    .input(z.object({ id: z.string().cuid(), confirmDelete: z.literal(true) }))
+    .input(z.object({ id: z.string().min(1), confirmDelete: z.literal(true) }))
     .mutation(async ({ ctx, input }) => {
       try {
         await deleteRelayProvider(input.id);

@@ -467,24 +467,21 @@ function ModelsSection({
                 </div>
               )}
 
-              {/* 从 catalog 添加中转站模型 — Audit 修(F-P2-1):existingSuffixes 用 providerIdSuffix 反推
-                  ProviderConfig 没存 providerIdSuffix,但 providerId = `${prefix}-${suffix}`,
-                  按 - 切第一段去掉(prefix=relayProvider.name)剩下就是 suffix */}
+              {/* 从 catalog 添加中转站模型 — Audit r22.1 修(遍 5):用 defaultModel 反推匹配 catalog modelId
+                  (旧 prefix 反推不稳健:1.5.1 之前的 relay-* migrated 后 prefix 是 'relay-' 不是 'moyu-')
+                  defaultModel 在 createFromCatalog 时一定 set(=m.modelId),migration 旧 relay-* 也保留了
+                  defaultParams.defaultModel,所以这个反推稳健 */}
               {hasCatalogModels && relays.length > 0 && (
                 <CatalogAddRow
                   kind={kind}
                   relays={relays}
                   catalogs={catalogs}
-                  existingSuffixesByRelay={(() => {
+                  existingModelIdsByRelay={(() => {
                     const map = new Map<string, Set<string>>();
                     for (const p of list) {
-                      if (!p.relayProviderId || !p.relayProviderName) continue;
-                      const prefix = `${p.relayProviderName}-`;
-                      const suffix = p.providerId.startsWith(prefix)
-                        ? p.providerId.slice(prefix.length)
-                        : p.providerId;
+                      if (!p.relayProviderId || !p.defaultModel) continue;
                       const existing = map.get(p.relayProviderId) ?? new Set<string>();
-                      existing.add(suffix);
+                      existing.add(p.defaultModel);
                       map.set(p.relayProviderId, existing);
                     }
                     return map;
@@ -700,13 +697,13 @@ function CatalogAddRow({
   kind,
   relays,
   catalogs,
-  existingSuffixesByRelay,
+  existingModelIdsByRelay,
   onChange,
 }: {
   kind: string;
   relays: RelayProvider[];
   catalogs: Catalog[];
-  existingSuffixesByRelay: Map<string, Set<string>>;
+  existingModelIdsByRelay: Map<string, Set<string>>;
   onChange: () => void;
 }): React.ReactElement {
   const [open, setOpen] = React.useState(false);
@@ -728,12 +725,9 @@ function CatalogAddRow({
           kind={kind}
           relays={relays}
           catalogs={catalogs}
-          existingSuffixesByRelay={existingSuffixesByRelay}
+          existingModelIdsByRelay={existingModelIdsByRelay}
           onClose={() => setOpen(false)}
-          onSaved={() => {
-            onChange();
-            setOpen(false);
-          }}
+          onChange={onChange}
         />
       )}
     </>
@@ -744,16 +738,16 @@ function CatalogPickerDialog({
   kind,
   relays,
   catalogs,
-  existingSuffixesByRelay,
+  existingModelIdsByRelay,
   onClose,
-  onSaved,
+  onChange,
 }: {
   kind: string;
   relays: RelayProvider[];
   catalogs: Catalog[];
-  existingSuffixesByRelay: Map<string, Set<string>>;
+  existingModelIdsByRelay: Map<string, Set<string>>;
   onClose: () => void;
-  onSaved: () => void;
+  onChange: () => void;
 }): React.ReactElement {
   const [selectedRelayId, setSelectedRelayId] = React.useState<string>(
     relays[0]?.id ?? '',
@@ -764,13 +758,14 @@ function CatalogPickerDialog({
 
   const createFromCatalog = trpc.admin.provider.createFromCatalog.useMutation();
 
-  // Audit 修(F-P2-1):existingSuffixes 关联到当前选中的 RelayProvider — 不同中转站独立去重
-  // 这样 user 切换中转站时,filtered 列表会正确刷新(同 catalogKey 下已加的不重复)
-  const existingSuffixes =
-    existingSuffixesByRelay.get(selectedRelayId) ?? new Set<string>();
-  const filtered = models.filter((m) => !existingSuffixes.has(m.providerIdSuffix));
+  // Audit r22.1 修(遍 5):existingModelIds 用 catalog.modelId 反推 ProviderConfig.defaultModel
+  // (比 providerIdSuffix 拼前缀反推稳健;能正确去重历史 migrated 旧 relay-*)
+  const existingModelIds =
+    existingModelIdsByRelay.get(selectedRelayId) ?? new Set<string>();
+  const filtered = models.filter((m) => !existingModelIds.has(m.modelId));
 
-  // 添加成功后:invoke parent refetch 但保持对话框开,允许连续添加
+  // Audit r22.1 修(遍 3):成功后保持 dialog 开,只 refetch 让 filtered 立即去掉刚加的
+  // 这样用户可以连续 [+ 添加] 多个候选,完成后点 "完成" 关闭
   const handleAdd = (suffix: string): void => {
     createFromCatalog.mutate(
       {
@@ -779,9 +774,25 @@ function CatalogPickerDialog({
         providerIdSuffix: suffix,
       },
       {
-        onSuccess: () => onSaved(), // parent refetch + 重渲染 filtered
+        onSuccess: () => onChange(), // 触发 parent refetch,dialog 不关
       },
     );
+  };
+
+  // Audit r22.1(遍 4):catalog 价格按 kind 显示策略 — IMAGE/VIDEO 优先 unitPriceCny(用户更直观)
+  // TEXT 优先 modelRate(per-token 计费)
+  const formatCatalogPrice = (m: CatalogModel): string => {
+    const isTokenKind = kind === 'TEXT' || kind === 'EMBEDDING';
+    if (isTokenKind && m.modelRate != null) {
+      return `¥${m.modelRate}/M · 输出 ${m.outputRate ?? 1}×`;
+    }
+    if (m.unitPriceCny != null && m.unitName) {
+      return `¥${m.unitPriceCny}/${m.unitName}`;
+    }
+    if (m.modelRate != null) {
+      return `¥${m.modelRate}/M · 输出 ${m.outputRate ?? 1}×`;
+    }
+    return '由中转站计费';
   };
 
   return (
@@ -847,10 +858,7 @@ function CatalogPickerDialog({
                       {m.description}
                     </div>
                     <div className="mt-1 font-mono text-[10px] text-[hsl(var(--color-muted-foreground))]">
-                      {m.modelId} ·{' '}
-                      {m.modelRate != null
-                        ? `¥${m.modelRate}/M · 输出 ${m.outputRate ?? 1}×`
-                        : `¥${m.unitPriceCny ?? 0}/${m.unitName ?? '?'}`}
+                      {m.modelId} · {formatCatalogPrice(m)}
                     </div>
                   </div>
                   <Button
