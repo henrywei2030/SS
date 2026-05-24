@@ -17,9 +17,14 @@ import {
   setProviderApiKey,
   clearProviderApiKey,
   setProviderActive,
+  getTextProvider,
+  getImageProvider,
+  getVideoProvider,
 } from '@ss/adapters/provider';
+import { prisma } from '@ss/db';
+import { sanitizeErrorMsg } from '@ss/shared';
 
-import { router, adminProcedure } from '../trpc.js';
+import { router, adminProcedure, rateLimit } from '../trpc.js';
 import { logOperation } from '../middleware/audit.js';
 
 // ---------------------------------------------------------------------------
@@ -101,17 +106,123 @@ const providerRouter = router({
       return updated;
     }),
 
-  /** 测试连接 — W2.7 实现真实测试调用，先占位 */
+  /**
+   * 测试连接(第 21 轮 audit 真实现)
+   *
+   * 行为:
+   *   - text Provider:用 "reply with: pong" 最小 chat 调用,verify token + endpoint 有效
+   *   - image Provider:仅 verify config 存在,真生成图会扣钱,**留 dryRun 选项**让 admin 真测时显式触发
+   *   - video Provider:仅 verify config 存在(异步任务即使 dry 也会扣钱)
+   *
+   * 保护:
+   *   - adminProcedure 守门(仅 admin 调)
+   *   - per-admin rate limit 5 次/min(防误点刷爆 token)
+   *   - errMsg 经 sanitizeErrorMsg 脱敏(防错误信息泄漏 Provider URL/token)
+   *   - 全程入 OperationLog(action: 'provider.testConnection'),记 ok/失败/latencyMs
+   */
   testConnection: adminProcedure
-    .input(z.object({ providerId: z.string() }))
-    .mutation(async ({ input }) => {
-      // TODO: 拉取 provider 实例 + 跑最小调用
-      return {
-        success: true,
+    .use(
+      rateLimit({
+        key: (ctx) => `provider.testConnection:${ctx.user?.id ?? 'anon'}`,
+        max: 5,
+        windowMs: 60_000,
+        message: '测试连接过快(每分钟最多 5 次)— 防误点刷爆 token',
+      }),
+    )
+    .input(
+      z.object({
+        providerId: z.string(),
+        /** 图像/视频默认 dryRun=true(只 verify 配置,不真生成防扣钱);text 总是真调(消耗 < 50 token) */
+        dryRun: z.boolean().default(true),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const startedAt = Date.now();
+      const cfg = await prisma.providerConfig.findUnique({ where: { providerId: input.providerId } });
+      if (!cfg) {
+        return {
+          success: false,
+          providerId: input.providerId,
+          latencyMs: 0,
+          message: '配置不存在',
+        };
+      }
+      if (!cfg.isActive) {
+        return {
+          success: false,
+          providerId: input.providerId,
+          latencyMs: 0,
+          message: 'Provider 未启用(isActive=false)— 先在 list 启用再测',
+        };
+      }
+
+      const baseLog = {
         providerId: input.providerId,
-        latencyMs: 0,
-        message: 'W2.7 测试连接未实现',
+        kind: cfg.kind,
+        dryRun: input.dryRun,
       };
+
+      try {
+        let resultMessage: string;
+        if (cfg.kind === 'TEXT') {
+          // 真调一次 chat,消耗 < 50 token,verify token + endpoint
+          const provider = await getTextProvider(input.providerId);
+          const r = await provider.generate(
+            {
+              prompt: 'Reply with just the word: pong',
+              maxTokens: 5,
+              temperature: 0,
+            },
+            { userId: ctx.user.id, skipLedger: true },
+          );
+          resultMessage = `OK · response="${r.text.slice(0, 50)}" · tokens=${r.inputTokens}+${r.outputTokens}`;
+        } else if (cfg.kind === 'IMAGE' || cfg.kind === 'VIDEO') {
+          if (input.dryRun) {
+            // dryRun:仅 verify Provider 实例化成功 + apiKey 解密成功,不真生成
+            if (cfg.kind === 'IMAGE') await getImageProvider(input.providerId);
+            else await getVideoProvider(input.providerId);
+            resultMessage = `配置 OK(dryRun · 未真生成,需 dryRun=false 测真接口会扣钱)`;
+          } else {
+            return {
+              success: false,
+              providerId: input.providerId,
+              latencyMs: Date.now() - startedAt,
+              message:
+                'IMAGE/VIDEO 真测会扣钱,请通过 UI 业务流程触发(/art 或 /aigc),不在 admin testConnection 内自动触发',
+            };
+          }
+        } else {
+          resultMessage = `kind=${cfg.kind} 暂不支持自动测试(Phase 1.5 补)`;
+        }
+
+        const latencyMs = Date.now() - startedAt;
+        await logOperation(ctx, 'provider.config.testConnection', 'provider', input.providerId, null, {
+          ...baseLog,
+          success: true,
+          latencyMs,
+        });
+        return {
+          success: true,
+          providerId: input.providerId,
+          latencyMs,
+          message: resultMessage,
+        };
+      } catch (e) {
+        const latencyMs = Date.now() - startedAt;
+        const errMsg = sanitizeErrorMsg(e);
+        await logOperation(ctx, 'provider.config.testConnection', 'provider', input.providerId, null, {
+          ...baseLog,
+          success: false,
+          latencyMs,
+          error: errMsg,
+        });
+        return {
+          success: false,
+          providerId: input.providerId,
+          latencyMs,
+          message: errMsg,
+        };
+      }
     }),
 });
 

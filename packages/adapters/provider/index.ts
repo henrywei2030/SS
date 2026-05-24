@@ -15,6 +15,8 @@ export { BaseProvider } from './base.js';
 export { SeedanceProvider } from './seedance.js';
 export { ClaudeTextProvider } from './claude.js';
 export { MockVideoProvider } from './mock-video.js';
+export { OpenAICompatTextProvider } from './openai-compat.js';
+export { OpenAICompatImageProvider } from './openai-compat-image.js';
 
 import { prisma } from '@ss/db';
 
@@ -22,6 +24,8 @@ import { decryptSecret, encryptSecret, maskSecret } from '../src/crypto.js';
 import { SeedanceProvider } from './seedance.js';
 import { ClaudeTextProvider } from './claude.js';
 import { MockVideoProvider } from './mock-video.js';
+import { OpenAICompatTextProvider } from './openai-compat.js';
+import { OpenAICompatImageProvider } from './openai-compat-image.js';
 import type {
   IVideoProvider,
   IImageProvider,
@@ -143,11 +147,34 @@ import { MockImageProvider } from './mock-image.js';
 export { MockImageProvider } from './mock-image.js';
 
 export async function getImageProvider(id: string): Promise<IImageProvider> {
-  // W4-MM.6 临时实现:全部用 MockImageProvider (picsum.photos 占位)
-  // 真接入 NanoBanana / GPT Image / 豆包图像 时改这里的 switch
+  // 第 21 轮 audit:真接入路径
+  //   - protocol='openai-compat' → OpenAICompatImageProvider(moyu seedream / FLUX / DALL-E)
+  //   - 否则 → MockImageProvider 兜底(picsum.photos,dev 永远可用)
   const cfg = await loadConfig(id).catch(() => null);
   const unitPriceCny = cfg?.unitPriceCny ?? 0;
 
+  // protocol = 'openai-compat':真接入 moyu / OpenAI 兼容图像 endpoint
+  if (cfg && (cfg.defaultParams.protocol as string | undefined) === 'openai-compat') {
+    const cacheKey = cfg.cacheKey;
+    const hit = cache.image.get(id);
+    if (hit && hit.cacheKey === cacheKey) return hit.instance;
+
+    const defaultModel =
+      (cfg.defaultParams.defaultModel as string | undefined) ?? cfg.providerId;
+    const instance = new OpenAICompatImageProvider({
+      apiUrl: cfg.apiUrl,
+      apiKey: cfg.apiKey,
+      defaultModel,
+      unitPriceCny: cfg.unitPriceCny,
+      displayName: cfg.defaultParams.displayName as string | undefined,
+      maxConcurrent: cfg.maxConcurrent,
+      defaultSize: cfg.defaultParams.defaultSize as string | undefined,
+    });
+    cache.image.set(id, { instance, cacheKey });
+    return instance;
+  }
+
+  // Mock 兜底(无 cfg / 无 key / inactive / 无 protocol 声明)
   const hit = cache.image.get(id);
   const cacheKey = `${id}-mock-${cfg?.cacheKey ?? 'noconfig'}`;
   if (hit && hit.cacheKey === cacheKey) return hit.instance;
@@ -170,6 +197,24 @@ export async function getTextProvider(id: string): Promise<ITextProvider> {
 const textInstances = new Map<string, { instance: ITextProvider; cacheKey: string }>();
 
 function constructTextProvider(cfg: ResolvedConfig): ITextProvider {
+  // 第 21 轮 audit:protocol='openai-compat' 优先(moyu / Poe / OpenRouter / OpenAI / 任意 OpenAI 兼容站)
+  // defaultParams.protocol 由 admin 后台 / seed.ts 显式声明,不依赖 URL parsing
+  const protocol = cfg.defaultParams.protocol as string | undefined;
+  if (protocol === 'openai-compat') {
+    const defaultModel =
+      (cfg.defaultParams.defaultModel as string | undefined) ?? cfg.providerId;
+    return new OpenAICompatTextProvider({
+      apiUrl: cfg.apiUrl,
+      apiKey: cfg.apiKey,
+      defaultModel,
+      unitPriceCny: cfg.unitPriceCny,
+      inputUnitPriceCny: cfg.defaultParams.inputUnitPriceCny as number | undefined,
+      outputUnitPriceCny: cfg.defaultParams.outputUnitPriceCny as number | undefined,
+      displayName: cfg.defaultParams.displayName as string | undefined,
+      maxConcurrent: cfg.maxConcurrent,
+    });
+  }
+  // Anthropic 直连原生协议
   if (cfg.providerId.startsWith('claude')) {
     return new ClaudeTextProvider({
       apiUrl: cfg.apiUrl || 'https://api.anthropic.com/v1',
@@ -179,8 +224,10 @@ function constructTextProvider(cfg: ResolvedConfig): ITextProvider {
     });
   }
   if (cfg.providerId.startsWith('doubao')) {
-    // 豆包使用 OpenAI 兼容协议，复用 Claude 类的结构改造（Phase 2 完整实现）
-    throw new Error('Doubao text provider implementation deferred to Phase 2');
+    // 豆包使用 OpenAI 兼容协议 — 推荐通过 moyu / 任意 OpenAI 兼容中转,设 protocol='openai-compat'
+    throw new Error(
+      'Doubao text provider:请改用 protocol="openai-compat" 配置(走 moyu 中转或直连 ARK OpenAI 兼容 endpoint)',
+    );
   }
   throw new Error(`No text provider class for: ${cfg.providerId}`);
 }
@@ -228,14 +275,23 @@ export async function getComplianceProvider(id: string): Promise<IComplianceProv
  * 完全找不到匹配 → 返 MockVideoProvider 兜底(而不是抛错),让 dev 环境永远可用。
  */
 function constructVideoProvider(cfg: ResolvedConfig): IVideoProvider {
-  if (cfg.providerId.startsWith('seedance')) {
+  // 第 21 轮 audit:endpointStyle 由 defaultParams 显式声明
+  //   - 'moyu' → moyu /v1/video/generations 中转(prompt+duration+ratio 简化结构)
+  //   - 'ark'  → Volcengine ARK 原生 /contents/generations/tasks(content+parameters 结构)
+  // 默认 'ark'(backward compat)
+  const endpointStyle = (cfg.defaultParams.endpointStyle as 'ark' | 'moyu' | undefined) ?? 'ark';
+  const defaultModel =
+    (cfg.defaultParams.defaultModel as string | undefined) ?? cfg.providerId;
+
+  if (cfg.providerId.startsWith('seedance') || cfg.providerId.startsWith('doubao-seedance') || cfg.providerId.startsWith('moyu-doubao-seedance')) {
     return new SeedanceProvider({
-      apiUrl: cfg.apiUrl || 'https://ark.cn-beijing.volces.com/api/v3',
+      apiUrl: cfg.apiUrl || (endpointStyle === 'moyu' ? 'https://www.moyu.info/v1' : 'https://ark.cn-beijing.volces.com/api/v3'),
       apiKey: cfg.apiKey,
-      defaultModel: cfg.providerId,
-      fastModel: 'seedance-2.0-fast',
+      defaultModel,
+      fastModel: cfg.defaultParams.fastModel as string | undefined,
       maxDuration: Number(cfg.defaultParams.maxDuration ?? 10),
       unitPriceCny: cfg.unitPriceCny,
+      endpointStyle,
     });
   }
   // TODO Phase 2:Kling / HappyHorse / 本地模型按上述注释模板接入
