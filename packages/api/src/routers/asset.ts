@@ -613,8 +613,14 @@ export const assetRouter = router({
         },
       });
       const map = new Map(settings.map((s) => [s.key, s.value]));
-      const modelId =
-        map.get('binding.asset.breakdown.modelId') ?? 'claude-sonnet-4-5';
+      // 二十收工后用户反馈:不 hardcode 默认 provider,binding 空时显式拒绝
+      const modelId = map.get('binding.asset.breakdown.modelId') ?? '';
+      if (!modelId) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '资产拆解未配置 LLM Provider — 请去 /admin/bindings 选择 binding.asset.breakdown.modelId',
+        });
+      }
       const maxCharacters = Number(map.get('asset.breakdown.maxCharacters') ?? '20');
 
       // W1-W5 audit P0(B1):写 GenerationAttempt(action=TEXT),Phase 1 资产拆解扣费回溯链路
@@ -817,11 +823,21 @@ export const assetRouter = router({
         },
       });
       const settingMap = new Map(settings.map((s) => [s.key, s.value]));
+      // 二十收工后用户反馈:不 hardcode 默认 provider,binding 空时显式拒绝(input.modelId 优先,测试调试用)
       const providerId =
         input.modelId ??
         (input.slot === 'panorama'
-          ? settingMap.get('binding.asset.panorama.providerId') ?? 'gpt-image-2'
-          : settingMap.get('binding.asset.image.providerId') ?? 'nano-banana-pro');
+          ? settingMap.get('binding.asset.panorama.providerId') ?? ''
+          : settingMap.get('binding.asset.image.providerId') ?? '');
+      if (!providerId) {
+        const bindingKey = input.slot === 'panorama'
+          ? 'binding.asset.panorama.providerId'
+          : 'binding.asset.image.providerId';
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: `资产${input.slot === 'panorama' ? '全景图' : '图像'}生成未配置 Image Provider — 请去 /admin/bindings 选择 ${bindingKey}(或在调用时传 input.modelId 显式指定)`,
+        });
+      }
 
       const compiled = compileAssetPrompt({
         asset: {

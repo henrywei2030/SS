@@ -9,6 +9,23 @@
 
 **完成 — Phase 1.5 代码层 100% ready,真接中转站全链路通**
 
+### 收工后补丁(同日,binding 强制显式选)
+用户反馈:"测试调试可以,实际用必须后台设置最终用哪一个" — 不该 hardcode 任何 provider 作为默认值
+
+- ✅ seed.ts 7 个 binding.*.{modelId|providerId} 默认值改 `''`(留 `binding.script.docx.parser` = mammoth,这是库不是 provider)
+- ✅ 5 业务 router fallback 改空时抛 PRECONDITION_FAILED + 引导 /admin/bindings:
+  - script.analyze(input.modelId 优先,binding 空时抛)
+  - storyboard.generateForEpisode(getStoryboardBindings helper 内抛)
+  - asset.breakdown(无 override,binding 空时抛)
+  - asset.generateImage(input.modelId 优先,binding 空 + 无 override 时抛,分 panorama/image 错误信息)
+  - aigc.generateVideo(input.providerOverride 优先,binding 空 + 无 override 时抛)
+- ✅ DB SQL UPDATE 修复已 seed 的 8 行 binding 值清空
+- ✅ 测试脚本(relay-real-test.mjs / w8-smoke.mjs) hardcode provider id 保留 — 测试场景就该 explicit 测特定 provider
+- ✅ typecheck 15/15 + test 85/85 + **smoke 19/19** 全过(generateForEpisode 错误改前路径,仍被 sanitize)
+- ✅ ADR-28 加 §F 段:explicit-choice-only 原则
+
+
+
 ### Phase 1.5 主次重审 v2.1(规划阶段)
 - ✅ docs/integrations/phase-1.5-plan.md 升级 v2.1:**P0-2 4 倍率 → 2 倍率压简**(cache/group 推 Phase 2,SaaS 多租户产物)+ **P0-3 maskSecret 降级 P1-5**(纯 UI polish)
 - ✅ 净省 0.5-1 天工作量,P0 从 6 项 → 5 项核心,聚焦"上线必需"

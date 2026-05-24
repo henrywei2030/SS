@@ -62,7 +62,8 @@ async function getVideoBindings(ctx: Context): Promise<{
   const ar: '9:16' | '16:9' | '1:1' =
     rawAr === '16:9' ? '16:9' : rawAr === '1:1' ? '1:1' : '9:16';
   return {
-    providerId: map.get('binding.shot.video.providerId') ?? 'seedance-2.0',
+    // 二十收工后用户反馈:不 hardcode 默认 provider,空时调用方判断(generateVideo 有 input.providerOverride 优先)
+    providerId: map.get('binding.shot.video.providerId') ?? '',
     maxDurationS: Number(map.get('shot.video.maxDurationS') ?? '10'),
     defaultAspectRatio: ar,
     dailyBudgetCny: Number(map.get('shot.video.dailyBudgetCny') ?? '500'),
@@ -1040,6 +1041,13 @@ export const aigcRouter = router({
       const bindings = await getVideoBindings(ctx);
 
       const providerId = input.providerOverride ?? bindings.providerId;
+      // 二十收工后用户反馈:不 hardcode 默认 provider,binding 空 + 无 override 时显式拒绝
+      if (!providerId) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '视频生成未配置 Video Provider — 请去 /admin/bindings 选择 binding.shot.video.providerId(或在调用时传 input.providerOverride 显式指定)',
+        });
+      }
       // W5.5.1:'auto' 比例 resolve 到项目默认(短剧默认 9:16)
       const resolvedAspect =
         input.aspectRatio === 'auto' || input.aspectRatio === undefined

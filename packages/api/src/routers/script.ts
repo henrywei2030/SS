@@ -593,14 +593,21 @@ export const scriptRouter = router({
       if (!script) throw new TRPCError({ code: 'NOT_FOUND' });
       await assertProjectAccess(ctx, script.projectId);
 
-      // P1-4:从 binding 读 modelId(input 优先 > binding > 硬编码兜底)
+      // P1-4:从 binding 读 modelId(input 优先 > binding,无硬编码兜底)
+      // 二十收工后用户反馈:不 hardcode 任何默认 provider,binding 空时显式拒绝
       let modelId = input.modelId;
       if (!modelId) {
         const binding = await ctx.prisma.systemSetting.findUnique({
           where: { key: 'binding.script.analysis.modelId' },
           select: { value: true },
         });
-        modelId = binding?.value ?? 'claude-sonnet-4-5';
+        modelId = binding?.value ?? '';
+      }
+      if (!modelId) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '剧本分析未配置 LLM Provider — 请去 /admin/bindings 选择 binding.script.analysis.modelId(或在调用时传 input.modelId 显式指定)',
+        });
       }
 
       const { analyzeScript } = await import('@ss/core/script');

@@ -458,30 +458,33 @@ async function main() {
         '中转站素材库默认 group_id(0 = 关闭素材库同步)。若你用的中转站支持素材库 API(可上传文件拿 asset:// 引用,跨调用复用),配 token 后到该站后台创建 group,拿到 group_id 后填这里启用。同一 token 共享素材库。',
     },
 
-    // ----- 模型用途绑定（让后台一处切换，所有调用统一）-----
+    // ----- 模型用途绑定(admin 后台 /admin/bindings 显式选择,默认空)-----
+    // 设计原则(二十收工后用户反馈):不 hardcode 任何 provider 作为默认值。
+    // 业务调用读 binding,空时抛 PRECONDITION_FAILED 引导 admin 显式配。
+    // 测试调试场景仍可走 input.providerOverride / input.modelId 绕过 binding。
     {
       key: 'binding.script.analysis.modelId',
-      value: 'claude-sonnet-4-5',
+      value: '',
       category: 'model_binding',
-      description: '剧本分析使用的 LLM modelId（W2.7 Story Compass）',
+      description: '剧本分析使用的 LLM modelId(必须 admin 显式选,例:claude-sonnet-4-5 / relay-claude-sonnet-4-5 / relay-deepseek-chat 等任意 active text provider)',
     },
     {
       key: 'binding.storyboard.generation.modelId',
-      value: 'claude-sonnet-4-5',
+      value: '',
       category: 'model_binding',
-      description: '分镜生成（剧本→单镜列表）使用的 LLM modelId',
+      description: '分镜生成(剧本→单镜列表)使用的 LLM modelId(必须 admin 显式选)',
     },
     {
       key: 'binding.storyboard.prompt.modelId',
-      value: 'claude-sonnet-4-5',
+      value: '',
       category: 'model_binding',
-      description: '分镜提示词生成（单镜→视频 prompt 含台词/OS）使用的 LLM modelId',
+      description: '分镜提示词生成(单镜→视频 prompt 含台词/OS)使用的 LLM modelId(必须 admin 显式选)',
     },
     {
       key: 'binding.script.docx.parser',
       value: 'mammoth',
       category: 'model_binding',
-      description: 'docx 解析引擎（mammoth | docx2md）',
+      description: 'docx 解析引擎(mammoth | docx2md)— 这是库选择不是 provider,保留默认值',
     },
 
     // ----- 分镜业务参数 -----
@@ -510,30 +513,30 @@ async function main() {
       description: '生成分镜时是否自动按 maxDurationS 预合并组',
     },
 
-    // ----- W4 资产工坊 model 绑定 -----
+    // ----- W4 资产工坊 model 绑定(admin 显式选,默认空) -----
     {
       key: 'binding.asset.breakdown.modelId',
-      value: 'claude-sonnet-4-5',
+      value: '',
       category: 'model_binding',
-      description: '资产拆解使用的 LLM modelId(剧本→人物/场景/道具结构化)',
+      description: '资产拆解使用的 LLM modelId(剧本→人物/场景/道具结构化)— 必须 admin 显式选',
     },
     {
       key: 'binding.asset.image.providerId',
-      value: 'nano-banana-pro',
+      value: '',
       category: 'model_binding',
-      description: '资产主形象 / 三视图生成使用的 Image Provider',
+      description: '资产主形象 / 三视图生成使用的 Image Provider — 必须 admin 显式选(例:nano-banana-pro / relay-doubao-seedream-4-0 / gpt-image-2 等)',
     },
     {
       key: 'binding.asset.panorama.providerId',
-      value: 'gpt-image-2',
+      value: '',
       category: 'model_binding',
-      description: '场景 360° 全景图生成使用的 Image Provider',
+      description: '场景 360° 全景图生成使用的 Image Provider — 必须 admin 显式选',
     },
     {
       key: 'binding.asset.compliance.providerId',
-      value: 'volcengine-compliance',
+      value: '',
       category: 'model_binding',
-      description: '人物合规检查使用的 Compliance Provider(返回 complianceId)',
+      description: '人物合规检查使用的 Compliance Provider(返回 complianceId)— 必须 admin 显式选',
     },
 
     // ----- W4 资产业务参数 -----
@@ -556,12 +559,12 @@ async function main() {
       description: '视频生成前是否强制要求人物已通过合规检查',
     },
 
-    // ----- W5.0 视频生成 model 绑定 -----
+    // ----- W5.0 视频生成 model 绑定(admin 显式选,默认空) -----
     {
       key: 'binding.shot.video.providerId',
-      value: 'seedance-2.0',
+      value: '',
       category: 'model_binding',
-      description: '分镜视频生成默认 Provider(快速档可改 seedance-2.0-fast)',
+      description: '分镜视频生成使用的 Video Provider — 必须 admin 显式选(例:seedance-2.0 / relay-doubao-seedance-1-0-pro / relay-doubao-seedance-2-0 等)',
     },
 
     // ----- W5.0 视频生成业务参数 -----

@@ -73,8 +73,16 @@ async function getStoryboardBindings(ctx: Context): Promise<{
     },
   });
   const map = new Map(settings.map((s) => [s.key, s.value]));
+  const modelId = map.get('binding.storyboard.generation.modelId') ?? '';
+  // 二十收工后用户反馈:不 hardcode 默认 provider,binding 空时显式拒绝
+  if (!modelId) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: '分镜生成未配置 LLM Provider — 请去 /admin/bindings 选择 binding.storyboard.generation.modelId',
+    });
+  }
   return {
-    modelId: map.get('binding.storyboard.generation.modelId') ?? 'claude-sonnet-4-5',
+    modelId,
     maxDurationS: Number(map.get('storyboard.maxDurationS') ?? '15'),
     defaultShotDurationS: Number(map.get('storyboard.defaultShotDurationS') ?? '3'),
     autoMerge: (map.get('storyboard.autoMergeOnGenerate') ?? 'true') === 'true',
