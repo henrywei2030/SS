@@ -5,6 +5,87 @@
 
 ---
 
+## 2026-05-24(周日,win-laptop · 十九次收工)— moyu 真接入 + Phase 1.5 P0 规划 + 最终 audit(12 commits)
+
+**完成 — moyu 中转站全栈接入 + 后台 4 类入口设计 + Phase 1.5 启动 ready**
+
+### W8 真接入完整闭环(用户授权 2h 自主完成)
+- ✅ W8 step 1-5:服务拉起(infra/migration/web/worker 全活)
+- ✅ W8 step 10 部分:smoke 18/18 → 后 19/19(无 LLM Key 部分全验)
+- ✅ 真接 moyu(用户给临时 token):chat/image/video 三端到端调通 + script.analyze 24s 真出剧本分析
+
+### moyu.info 中转站完整接入(12 commits 累计)
+
+**Provider 层(4 类入口统一抽象)**:
+- ✅ 新 `OpenAICompatTextProvider`(适配 moyu/Poe/OpenRouter/OpenAI 任意 OpenAI 兼容)
+- ✅ 新 `OpenAICompatImageProvider`(适配 seedream/FLUX/DALL-E)
+- ✅ `SeedanceProvider` 加 endpointStyle('ark'|'moyu') backward compat
+- ✅ index.ts switch:protocol='openai-compat' + endpointStyle='moyu' 显式声明
+- ✅ seed.ts 加 8 个 moyu Provider(claude-sonnet/haiku/deepseek + seedance-1-0-pro/2-0/lite-i2v + seedream-4-0/FLUX,全 isActive=false)
+
+**Admin 后台真闭环**:
+- ✅ admin.testConnection 真实现(text 真调 chat / image+video dryRun + sanitize + rate limit)
+- ✅ admin.provider.create + delete(支持 4 类入口任意添加 — 中转/Poe/直连/本地)
+- ✅ admin.dashboard.platformOverview(替 ¥0.00 hardcode,真聚合 KPI)
+
+**安全加固(第 23 轮 audit 7 项 P0/P1)**:
+- 🔴 SSRF 防御:`validateApiUrl()` 拒 RFC1918/link-local/metadata,dev 允许 localhost
+- 🔴 admin 首页 ¥0.00 → 真 data
+- 🔴 requestId 客户端伪造防御:X-Request-Id 严格 UUID 格式校验
+- 🟡 zodIssues 生产脱敏(防 password regex 泄漏)
+- 🟡 providerId case race(create 自动 lowercase)
+- 🟡 mutationCache 加 `meta.customError` 防双 toast
+- 🟡 maskSecret 改前 5+后 4(moyu 风格,留 P0-3 Phase 1.5 实施)
+
+### 关键发现(moyu 浏览器深度学习 - Claude in Chrome 扩展)
+1. **预扣 + 退还多扣机制**(视频生成必学):创建预扣 ¥10,完成退还 ¥6.297,净 ¥3.703
+2. **4 倍率拆分**:模型 / 输出 / 缓存 / 分组(GPT/Claude 风格)
+3. **/console UI 设计借鉴**:KPI 4 卡 + 2×2 图表 + sidebar 4 区分 + sk-XXXX****yyyy 风格 + 列设置 + CSV 导出
+4. **支付集成参考**:Stripe + 支付宝 + 微信 + 兑换码(Phase 2 SaaS 化)
+
+### 完整文档归档(`docs/integrations/`)
+- ✅ `moyu-full-docs.md` 213593 chars(24 章 API + SDK + Seedance2 + 素材库)
+- ✅ `moyu-pricing.md` 49715 chars(148 模型完整定价)
+- ✅ `moyu-api.md` API spec 摘要
+- ✅ `moyu-design-notes.md` 设计要素 + 二次校验报告
+- ✅ `provider-onboarding-design.md` 4 类入口设计
+- ✅ `phase-1.5-plan.md` ⭐ 重写后的 6 项 P0 规划(P0-1 entryType + P0-2 4 倍率 + P0-3 mask + P0-4 CSV + P0-5 asset:// + P0-6 配 token)
+- ✅ `docs/admin/api-keys-onboarding.md` admin 真用 step-by-step
+
+### Phase 1.5 启动 Ready(代码层)
+- ✅ smoke 19/19 / CRUD 7/7 / typecheck 全过 / pnpm audit 无 vuln
+- ✅ 服务全活(web :3000 / worker :9200 / postgres+redis+minio healthy 24h+)
+- ✅ 真测 moyu 全链路:LLM analyze 24s ✓ / image gen ✓ / video task creation ✓ / pricing 148 全归档
+
+**进行中**
+- 🚧 (无在途代码,等用户新 session 详细任务清单)
+
+**问题 / 待决策**
+- ❓ Phase 1.5 启动顺序确认(P0-1+P0-2 同 migration → P0-6 配 token → 真触发 W3/W4/W5)
+- ❓ moyu 真 token 申请 + 额度设置(用户决定)
+- ❓ W8 5 人冷启动会议时间(协调人决定)
+
+**下次接着做**
+- 📌 **新 session 用户会发详细任务清单**
+- 📌 按 `docs/integrations/phase-1.5-plan.md` 强制顺序执行 6 项 P0
+- 📌 P0-1: CostLedgerEntry 加 entryType(NORMAL/PREPAY/REFUND/ADJUSTMENT)+ migration
+- 📌 P0-2: ProviderConfig 加 4 倍率字段(modelRate/outputRate/cacheRate/groupRate)
+- 📌 P0-5: moyu 素材库 asset:// 引用机制接入
+
+**质量**
+- 25 文件 + 6 新文档 = 31 文件累计 +3000+/-50 行
+- 12 commits push origin/main(573a659 → 440ce9d)
+- 安全:9 项保护机制(AES-256-GCM / mask / adminProcedure / rateLimit / sanitize / OperationLog / dryRun / isActive / SSRF 白名单)
+- 文档归档 4 个新增 + 1 更新 = 5 个 docs/integrations/*.md
+
+**累计**
+- **19 次收工 / 60+次 debug + W8 真接入 + 4 类 Provider 入口 + Phase 1.5 P0 规划**
+- 27 ADR(ADR-27 全栈加固决议)/ 19 migration / ~100 audit 修
+- 11 workspace 包 + 5 package README + MODULES.md
+- **真接 moyu + verify 全链路通**(用户真 token 测试,~¥4 消耗 251k tokens)
+
+---
+
 ## 2026-05-24(周日,win-laptop · 十八次收工)— 第 19-20 轮 audit 全栈加固(60 次 debug · ADR-27)
 
 **完成 — 用户要求 3 诉求 100% 闭环:升级接口 / 模块独立升级 / 跨模块可追溯**

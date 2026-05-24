@@ -48,6 +48,7 @@
 - [x] **W7 收尾 — EN 文案 review**(十六收工)— zh ↔ en 4 json 全对齐 + characterRole enums 补
 - [x] **README + CHANGELOG**(十六收工)— 完整重写 README(完成度徽章+模块全景+快速启动)+ CHANGELOG 16 次收工日志
 - [x] **第 19-20 轮 audit 60 次 debug**(十八收工)— Sprint A/A2/B/C/D + R2 F/G/H · 修 15+ P0/P1 · 13 mutation .meta 100% · requestId 全链 · EventBus 4 publish 补 · Tauri capabilities DRAFT · 6 模块文档 · ADR-27 — 2026-05-24
+- [x] **moyu 真接入 + 4 类 Provider 入口 + Phase 1.5 P0 规划**(十九收工)— OpenAICompatProvider × 2 + 8 个 moyu Provider + admin.testConnection 真实现 + admin.provider.create/delete + admin.dashboard.platformOverview + 7 项 P0/P1 修(SSRF/requestId 防伪造/zodIssues 脱敏/lowercase 标准化/双 toast/admin ¥0.00→真 data)+ moyu 浏览器深度学习(24 章 docs + 148 模型 + 设计要素归档)+ Phase 1.5 P0 plan v2(预扣退还/4 倍率/asset://) — 2026-05-24
 - [ ] **W5.6 进阶**(留 Phase 2)— 音频波形(wavesurfer.js)/ AI 自动打标(BPM/时长)/ pgvector 向量搜索
 - [ ] **Polish 剩余**(留 Phase 2)— 34 处硬编码颜色 / a11y / listBindings N+1 / OperationLog 命名规范
 - [ ] **W8 团队实战**(下次启动)— 5 人冷启动 + 配 API Key 真接 Seedance + 1 集 7 镜头
