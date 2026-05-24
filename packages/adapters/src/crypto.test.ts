@@ -49,9 +49,21 @@ describe('adapters/crypto', () => {
     expect(selfTest()).toBe(true);
   });
 
-  it('maskSecret 末尾 4 位可见', () => {
-    expect(maskSecret('sk-1234abcdEFGH')).toBe('••••EFGH');
+  it('maskSecret 极短(≤4)全遮 / 空返空', () => {
     expect(maskSecret('abc')).toBe('****');
     expect(maskSecret('')).toBe('');
+  });
+
+  it('maskSecret 短 token(5-9)末 4 位可见', () => {
+    expect(maskSecret('abcde')).toBe('••••bcde');
+    expect(maskSecret('abcdefghi')).toBe('••••fghi');
+  });
+
+  it('maskSecret 长 token(>9)前 5+后 4 风格', () => {
+    // typical sk- 前缀 + 32+ char,前 5 标识 + 后 4 对账
+    expect(maskSecret('sk-1234abcdEFGH')).toBe('sk-12••••••••EFGH');
+    expect(maskSecret('sk-jsfRabcdefghijklmnopWnDA')).toBe('sk-js••••••••WnDA');
+    // 含中转站 prefix
+    expect(maskSecret('relay-abcdefghijxyzw')).toBe('relay••••••••xyzw');
   });
 });

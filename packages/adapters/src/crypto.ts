@@ -66,11 +66,22 @@ export function decryptSecret(ciphertextB64: string): string {
   return dec.toString('utf8');
 }
 
-/** 生成 UI 显示用脱敏字符串（仅保留后 4 字符） */
+/**
+ * 遮罩 secret 用于 UI 显示 / OperationLog,绝不暴露明文
+ *
+ * 短 token(≤9 字符):`••••XXXX`(后 4 位)— 防泄漏
+ * 长 token(>9 字符):`sk-12••••••••WXYZ`(前 5 + 8 个 • + 后 4)
+ *
+ * 前 5 位:让 admin 快速区分多 token(`sk-xxx` 前缀 + 第一段标识)
+ * 后 4 位:对账核对(跟 token 申请方记录的"末 4 位"对得上)
+ *
+ * Phase 1.5 P1-5(2026-05-25 二十一收工后落地):参考 OpenAI 兼容中转站常见 mask 风格
+ */
 export function maskSecret(secret: string): string {
   if (!secret) return '';
   if (secret.length <= 4) return '****';
-  return `••••${secret.slice(-4)}`;
+  if (secret.length <= 9) return `••••${secret.slice(-4)}`;
+  return `${secret.slice(0, 5)}${'•'.repeat(8)}${secret.slice(-4)}`;
 }
 
 /** 测试是否能正常加解密（用于健康检查） */
