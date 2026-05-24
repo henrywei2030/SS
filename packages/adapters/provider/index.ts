@@ -337,6 +337,12 @@ export interface ProviderSummary {
   rateLimitRpm: number;
   healthScore: number;
   lastErrorAt: Date | null;
+  // Phase 1.5 P0-2 — 2 倍率(modelRate 非空时优先于 unitPriceCny)
+  modelRate: number | null;
+  outputRate: number | null;
+  // Phase 1.5.1 — UI 展示用元数据(从 defaultParams 解出)
+  defaultModel: string | null;
+  source: 'relay' | 'subscription' | 'direct' | 'local' | null;
 }
 
 /** 列出所有 Provider 的配置摘要（永不返回明文 Key） */
@@ -347,6 +353,7 @@ export async function listProviderConfigs(): Promise<ProviderSummary[]> {
   return rows.map((r) => {
     const hasDbKey = !!r.apiKeyEnc;
     const hasEnvKey = !!(r.apiKeyRef && process.env[r.apiKeyRef]);
+    const dp = (r.defaultParams ?? {}) as Record<string, unknown>;
     return {
       providerId: r.providerId,
       displayName: r.displayName,
@@ -355,7 +362,7 @@ export async function listProviderConfigs(): Promise<ProviderSummary[]> {
       apiUrl: r.apiUrl,
       apiKeyMasked: r.apiKeyMasked,
       apiKeyConfigured: hasDbKey || hasEnvKey,
-      apiKeySource: hasDbKey ? 'db' : hasEnvKey ? 'env' : 'none',
+      apiKeySource: (hasDbKey ? 'db' : hasEnvKey ? 'env' : 'none') as 'db' | 'env' | 'none',
       apiKeyUpdatedAt: r.apiKeyUpdatedAt,
       apiKeyUpdatedBy: r.apiKeyUpdatedBy,
       unitPriceCny: Number(r.unitPriceCny),
@@ -364,6 +371,12 @@ export async function listProviderConfigs(): Promise<ProviderSummary[]> {
       rateLimitRpm: r.rateLimitRpm,
       healthScore: r.healthScore,
       lastErrorAt: r.lastErrorAt,
+      // Phase 1.5 P0-2 — 2 倍率
+      modelRate: r.modelRate != null ? Number(r.modelRate) : null,
+      outputRate: r.outputRate != null ? Number(r.outputRate) : null,
+      // Phase 1.5.1 — UI 元数据
+      defaultModel: (dp.defaultModel as string | undefined) ?? null,
+      source: (dp.source as 'relay' | 'subscription' | 'direct' | 'local' | undefined) ?? null,
     };
   });
 }
@@ -426,6 +439,145 @@ export async function setProviderActive(
   cache.image.delete(providerId);
   cache.text.delete(providerId);
   cache.compliance.delete(providerId);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1.5.1 中转站凭证统一管理(2026-05-25)
+// ---------------------------------------------------------------------------
+// 用户痛点:8 个 relay-* provider 每个单独设 API key 浪费操作;
+//          实际中转站是 1 token 共享所有模型。
+// 设计:用 setRelayCredential 一次性把同 token 批量 sync 到所有 relay-* provider。
+// 不引入新表(SystemSetting 也省了),直接复用 ProviderConfig 行 — loadConfig 不变。
+// ---------------------------------------------------------------------------
+
+export interface RelayCredentialSummary {
+  apiUrl: string;
+  apiKeyMasked: string | null;
+  apiKeyUpdatedAt: Date | null;
+  apiKeyUpdatedBy: string | null;
+  hasCredential: boolean;
+  attachedProviderCount: number;
+  inconsistent: boolean; // true:某个 relay-* 的 apiUrl/apiKeyEnc 跟其他不一致(数据迁移/历史 setApiKey 遗留)
+}
+
+/**
+ * 读取中转站凭证摘要(取所有 relay-* 中第一条 hasKey 的作为代表)
+ * inconsistent=true 提示用户重新 setRelayCredential 修复
+ */
+export async function getRelayCredentialSummary(): Promise<RelayCredentialSummary> {
+  const all = await prisma.providerConfig.findMany({
+    where: { providerId: { startsWith: 'relay-' } },
+    select: {
+      providerId: true,
+      apiUrl: true,
+      apiKeyEnc: true,
+      apiKeyMasked: true,
+      apiKeyUpdatedAt: true,
+      apiKeyUpdatedBy: true,
+    },
+  });
+  if (all.length === 0) {
+    return {
+      apiUrl: '',
+      apiKeyMasked: null,
+      apiKeyUpdatedAt: null,
+      apiKeyUpdatedBy: null,
+      hasCredential: false,
+      attachedProviderCount: 0,
+      inconsistent: false,
+    };
+  }
+  // 找第一条 hasKey 的作为代表
+  const withKey = all.find((p) => p.apiKeyEnc !== null);
+  const representative = withKey ?? all[0]!;
+  // 检测不一致:有 key 但部分 apiUrl 或 apiKeyMasked 跟其他 hasKey 的不同
+  const withKeys = all.filter((p) => p.apiKeyEnc !== null);
+  const inconsistent =
+    withKeys.length > 0 &&
+    withKeys.some(
+      (p) =>
+        p.apiUrl !== representative.apiUrl ||
+        p.apiKeyMasked !== representative.apiKeyMasked,
+    );
+  return {
+    apiUrl: representative.apiUrl ?? '',
+    apiKeyMasked: representative.apiKeyMasked,
+    apiKeyUpdatedAt: representative.apiKeyUpdatedAt,
+    apiKeyUpdatedBy: representative.apiKeyUpdatedBy,
+    hasCredential: withKey !== undefined,
+    attachedProviderCount: all.length,
+    inconsistent,
+  };
+}
+
+/** 批量同步中转站凭证到所有 relay-* provider(单加密 + updateMany + 失效缓存) */
+export async function setRelayCredential(
+  apiUrl: string,
+  apiKey: string,
+  updatedBy: string,
+): Promise<{ affectedCount: number }> {
+  if (!apiKey || apiKey.length < 8) {
+    throw new Error('API key too short (min 8 chars)');
+  }
+  const apiKeyEnc = encryptSecret(apiKey);
+  const apiKeyMasked = maskSecret(apiKey);
+  const now = new Date();
+
+  const all = await prisma.providerConfig.findMany({
+    where: { providerId: { startsWith: 'relay-' } },
+    select: { providerId: true },
+  });
+
+  await prisma.providerConfig.updateMany({
+    where: { providerId: { startsWith: 'relay-' } },
+    data: {
+      apiUrl,
+      apiKeyEnc,
+      apiKeyMasked,
+      apiKeyUpdatedAt: now,
+      apiKeyUpdatedBy: updatedBy,
+    },
+  });
+
+  // 失效所有 relay-* 缓存
+  for (const p of all) {
+    cache.video.delete(p.providerId);
+    cache.image.delete(p.providerId);
+    cache.text.delete(p.providerId);
+    cache.compliance.delete(p.providerId);
+  }
+
+  return { affectedCount: all.length };
+}
+
+/** 清除所有 relay-* 的凭证 + 自动停用(无 key 后业务调用会失败,显式停用更安全) */
+export async function clearRelayCredential(
+  updatedBy: string,
+): Promise<{ affectedCount: number }> {
+  const all = await prisma.providerConfig.findMany({
+    where: { providerId: { startsWith: 'relay-' } },
+    select: { providerId: true },
+  });
+
+  await prisma.providerConfig.updateMany({
+    where: { providerId: { startsWith: 'relay-' } },
+    data: {
+      apiKeyEnc: null,
+      apiKeyMasked: null,
+      apiKeyUpdatedAt: new Date(),
+      apiKeyUpdatedBy: updatedBy,
+      isActive: false, // 无 key 无法用,显式停用
+    },
+  });
+
+  for (const p of all) {
+    cache.video.delete(p.providerId);
+    cache.image.delete(p.providerId);
+    cache.text.delete(p.providerId);
+    cache.compliance.delete(p.providerId);
+  }
+
+  return { affectedCount: all.length };
 }
 
 /** 调试用：列出已注册 + 已缓存 */

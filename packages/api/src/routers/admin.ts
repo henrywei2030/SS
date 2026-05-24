@@ -20,6 +20,10 @@ import {
   getTextProvider,
   getImageProvider,
   getVideoProvider,
+  // Phase 1.5.1 中转站凭证统一管理(2026-05-25)
+  getRelayCredentialSummary,
+  setRelayCredential,
+  clearRelayCredential,
 } from '@ss/adapters/provider';
 import { prisma } from '@ss/db';
 import { sanitizeErrorMsg } from '@ss/shared';
@@ -360,6 +364,53 @@ const providerRouter = router({
         };
       }
     }),
+});
+
+// ---------------------------------------------------------------------------
+// admin.relay — 中转站凭证统一管理(2026-05-25 Phase 1.5.1)
+//
+// 痛点:8 个 relay-* provider 每个单独设 API Key 浪费操作;中转站实际 1 token 共享。
+// 设计:一次 setCredential 批量 sync 所有 relay-* provider 的 apiUrl + apiKey,loadConfig 不变。
+//      UI 只在顶部显示一个凭证表单,中转站模型列表只显示 toggle(启停)+ 中转站归档参数。
+// ---------------------------------------------------------------------------
+
+const relayRouter = router({
+  /** 返中转站凭证摘要(取所有 relay-* 中第一条 hasKey 的作为代表) */
+  getCredential: adminProcedure.query(async () => {
+    return getRelayCredentialSummary();
+  }),
+
+  /** 批量同步中转站凭证到所有 relay-* provider */
+  setCredential: adminProcedure
+    .input(
+      z.object({
+        apiUrl: z.string().url().max(255),
+        apiKey: z.string().min(8, 'API Key 至少 8 字符'),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      // SSRF 防御:apiUrl 拒内网/metadata
+      const urlErr = validateApiUrl(input.apiUrl);
+      if (urlErr) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `apiUrl 被拒:${urlErr}` });
+      }
+      const result = await setRelayCredential(input.apiUrl, input.apiKey, ctx.user.id);
+      await logOperation(ctx, 'relay.credential.set', 'relayCredential', 'default', null, {
+        apiUrl: input.apiUrl,
+        keyMasked: '••••' + input.apiKey.slice(-4),
+        affectedCount: result.affectedCount,
+      });
+      return { success: true, affectedCount: result.affectedCount };
+    }),
+
+  /** 清除中转站凭证(同时自动停用所有 relay-* provider) */
+  clearCredential: adminProcedure.mutation(async ({ ctx }) => {
+    const result = await clearRelayCredential(ctx.user.id);
+    await logOperation(ctx, 'relay.credential.clear', 'relayCredential', 'default', null, {
+      affectedCount: result.affectedCount,
+    });
+    return { success: true, affectedCount: result.affectedCount };
+  }),
 });
 
 // ---------------------------------------------------------------------------
@@ -1851,6 +1902,7 @@ const dashboardRouter = router({
 });
 
 export const adminRouter = router({
+  relay: relayRouter,
   dashboard: dashboardRouter,
   provider: providerRouter,
   style: styleRouter,
