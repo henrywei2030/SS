@@ -1051,13 +1051,22 @@ export const aigcRouter = router({
         bindings.maxDurationS,
       );
 
+      // Phase 1.5 P0-1:提前 fetch provider + 算 prepayEstimate(transaction 前算好)
+      // 预扣 = max_duration × unitPriceCny(按当前 cfg 估算,真实抽卡完成时 worker 写 REFUND 退多扣)
+      const provider = await getVideoProvider(providerId);
+      const prepayEstimateCny = provider.estimateCost({
+        prompt: '',
+        durationS,
+        aspectRatio,
+      });
+
       // W1-W5 audit 三轮 G1 + 7 轮 audit P0(A1):advisory lock 必须在 $transaction 内,
       // 否则 pg_advisory_xact_lock 在 implicit transaction(单条 raw)立即释放,串行失效。
       //
-      // 模式:transaction 内 锁 + inflight check + 占位 attempt(status=QUEUED)。锁释放后
-      // 占位 attempt 仍在 DB,其他并发 inflight check 会看到 QUEUED → 拒。
-      // 后续检查(gachaMax/budget/compile)失败时 update 占位为 FAILED 释放;通过则升 RUNNING。
-      const earlyAttempt = await ctx.prisma.$transaction(async (tx) => {
+      // 模式:transaction 内 锁 + inflight check + 占位 attempt(status=QUEUED)+ PREPAY entry。
+      // 锁释放后占位 attempt 仍在 DB,其他并发 inflight check 会看到 QUEUED → 拒。
+      // 后续检查(gachaMax/budget/compile)失败时 update 占位为 FAILED + 写 REFUND 退还 PREPAY;通过则 worker 接管。
+      const { attempt: earlyAttempt, prepayEntryId } = await ctx.prisma.$transaction(async (tx) => {
         await tx.$executeRawUnsafe(
           `SELECT pg_advisory_xact_lock(hashtext('aigc_video:' || $1)::bigint)`,
           grp.id,
@@ -1077,7 +1086,7 @@ export const aigcRouter = router({
           });
         }
         // 锁内创建占位 attempt(QUEUED),commit 后即占位防其他并发
-        return tx.generationAttempt.create({
+        const attempt = await tx.generationAttempt.create({
           data: {
             projectId: grp.episode.projectId,
             episodeId: grp.episodeId,
@@ -1095,18 +1104,66 @@ export const aigcRouter = router({
             createdBy: ctx.user.id,
           },
         });
+        // Phase 1.5 P0-1:同事务写 PREPAY entry(预扣占额)— worker 完成时写 REFUND 抵消
+        const prepay = await tx.costLedgerEntry.create({
+          data: {
+            userId: ctx.user.id,
+            projectId: grp.episode.projectId,
+            episodeId: grp.episodeId,
+            attemptId: attempt.id,
+            providerId,
+            modelId: providerId,
+            action: 'video.generate',
+            inputUnits: durationS,
+            outputUnits: 0,
+            unitPriceCny: '0',
+            costCny: prepayEstimateCny.toFixed(4),
+            success: true, // PREPAY 写入即生效;失败时 REFUND 配 success:false 抵消
+            entryType: 'PREPAY',
+            billingCycle: new Date().toISOString().slice(0, 7),
+          },
+          select: { id: true },
+        });
+        return { attempt, prepayEntryId: prepay.id };
       });
 
       // 7 轮 audit A1:任何前置 check 失败都要把占位 attempt 标 FAILED 释放
-      // 用 try/catch 集中处理,失败时 update earlyAttempt 然后 rethrow
+      // Phase 1.5 P0-1:**同时**写 REFUND 退还 PREPAY(否则用户被多扣)
       const failPlaceholder = async (err: Error, code: 'TOO_MANY_REQUESTS' | 'PRECONDITION_FAILED' | 'BAD_REQUEST') => {
-        await ctx.prisma.generationAttempt.updateMany({
-          where: { id: earlyAttempt.id, status: 'QUEUED' },
-          data: {
-            status: 'FAILED',
-            errorMsg: err.message,
-            finishedAt: new Date(),
-          },
+        await ctx.prisma.$transaction(async (tx) => {
+          await tx.generationAttempt.updateMany({
+            where: { id: earlyAttempt.id, status: 'QUEUED' },
+            data: {
+              status: 'FAILED',
+              errorMsg: err.message,
+              finishedAt: new Date(),
+            },
+          });
+          // 退还全部 PREPAY(费用 = -prepayEstimateCny,负数,sum 后净额 0)
+          await tx.costLedgerEntry.create({
+            data: {
+              userId: ctx.user.id,
+              projectId: grp.episode.projectId,
+              episodeId: grp.episodeId,
+              attemptId: earlyAttempt.id,
+              providerId,
+              modelId: providerId,
+              action: 'video.generate',
+              inputUnits: 0,
+              outputUnits: 0,
+              unitPriceCny: '0',
+              costCny: prepayEstimateCny.toFixed(4) === '0.0000'
+                ? '0'
+                : `-${prepayEstimateCny.toFixed(4)}`,
+              // REFUND 永远 success=true(退还动作执行成功);task 成败用 GenerationAttempt.status 表达,
+              // 这样 ledger SUM(success:true) 自然把失败 task 的 PREPAY+REFUND 抵成 0
+              success: true,
+              entryType: 'REFUND',
+              refundReason: 'video_task_precheck_failed',
+              parentEntryId: prepayEntryId,
+              billingCycle: new Date().toISOString().slice(0, 7),
+            },
+          });
         });
         throw new TRPCError({ code, message: err.message });
       };
@@ -1135,12 +1192,13 @@ export const aigcRouter = router({
         }
       }
 
-      // 提前 fetch provider 实例(estimateCost 用 + 后续 generate 用,Mock 兜底始终可用)
-      const provider = await getVideoProvider(providerId);
+      // Phase 1.5 P0-1:provider 实例 + prepayEstimateCny 已在 transaction 前 fetch,此处直接复用
+      // (estimateCost 也已用,不再二次调用)
 
       // W1-W5 audit 三轮 B1:每日预算护栏 — 用 provider.estimateCost(req) 真实预估,
       // 不再写死 seedance 系数,Mock 也按 mock 真单价 estimate(默认 0,但若管理员 unitPriceCny>0 会拦)
       // W1-W5 audit P1 followup(R9):Decimal 比较防大额预算累加 IEEE-754 漂移
+      // Phase 1.5 P0-1:query 排除当前 attemptId 的 PREPAY,防自己刚写的预扣被算入 spent
       if (bindings.dailyBudgetCny > 0) {
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
@@ -1150,17 +1208,12 @@ export const aigcRouter = router({
             action: 'video.generate',
             success: true,
             createdAt: { gte: todayStart },
+            attemptId: { not: earlyAttempt.id }, // 排除当前 attempt 已写入的 PREPAY
           },
           _sum: { costCny: true },
         });
         const spentDec = new Prisma.Decimal(todaySpent._sum.costCny ?? 0);
-        const estimateDec = new Prisma.Decimal(
-          provider.estimateCost({
-            prompt: '',
-            durationS,
-            aspectRatio,
-          }),
-        );
+        const estimateDec = new Prisma.Decimal(prepayEstimateCny);
         const limitDec = new Prisma.Decimal(bindings.dailyBudgetCny);
         if (spentDec.plus(estimateDec).gt(limitDec)) {
           await failPlaceholder(
@@ -1242,10 +1295,24 @@ export const aigcRouter = router({
         mediaIds.size > 0
           ? await ctx.prisma.mediaItem.findMany({
               where: { id: { in: Array.from(mediaIds) } },
-              select: { id: true, cdnUrl: true },
+              // Phase 1.5 P0-5:meta 含 relayAssetUrl 时 provider=relay-* 优先用 asset://(免重传)
+              select: { id: true, cdnUrl: true, meta: true },
             })
           : [];
-      const mediaMap = new Map(medias.map((m) => [m.id, m.cdnUrl]));
+      // Phase 1.5 P0-5:provider 是 relay-* (OpenAI 兼容中转站)时优先用 meta.relayAssetUrl(asset:// 直传,免文件重传)
+      const isRelayProvider = providerId.startsWith('relay-');
+      const mediaMap = new Map(
+        medias.map((m) => {
+          let chosenUrl: string | null = m.cdnUrl;
+          if (isRelayProvider && m.meta && typeof m.meta === 'object' && !Array.isArray(m.meta)) {
+            const relayUrl = (m.meta as Record<string, unknown>).relayAssetUrl;
+            if (typeof relayUrl === 'string' && relayUrl.startsWith('asset://')) {
+              chosenUrl = relayUrl;
+            }
+          }
+          return [m.id, chosenUrl] as const;
+        }),
+      );
 
       // W1-W5 audit P1 followup(P1-6):全 7 槽位 fallback 链
       const refs: VideoReference[] = dbBindings.map((b) => {
@@ -1579,9 +1646,7 @@ export const aigcRouter = router({
           action: 'VIDEO',
         },
         orderBy: { createdAt: 'desc' },
-        include: {
-          costEntry: { select: { costCny: true, success: true } },
-        },
+        // Phase 1.5 P0-1:ledger 关系从 1:1 改 1:N(costEntries[]),原 include 没被使用,删
       });
       // 一次性查所有 outputMediaId 对应的 MediaItem
       const mediaIds = attempts

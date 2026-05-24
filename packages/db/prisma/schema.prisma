@@ -891,7 +891,8 @@ model GenerationAttempt {
   // W1-W5 audit 三轮 F1:改 SetNull,防未来误硬删 ShotGroup 抹掉 attempt 审计链路。
   // archiveGroup 走软删,不触发 FK,所以这里 SetNull 跟当前行为一致 + 防硬删兜底。
   shotGroup ShotGroup?       @relation(fields: [shotGroupId], references: [id], onDelete: SetNull)
-  costEntry CostLedgerEntry?
+  // Phase 1.5 P0-1:1 attempt 多条 ledger entry(PREPAY + REFUND),从 one-to-one 改 one-to-many
+  costEntries CostLedgerEntry[]
 
   @@index([projectId])
   @@index([shotId])
@@ -925,6 +926,17 @@ enum AttemptStatus {
 // § 8. 成本账本（Cost Ledger）
 // =============================================================================
 
+// Phase 1.5 P0-1:cost ledger 加 entryType 区分 NORMAL/PREPAY/REFUND/ADJUSTMENT
+// 视频生成预扣 + 退还机制(参考 OpenAI 兼容中转站的预扣实测):创建 task 时写 PREPAY,完成时写 REFUND(负数)
+enum LedgerEntryType {
+  NORMAL     // 普通扣费(LLM / image / 不带预扣的 action)
+  PREPAY     // 视频生成 task 创建时预扣(按 max_duration × 单价 估算)
+  REFUND     // 退还(完成时退多扣 - 失败时全退 - costCny 为负数)
+  ADJUSTMENT // 手动调整(admin 校对 / 异常补偿)
+
+  @@map("ledger_entry_type")
+}
+
 model CostLedgerEntry {
   id        String  @id @default(cuid())
   userId    String
@@ -932,7 +944,8 @@ model CostLedgerEntry {
   episodeId String?
   shotId    String?
   assetId   String?
-  attemptId String? @unique
+  // Phase 1.5 P0-1:去掉 @unique 改 @@index,允许同 attempt 多条 entry(PREPAY + REFUND)
+  attemptId String?
 
   providerId String
   modelId    String
@@ -946,6 +959,11 @@ model CostLedgerEntry {
   // 成功与否影响 ROI 计算
   success Boolean
 
+  // Phase 1.5 P0-1 字段
+  entryType     LedgerEntryType @default(NORMAL)
+  refundReason  String? // 'video_task_overcharge_refund' / 'video_task_failed_full_refund' / 'admin_adjustment' 等
+  parentEntryId String? // REFUND/ADJUSTMENT 指向对应的 PREPAY/NORMAL — 自引用形成账目链
+
   // Phase 2 计费维度预留
   billingCycle String? // '2026-05' 月度归集
   plan         String? // 'subscription' | 'pay-as-you-go'
@@ -953,6 +971,8 @@ model CostLedgerEntry {
   user    User               @relation(fields: [userId], references: [id])
   project Project?           @relation(fields: [projectId], references: [id], onDelete: SetNull)
   attempt GenerationAttempt? @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+  parent  CostLedgerEntry?   @relation("LedgerEntryParent", fields: [parentEntryId], references: [id], onDelete: SetNull)
+  children CostLedgerEntry[] @relation("LedgerEntryParent")
 
   createdAt DateTime @default(now())
 
@@ -960,6 +980,8 @@ model CostLedgerEntry {
   @@index([userId, createdAt])
   @@index([providerId, modelId, createdAt])
   @@index([billingCycle])
+  @@index([attemptId])
+  @@index([entryType])
   @@map("cost_ledger_entries")
 }
 
@@ -1141,6 +1163,14 @@ model ProviderConfig {
   // 计费规则
   unitPriceCny Decimal @db.Decimal(10, 6)
   unitName     String // 'second' | 'image' | 'ktoken' | 'request'
+
+  // Phase 1.5 P0-2:2 倍率拆分(主次重审 v2.1 — cache/group 推 Phase 2)
+  // 当 modelRate 非空时优先用 2 倍率公式:
+  //   inputCost  = inputUnits  / 1_000_000 × modelRate
+  //   outputCost = outputUnits / 1_000_000 × modelRate × (outputRate ?? 1)
+  // 否则 fallback 到旧的 unitPriceCny 单价模式(向后兼容)
+  modelRate  Decimal? @db.Decimal(10, 6) // 基础倍率 / 1M tokens(CNY)
+  outputRate Decimal? @db.Decimal(10, 4) // 输出价 = 输入 × 此倍率(典型 2x-5x)
 
   // 并发与限流
   maxConcurrent Int @default(5)

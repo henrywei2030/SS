@@ -86,7 +86,7 @@ const providerRouter = router({
             protocol: z.enum(['openai-compat', 'anthropic-native', 'volcengine-native']).optional(),
             defaultModel: z.string().optional(),
             source: z.enum(['relay', 'subscription', 'direct', 'local']).optional(),
-            endpointStyle: z.enum(['ark', 'moyu']).optional(),
+            endpointStyle: z.enum(['ark', 'relay']).optional(),
             inputUnitPriceCny: z.number().nonnegative().optional(),
             outputUnitPriceCny: z.number().nonnegative().optional(),
             maxDuration: z.number().positive().optional(),
@@ -103,7 +103,7 @@ const providerRouter = router({
       if (urlErr) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: `apiUrl 被拒:${urlErr}` });
       }
-      // 第 23 轮 audit P1:providerId case 标准化(防 "MOYU-X" vs "moyu-x" 并发 create race)
+      // 第 23 轮 audit P1:providerId case 标准化(防 "RELAY-X" vs "relay-x" 并发 create race)
       const normalizedProviderId = input.providerId.toLowerCase().trim();
       // providerId 防重(schema @unique 也防,提前拦更友好错误)
       const existing = await ctx.prisma.providerConfig.findUnique({
@@ -1273,6 +1273,114 @@ const apiUsageRouter = router({
           total: Number(r.total),
           cost: r.cost,
         })),
+      };
+    }),
+
+  // Phase 1.5 P0-4(主次重审 v2.1):CSV 导出 — 运维对账 / 用户拿明细 用
+  //
+  // 字段(13 列):时间 / 用户 / 项目 / Provider / 模型 / Action / 类型 / 输入(units) / 输出(units) / 单价 / 花费(CNY) / 成功 / 退款原因
+  // 注:不暴露 attemptId(内部 id 不必要给运维),也不含 cache/group(Phase 2)
+  exportCsv: adminProcedure
+    .input(
+      z.object({
+        days: z.number().min(1).max(365).default(30),
+        providerId: z.string().max(100).optional(),
+        userId: z.string().cuid().optional(),
+        projectId: z.string().cuid().optional(),
+        // 默认含 PREPAY + REFUND(完整审计);设 false 则只出 NORMAL(简化对账)
+        includePrepayRefund: z.boolean().default(true),
+        // 上限 10000 行防 OOM / 超时(运维需更多就分时段导)
+        maxRows: z.number().min(100).max(10000).default(5000),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const since = new Date(Date.now() - input.days * 24 * 3600 * 1000);
+      const where: Record<string, unknown> = { createdAt: { gte: since } };
+      if (input.providerId) where.providerId = input.providerId;
+      if (input.userId) where.userId = input.userId;
+      if (input.projectId) where.projectId = input.projectId;
+      if (!input.includePrepayRefund) where.entryType = 'NORMAL';
+
+      const rows = await ctx.prisma.costLedgerEntry.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: input.maxRows,
+        select: {
+          createdAt: true,
+          userId: true,
+          projectId: true,
+          providerId: true,
+          modelId: true,
+          action: true,
+          entryType: true,
+          inputUnits: true,
+          outputUnits: true,
+          unitPriceCny: true,
+          costCny: true,
+          success: true,
+          refundReason: true,
+        },
+      });
+
+      // CSV escape(RFC 4180 子集 — 字段含 , 或 " 或 \n 时包双引号 + 内部 " escape 成 "")
+      const esc = (v: string | null | undefined): string => {
+        const s = v ?? '';
+        if (s === '') return '';
+        if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+        return s;
+      };
+      const header = [
+        '时间',
+        '用户ID',
+        '项目ID',
+        'Provider',
+        '模型',
+        'Action',
+        '类型',
+        '输入',
+        '输出',
+        '单价(CNY)',
+        '花费(CNY)',
+        '成功',
+        '退款原因',
+      ].join(',');
+      const lines = rows.map((r) =>
+        [
+          esc(r.createdAt.toISOString()),
+          esc(r.userId),
+          esc(r.projectId),
+          esc(r.providerId),
+          esc(r.modelId),
+          esc(r.action),
+          esc(r.entryType),
+          String(r.inputUnits),
+          String(r.outputUnits),
+          esc(String(r.unitPriceCny)),
+          esc(String(r.costCny)),
+          r.success ? 'true' : 'false',
+          esc(r.refundReason),
+        ].join(','),
+      );
+      // BOM 让 Excel / 国产 office 正确识别 UTF-8 中文
+      const csv = '﻿' + [header, ...lines].join('\r\n');
+
+      // 写 OperationLog(导出含敏感成本数据,审计可追溯)
+      await logOperation(ctx, 'admin.apiUsage.exportCsv', 'costLedger', `days=${input.days}`, null, {
+        days: input.days,
+        rowCount: rows.length,
+        filters: {
+          providerId: input.providerId ?? null,
+          userId: input.userId ?? null,
+          projectId: input.projectId ?? null,
+          includePrepayRefund: input.includePrepayRefund,
+        },
+      });
+
+      return {
+        csv,
+        rowCount: rows.length,
+        filename: `cost-ledger-${input.days}d-${new Date().toISOString().slice(0, 10)}.csv`,
+        truncated: rows.length >= input.maxRows,
       };
     }),
 });

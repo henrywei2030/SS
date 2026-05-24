@@ -15,6 +15,8 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
 import { getStorageAdapter, buildStorageKey } from '@ss/adapters/storage';
+// Phase 1.5 P0-5(主次重审 v2.1):OpenAI 兼容中转站素材库 asset:// 引用机制
+import { getRelayAssetProvider, getRelayDefaultGroupId } from '@ss/adapters/provider';
 // 第 18 轮 audit P1:base64 解码错误信息脱敏 + MIME 白名单守门
 import { sanitizeErrorMsg } from '@ss/shared';
 
@@ -175,6 +177,10 @@ export const mediaRouter = router({
         projectId: z.string().cuid().optional(),
         mimeType: z.string().max(100).optional(),
         tags: z.array(z.string().max(40)).max(20).default([]),
+        // Phase 1.5 P0-5:同步到中转站素材库(获 asset:// 引用,后续视频生成免重传)
+        // 默认 false — 仅 W4 资产首图 / W5 视频参考图等"高频复用"场景显式开启
+        // 需先在 SystemSetting `relay.assets.default_group_id` 配 group_id 才生效
+        syncToRelay: z.boolean().default(false),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -257,6 +263,43 @@ export const mediaRouter = router({
         acl: input.scope === 'PUBLIC' ? 'public-read' : 'private',
       });
 
+      // Phase 1.5 P0-5:尝试同步到中转站素材库(失败时 fallback 不阻塞上传)
+      let relayAssetUrl: string | null = null;
+      let relayAssetId: string | null = null;
+      let relaySyncError: string | null = null;
+      if (input.syncToRelay && input.kind !== 'OTHER' && input.kind !== 'THREE_D') {
+        try {
+          const [relayProvider, groupId] = await Promise.all([
+            getRelayAssetProvider(),
+            getRelayDefaultGroupId(),
+          ]);
+          if (relayProvider && groupId !== null) {
+            // 中转站服务端会下载 url,需公网可达 → PUBLIC 用 putResult.url,PROJECT 用签名 URL(12h 有效)
+            const fetchUrl =
+              input.scope === 'PUBLIC' && putResult.url
+                ? putResult.url
+                : await storage.getSignedUrl(storageKey, 12 * 3600);
+            const assetType =
+              input.kind === 'IMAGE' ? 'Image' : input.kind === 'VIDEO' ? 'Video' : 'Audio';
+            const created = await relayProvider.createAsset({
+              url: fetchUrl,
+              assetType,
+              groupId,
+              name: input.filename.slice(0, 64),
+            });
+            relayAssetUrl = created.assetUrl;
+            relayAssetId = created.id;
+          } else if (input.syncToRelay) {
+            relaySyncError = relayProvider
+              ? 'relay.assets.default_group_id 未配置(去 /admin/settings 填)'
+              : '无 active 中转站 provider(去 /admin/providers 启用 relay-* 项)';
+          }
+        } catch (e) {
+          relaySyncError = sanitizeErrorMsg(e);
+          console.warn(`[media.upload] relay sync failed for ${input.filename}:`, e);
+        }
+      }
+
       const media = await ctx.prisma.mediaItem.create({
         data: {
           projectId: input.scope === 'PROJECT' ? input.projectId : null,
@@ -270,7 +313,11 @@ export const mediaRouter = router({
           aspectRatio: null,
           tags: input.tags,
           source: 'UPLOAD',
-          meta: {}, // Phase 2 异步 worker 解析 dimensions / duration / bpm 等
+          // Phase 1.5 P0-5:中转站 asset URL 存 meta,aigc.generateVideo 接 relay provider 时优先用
+          meta: {
+            ...(relayAssetUrl ? { relayAssetUrl, relayAssetId } : {}),
+            ...(relaySyncError ? { relaySyncError } : {}),
+          },
         },
       });
 
@@ -286,6 +333,8 @@ export const mediaRouter = router({
           scope: media.scope,
           sizeBytes: media.sizeBytes,
           projectId: media.projectId,
+          relayAssetUrl,
+          relaySyncError,
         },
       );
 

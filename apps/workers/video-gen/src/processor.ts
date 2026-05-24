@@ -174,6 +174,9 @@ export async function processVideoGenJob(
 
     // self-audit:DB 写入失败也必须 publish 'failed',防前端永远 loading。
     // 把 $transaction 用 try/catch 兜底,即使写库挂了 publish 仍能发出。
+    //
+    // Phase 1.5 P0-1:失败时不再写 NORMAL failed entry,改写 REFUND 全退 PREPAY
+    // (PREPAY 由 router 创建 attempt 时写入,此处需查出来算退还额)
     try {
       await prisma.$transaction(async (tx) => {
         await tx.generationAttempt.update({
@@ -185,23 +188,39 @@ export async function processVideoGenJob(
             durationMs: finishedAt.getTime() - startedAt.getTime(),
           },
         });
-        await tx.costLedgerEntry.create({
-          data: {
-            userId,
-            projectId,
-            episodeId,
-            attemptId,
-            providerId,
-            modelId,
-            action: 'video.generate',
-            inputUnits: durationS,
-            outputUnits: 0,
-            unitPriceCny: '0',
-            costCny: '0',
-            success: false,
-            billingCycle: new Date().toISOString().slice(0, 7),
-          },
+        // idempotent:retry 时若已写过 REFUND,跳过
+        const existingRefund = await tx.costLedgerEntry.findFirst({
+          where: { attemptId, entryType: 'REFUND' },
+          select: { id: true },
         });
+        if (!existingRefund) {
+          const prepayEntry = await tx.costLedgerEntry.findFirst({
+            where: { attemptId, entryType: 'PREPAY' },
+            select: { id: true, costCny: true },
+          });
+          const prepaid = prepayEntry?.costCny ?? '0';
+          const refundCost = String(prepaid) === '0' ? '0' : `-${prepaid}`;
+          await tx.costLedgerEntry.create({
+            data: {
+              userId,
+              projectId,
+              episodeId,
+              attemptId,
+              providerId,
+              modelId,
+              action: 'video.generate',
+              inputUnits: 0,
+              outputUnits: 0,
+              unitPriceCny: '0',
+              costCny: refundCost,
+              success: true, // REFUND 永远 success=true(退还动作执行成功)
+              entryType: 'REFUND',
+              refundReason: 'video_task_failed_full_refund',
+              parentEntryId: prepayEntry?.id,
+              billingCycle: new Date().toISOString().slice(0, 7),
+            },
+          });
+        }
       });
     } catch (dbErr) {
       console.error(
@@ -237,6 +256,8 @@ export async function processVideoGenJob(
   const safeName = groupNumber.replace(/[^a-zA-Z0-9_-]+/g, '_');
   const unitPrice = provider.info.defaultUnitPriceCny.toFixed(6);
 
+  // Phase 1.5 P0-1:成功时不再写 NORMAL success entry,改写 REFUND 退多扣(prepaid - actual)
+  // (PREPAY 已由 router 写入,此处只补充 REFUND;最终 sum = prepaid - (prepaid - actual) = actual)
   const { mediaId, updatedAttemptId } = await prisma.$transaction(async (tx) => {
     const media = await tx.mediaItem.create({
       data: {
@@ -279,23 +300,48 @@ export async function processVideoGenJob(
         durationMs: finishedAt.getTime() - startedAt.getTime(),
       },
     });
-    await tx.costLedgerEntry.create({
-      data: {
-        userId,
-        projectId,
-        episodeId,
-        attemptId,
-        providerId,
-        modelId,
-        action: 'video.generate',
-        inputUnits: durationS,
-        outputUnits: result.durationS,
-        unitPriceCny: unitPrice,
-        costCny: result.costCny.toFixed(4),
-        success: true,
-        billingCycle: new Date().toISOString().slice(0, 7),
-      },
+    // idempotent:retry 时若已写过 REFUND,跳过
+    const existingRefund = await tx.costLedgerEntry.findFirst({
+      where: { attemptId, entryType: 'REFUND' },
+      select: { id: true },
     });
+    if (!existingRefund) {
+      const prepayEntry = await tx.costLedgerEntry.findFirst({
+        where: { attemptId, entryType: 'PREPAY' },
+        select: { id: true, costCny: true },
+      });
+      // 退还 = prepaid - actual(可能正或负 — 通常正,因为按 max_duration 预估上限,实际抽卡可能更短)
+      const prepaidNum = Number(prepayEntry?.costCny ?? 0);
+      const actualNum = Number(result.costCny);
+      const refundNum = prepaidNum - actualNum;
+      // refund > 0:退还多扣 / refund < 0:实际超估补扣(罕见)/ refund = 0:跳过
+      if (refundNum !== 0) {
+        const refundCost = (-refundNum).toFixed(4); // 退还在 ledger 是负数(用户净消费 - 抵消)
+        await tx.costLedgerEntry.create({
+          data: {
+            userId,
+            projectId,
+            episodeId,
+            attemptId,
+            providerId,
+            modelId,
+            action: 'video.generate',
+            inputUnits: durationS,
+            outputUnits: result.durationS,
+            unitPriceCny: unitPrice,
+            costCny: refundCost,
+            success: true, // REFUND 永远 success=true
+            entryType: refundNum > 0 ? 'REFUND' : 'ADJUSTMENT',
+            refundReason:
+              refundNum > 0
+                ? 'video_task_overcharge_refund'
+                : 'video_task_underestimate_adjustment',
+            parentEntryId: prepayEntry?.id,
+            billingCycle: new Date().toISOString().slice(0, 7),
+          },
+        });
+      }
+    }
     return { mediaId: media.id, updatedAttemptId: a.id };
   });
 

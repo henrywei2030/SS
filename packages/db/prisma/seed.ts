@@ -137,26 +137,33 @@ async function main() {
       rateLimitRpm: 30,
     },
     // ==========================================================================
-    // 第 21 轮 audit:moyu.info 中转站接入(Phase 1.5 推荐入场路径)
+    // 第 21 轮 audit:OpenAI 兼容中转站接入(Phase 1.5 推荐入场路径)
     //
-    // 走 OpenAI 兼容协议(protocol='openai-compat'/'moyu'),admin 后台只需:
-    //   1. 在 moyu.info/token 申请一个 sk-xxx token
-    //   2. /admin/providers 把 token 录入这些 providerId(同一 token 可共享全部 moyu 模型)
-    //   3. 选要启用的模型(其他保持 isActive=false 节省额度)
+    // 适用站点:任意 OpenAI 兼容聚合站(OpenRouter / Poe / OneAPI 自部署 / moyu.info 等)
+    // 协议:protocol='openai-compat' + endpointStyle='relay'
     //
-    // 单价以 moyu 后台计费表为准,这里给参考价(2026-05 价格)
+    // admin 后台只需:
+    //   1. 在中转站申请一个 sk-xxx token
+    //   2. /admin/providers 把 token 录入这些 providerId(同一 token 共享全部模型)
+    //   3. 把 apiUrl 改成你用的中转站 base URL(默认填示例,空值时 fallback env)
+    //   4. 选要启用的模型(其他保持 isActive=false 节省额度)
+    //
+    // 单价以你的中转站后台计费表为准,这里给参考价(2026-05 快照)
     // ==========================================================================
     {
-      providerId: 'moyu-claude-sonnet-4-5',
-      displayName: 'Claude Sonnet 4.5（via moyu）— 剧本分析推荐',
+      providerId: 'relay-claude-sonnet-4-5',
+      displayName: 'Claude Sonnet 4.5（via 中转站）— 剧本分析推荐',
       kind: ProviderKind.TEXT,
-      apiUrl: 'https://www.moyu.info/v1',
-      apiKeyRef: 'MOYU_API_KEY',
+      apiUrl: '',  // 中转站 base URL — admin 后台必填(各站不同),isActive=false 时为空
+      apiKeyRef: 'RELAY_API_KEY',
       unitPriceCny: '0.025',
       unitName: 'ktoken',
       maxConcurrent: 10,
       rateLimitRpm: 100,
       isActive: false,
+      // Phase 1.5 P0-2:2 倍率(主次重审 v2.1)— modelRate=22 CNY/Mtoken,outputRate=4.909(108/22)
+      modelRate: '22.000000',
+      outputRate: '4.9091',
       defaultParams: {
         protocol: 'openai-compat',
         defaultModel: 'claude-sonnet-4-5-20250929',
@@ -165,97 +172,103 @@ async function main() {
       },
     },
     {
-      providerId: 'moyu-claude-haiku-4-5',
-      displayName: 'Claude Haiku 4.5（via moyu）— 快速便宜',
+      providerId: 'relay-claude-haiku-4-5',
+      displayName: 'Claude Haiku 4.5（via 中转站）— 快速便宜',
       kind: ProviderKind.TEXT,
-      apiUrl: 'https://www.moyu.info/v1',
-      apiKeyRef: 'MOYU_API_KEY',
+      apiUrl: '',  // 中转站 base URL — admin 后台必填(各站不同),isActive=false 时为空
+      apiKeyRef: 'RELAY_API_KEY',
       unitPriceCny: '0.005',
       unitName: 'ktoken',
       maxConcurrent: 20,
       rateLimitRpm: 200,
       isActive: false,
+      // Phase 1.5 P0-2:Haiku 默认 input=output(modelRate=5 CNY/Mtoken,outputRate=1)
+      modelRate: '5.000000',
+      outputRate: '1.0000',
       defaultParams: {
         protocol: 'openai-compat',
         defaultModel: 'claude-haiku-4-5-20251001',
       },
     },
     {
-      providerId: 'moyu-deepseek-chat',
-      displayName: 'DeepSeek Chat（via moyu）— 国产便宜',
+      providerId: 'relay-deepseek-chat',
+      displayName: 'DeepSeek Chat（via 中转站）— 国产便宜',
       kind: ProviderKind.TEXT,
-      apiUrl: 'https://www.moyu.info/v1',
-      apiKeyRef: 'MOYU_API_KEY',
+      apiUrl: '',  // 中转站 base URL — admin 后台必填(各站不同),isActive=false 时为空
+      apiKeyRef: 'RELAY_API_KEY',
       unitPriceCny: '0.002',
       unitName: 'ktoken',
       maxConcurrent: 20,
       rateLimitRpm: 200,
       isActive: false,
+      // Phase 1.5 P0-2:DeepSeek 输入 1.0 输出 2.0 CNY/Mtoken,outputRate=2(典型)
+      modelRate: '1.000000',
+      outputRate: '2.0000',
       defaultParams: {
         protocol: 'openai-compat',
         defaultModel: 'deepseek-chat',
       },
     },
     {
-      providerId: 'moyu-doubao-seedance-1-0-pro',
-      displayName: 'Seedance 1.0 Pro（via moyu）— 视频生成推荐',
+      providerId: 'relay-doubao-seedance-1-0-pro',
+      displayName: 'Seedance 1.0 Pro（via 中转站）— 视频生成推荐',
       kind: ProviderKind.VIDEO,
-      apiUrl: 'https://www.moyu.info/v1',
-      apiKeyRef: 'MOYU_API_KEY',
+      apiUrl: '',  // 中转站 base URL — admin 后台必填(各站不同),isActive=false 时为空
+      apiKeyRef: 'RELAY_API_KEY',
       unitPriceCny: '1.0',
       unitName: 'second',
       maxConcurrent: 5,
       rateLimitRpm: 30,
       isActive: false,
       defaultParams: {
-        endpointStyle: 'moyu',
+        endpointStyle: 'relay',
         defaultModel: 'doubao-seedance-1-0-pro-250528',
         maxDuration: 10,
         defaultDuration: 5,
       },
     },
     {
-      providerId: 'moyu-doubao-seedance-2-0',
-      displayName: 'Seedance 2.0（via moyu）— 最新',
+      providerId: 'relay-doubao-seedance-2-0',
+      displayName: 'Seedance 2.0（via 中转站）— 最新',
       kind: ProviderKind.VIDEO,
-      apiUrl: 'https://www.moyu.info/v1',
-      apiKeyRef: 'MOYU_API_KEY',
+      apiUrl: '',  // 中转站 base URL — admin 后台必填(各站不同),isActive=false 时为空
+      apiKeyRef: 'RELAY_API_KEY',
       unitPriceCny: '1.2',
       unitName: 'second',
       maxConcurrent: 5,
       rateLimitRpm: 30,
       isActive: false,
       defaultParams: {
-        endpointStyle: 'moyu',
+        endpointStyle: 'relay',
         defaultModel: 'doubao-seedance-2-0-260128',
         maxDuration: 10,
         defaultDuration: 5,
       },
     },
     {
-      providerId: 'moyu-doubao-seedance-1-0-lite-i2v',
-      displayName: 'Seedance 1.0 Lite i2v（via moyu）— 图生视频便宜',
+      providerId: 'relay-doubao-seedance-1-0-lite-i2v',
+      displayName: 'Seedance 1.0 Lite i2v（via 中转站）— 图生视频便宜',
       kind: ProviderKind.VIDEO,
-      apiUrl: 'https://www.moyu.info/v1',
-      apiKeyRef: 'MOYU_API_KEY',
+      apiUrl: '',  // 中转站 base URL — admin 后台必填(各站不同),isActive=false 时为空
+      apiKeyRef: 'RELAY_API_KEY',
       unitPriceCny: '0.4',
       unitName: 'second',
       maxConcurrent: 8,
       rateLimitRpm: 60,
       isActive: false,
       defaultParams: {
-        endpointStyle: 'moyu',
+        endpointStyle: 'relay',
         defaultModel: 'doubao-seedance-1-0-lite-i2v-250428',
         maxDuration: 5,
         defaultDuration: 5,
       },
     },
     {
-      providerId: 'moyu-doubao-seedream-4-0',
-      displayName: 'Seedream 4.0（via moyu）— 图片生成推荐',
+      providerId: 'relay-doubao-seedream-4-0',
+      displayName: 'Seedream 4.0（via 中转站）— 图片生成推荐',
       kind: ProviderKind.IMAGE,
-      apiUrl: 'https://www.moyu.info/v1',
-      apiKeyRef: 'MOYU_API_KEY',
+      apiUrl: '',  // 中转站 base URL — admin 后台必填(各站不同),isActive=false 时为空
+      apiKeyRef: 'RELAY_API_KEY',
       unitPriceCny: '0.10',
       unitName: 'image',
       maxConcurrent: 5,
@@ -268,11 +281,11 @@ async function main() {
       },
     },
     {
-      providerId: 'moyu-flux-2-dev',
-      displayName: 'FLUX.2-dev（via moyu）— BlackForest 开源风',
+      providerId: 'relay-flux-2-dev',
+      displayName: 'FLUX.2-dev（via 中转站）— BlackForest 开源风',
       kind: ProviderKind.IMAGE,
-      apiUrl: 'https://www.moyu.info/v1',
-      apiKeyRef: 'MOYU_API_KEY',
+      apiUrl: '',  // 中转站 base URL — admin 后台必填(各站不同),isActive=false 时为空
+      apiKeyRef: 'RELAY_API_KEY',
       unitPriceCny: '0.05',
       unitName: 'image',
       maxConcurrent: 5,
@@ -435,6 +448,14 @@ async function main() {
       value: 'false',
       category: 'security',
       description: '是否允许公开注册(默认关闭,防任何人创建账号;本地/团队部署可改 true)',
+    },
+    // Phase 1.5 P0-5(主次重审 v2.1):中转站素材库 asset:// 引用机制配置
+    {
+      key: 'relay.assets.default_group_id',
+      value: '0',
+      category: 'feature_flag',
+      description:
+        '中转站素材库默认 group_id(0 = 关闭素材库同步)。若你用的中转站支持素材库 API(可上传文件拿 asset:// 引用,跨调用复用),配 token 后到该站后台创建 group,拿到 group_id 后填这里启用。同一 token 共享素材库。',
     },
 
     // ----- 模型用途绑定（让后台一处切换，所有调用统一）-----

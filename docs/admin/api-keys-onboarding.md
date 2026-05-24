@@ -5,28 +5,30 @@
 
 ---
 
-## 一、最快入场(¥10 验证全链路)— moyu 中转
+## 一、最快入场(¥10 验证全链路)— OpenAI 兼容中转站
 
 **适合**:第一次接入,1 个 token 覆盖 8 个 Provider(claude/seedance/seedream),省事
 
-### Step 1:申请 moyu token(5 min)
-1. 注册 https://www.moyu.info/
-2. 进 `/token` 页 → "创建令牌"
-3. 设置:
-   - **额度上限**:¥10(防错刷;真用 W3 一集 < ¥0.1)
-   - 模型范围:全选(让一个 token 覆盖文本/视频/图像)
-   - 有效期:1 个月
-4. 复制 `sk-xxxxxxx` token(只显示一次)
+### Step 1:申请中转站 token(5 min)
+- 中转站可选:moyu.info / OpenRouter / Poe / OneAPI 自部署 等任意 OpenAI 兼容站
+- 在选定站点注册账号 → 进入令牌 / API Key 管理页 → 创建 token
+- 设置建议:
+  - **额度上限**:¥10(防错刷;真用 W3 一集 < ¥0.1)
+  - 模型范围:全选(让一个 token 覆盖文本/视频/图像)
+  - 有效期:1 个月
+- 复制 `sk-xxxxxxx` token(通常只显示一次)
+- 同时记下该站点的 **base URL**(如 `https://www.moyu.info/v1` / `https://openrouter.ai/api/v1`),Step 2 需要
 
-### Step 2:启用预置 moyu Provider(后台 UI)
+### Step 2:启用预置中转站 Provider(后台 UI)
 1. 登录 `/zh-CN/admin/providers`
-2. 找 `moyu-claude-sonnet-4-5`(已 seed,默认 isActive=false)
+2. 找 `relay-claude-sonnet-4-5`(已 seed,默认 isActive=false)
 3. 操作:
+   - 把 **apiUrl** 改成你用的中转站 base URL(seed 给的是示例,需用户填真值)
    - 点 **[设置 API Key]** → 粘贴 sk-xxx → 保存(后端 AES-256-GCM 加密入库)
    - 切换 **isActive → true**
    - 点 **[测试连接]** → 看 `OK · response="pong" · tokens=15+5`(~3s)
-4. 同样开启 `moyu-doubao-seedance-1-0-pro`(视频)+ `moyu-doubao-seedream-4-0`(图像)
-   - 这 3 个 Provider 共享同 1 个 moyu token,只在 1 个 Provider 录入,其他启用即可
+4. 同样开启 `relay-doubao-seedance-1-0-pro`(视频)+ `relay-doubao-seedream-4-0`(图像)
+   - 这 3 个 Provider 共享同 1 个中转站 token,只在 1 个 Provider 录入 API key,其他启用即可
 
 ### Step 3:真触发业务流程
 1. 创建一个项目 → /director/storyboard
@@ -136,8 +138,8 @@ admin.provider.create({
 - ❌ APP_MASTER_KEY 一旦定 prod **绝不**改(改后已加密 key 全废)
 
 ### 推荐定期(每 90 天)
-- 🔄 rotate token:moyu 后台撤旧 → 新 → `/admin/providers` 重新 setApiKey
-- 📊 看 `/admin/api-usage` 实际消费,跟 moyu 后台余额对账
+- 🔄 rotate token:中转站后台撤旧 → 新 → `/admin/providers` 重新 setApiKey
+- 📊 看 `/admin/api-usage` 实际消费,跟中转站后台余额对账
 - 📋 看 `/admin/audit` 过滤 `action contains 'provider'` 看谁改了什么时候
 
 ---
@@ -145,12 +147,12 @@ admin.provider.create({
 ## 四、故障排查
 
 ### Q1:testConnection 报 "model_not_found"
-- moyu/Poe 后台:**该模型不在当前 token 的可访问范围**
-- 解决:moyu /token 页编辑令牌,加该模型;或换 `defaultModel` 用 token 已开通的
+- 中转站后台:**该模型不在当前 token 的可访问范围**
+- 解决:中转站令牌页编辑令牌,加该模型;或换 `defaultModel` 用 token 已开通的
 
 ### Q2:testConnection 报 "无可用渠道"
-- moyu 后台:**当前 group 没接通该模型的 channel**
-- 解决:moyu /channel 页加该模型的 channel,或换其他模型(/v1/models 列已开通的)
+- 中转站后台:**当前 group 没接通该模型的 channel**
+- 解决:中转站后台加该模型的 channel,或换其他模型(/v1/models 列已开通的)
 
 ### Q3:setApiKey 报 "API key too short"
 - adapters/setProviderApiKey 校验 < 8 字符拒
@@ -162,7 +164,7 @@ admin.provider.create({
 
 ### Q5:视频抽卡失败 "task timeout"
 - BullMQ worker pollTimeoutMs=5min,超时未完成自动 fail
-- 解决:看 worker 日志,可能 moyu 后端 vendor 拥堵;重抽即可(BullMQ 自动 retry 5 次)
+- 解决:看 worker 日志,可能中转站后端 vendor 拥堵;重抽即可(BullMQ 自动 retry 5 次)
 
 ### Q6:admin 后台 setActive 后 业务还 Mock 兜底
 - Provider 实例缓存,setApiKey 时已自动 invalidate(`cache.text.delete(providerId)`)
@@ -173,7 +175,7 @@ admin.provider.create({
 ## 五、参考资料
 
 - 4 类入口设计:[provider-onboarding-design.md](provider-onboarding-design.md)
-- moyu API spec:[moyu-api.md](../integrations/moyu-api.md)
+- 中转站 API spec 参考(以 moyu.info 为例):[moyu-api.md](../integrations/moyu-api.md)
 - 模块边界:[../MODULES.md](../MODULES.md)
 - ADR-27 决议:[../05-tech-decisions.md](../05-tech-decisions.md) § ADR-27
 - 安全测试矩阵:provider-onboarding-design.md § 5

@@ -2,7 +2,7 @@
  * OpenAI-Compatible Text Provider
  *
  * 适配所有 OpenAI Chat Completions 兼容的中转 / 原生站点:
- *   - moyu.info (魔芋 AI 中转站) — Claude / GPT / Gemini / DeepSeek / 豆包 全系
+ *   - OpenAI 兼容中转站(OpenRouter / Poe / OneAPI 自部署 / moyu.info 等) — Claude / GPT / Gemini / DeepSeek / 豆包 全系
  *   - Poe (poe.com/api-docs)
  *   - OpenRouter
  *   - OpenAI 直连
@@ -17,8 +17,8 @@
  *   - Claude Provider 直接打 api.anthropic.com,Anthropic 原生 endpoint
  *
  * 后台配置示例(seed.ts ProviderConfig 或 admin/providers UI):
- *   providerId: 'moyu-claude-sonnet-4-5-20250929'
- *   apiUrl:     'https://www.moyu.info/v1'
+ *   providerId: 'relay-claude-sonnet-4-5-20250929'
+ *   apiUrl:     'https://<your-relay-host>/v1'
  *   apiKeyEnc:  <加密的 sk-xxx>
  *   defaultParams: {
  *     protocol: 'openai-compat',
@@ -43,7 +43,7 @@ import type {
 } from './types.js';
 
 export interface OpenAICompatTextConfig {
-  /** Base URL, e.g. 'https://www.moyu.info/v1' or 'https://api.openai.com/v1' */
+  /** Base URL, e.g. 'https://<your-relay-host>/v1' or 'https://api.openai.com/v1' */
   apiUrl: string;
   apiKey: string;
   /** 默认模型 id, e.g. 'claude-sonnet-4-5-20250929' / 'gpt-4o' / 'deepseek-chat' */
@@ -57,6 +57,10 @@ export interface OpenAICompatTextConfig {
   displayName?: string;
   /** 最大并发,默认 10 */
   maxConcurrent?: number;
+  // Phase 1.5 P0-2:2 倍率(modelRate 非空时优先,跳过 inputUnitPrice/outputUnitPrice/unitPriceCny)
+  // cost = inputUnits/1M × modelRate + outputUnits/1M × modelRate × outputRate
+  modelRate?: number;
+  outputRate?: number;
 }
 
 interface OpenAIChatResponse {
@@ -101,6 +105,14 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
   estimateCost(req: TextRequest): number {
     const approxIn = Math.ceil((req.prompt.length + (req.system?.length ?? 0)) / 4);
     const approxOut = Math.min(req.maxTokens ?? 4096, 4096);
+    // Phase 1.5 P0-2:modelRate 非空时优先 2 倍率公式
+    if (this.cfg.modelRate != null && this.cfg.modelRate > 0) {
+      const oRate = this.cfg.outputRate ?? 1;
+      return (
+        (approxIn / 1_000_000) * this.cfg.modelRate +
+        (approxOut / 1_000_000) * this.cfg.modelRate * oRate
+      );
+    }
     if (this.cfg.inputUnitPriceCny != null && this.cfg.outputUnitPriceCny != null) {
       return (
         (approxIn / 1000) * this.cfg.inputUnitPriceCny +
@@ -125,7 +137,7 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
       max_tokens: req.maxTokens ?? 4096,
     };
     if (req.temperature !== undefined) body.temperature = req.temperature;
-    // jsonSchema 触发 response_format(OpenAI / Anthropic 在 moyu 都支持)
+    // jsonSchema 触发 response_format(OpenAI / Anthropic 在多数中转站都支持)
     if (req.jsonSchema) {
       body.response_format = { type: 'json_object' };
     }
@@ -186,6 +198,8 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
       outputUnits: outputTokens,
       unitPriceCny: this.unitPriceForLedger(),
       success: true,
+      // Phase 1.5 P0-2:已用 calcCost 算好真实 cost(走 2 倍率优先),透给 BaseProvider 直接落库
+      costCnyOverride: costCny,
     });
 
     // JSON 模式:request_format=json_object 时优先 JSON.parse;否则也尝试剥 ```json 容错
@@ -222,6 +236,14 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
   }
 
   private calcCost(inTokens: number, outTokens: number): number {
+    // Phase 1.5 P0-2:modelRate 非空时优先 2 倍率公式(主次重审 v2.1)
+    if (this.cfg.modelRate != null && this.cfg.modelRate > 0) {
+      const oRate = this.cfg.outputRate ?? 1;
+      return (
+        (inTokens / 1_000_000) * this.cfg.modelRate +
+        (outTokens / 1_000_000) * this.cfg.modelRate * oRate
+      );
+    }
     if (this.cfg.inputUnitPriceCny != null && this.cfg.outputUnitPriceCny != null) {
       return (
         (inTokens / 1000) * this.cfg.inputUnitPriceCny +

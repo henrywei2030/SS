@@ -43,7 +43,7 @@
 
 | 字段 | A: 中转站 moyu | B: Poe | C: 直连 Claude | D: 本地 Ollama |
 |---|---|---|---|---|
-| `providerId` | `moyu-claude-sonnet-4-5` | `poe-claude-3-7-sonnet` | `claude-sonnet-4-5` | `local-qwen-32b` |
+| `providerId` | `relay-claude-sonnet-4-5` | `poe-claude-3-7-sonnet` | `claude-sonnet-4-5` | `local-qwen-32b` |
 | `displayName` | Claude S4.5 via moyu | Claude S3.7 via Poe | Claude S4.5 直连 | Qwen 32B 本地 |
 | `kind` | TEXT | TEXT | TEXT | TEXT |
 | `apiUrl` | `https://www.moyu.info/v1` | `https://api.poe.com/v1` | `https://api.anthropic.com/v1` | `http://localhost:11434/v1` |
@@ -75,8 +75,8 @@
 │ AI Provider 配置                                            │
 ├─────────────────────────────────────────────────────────────┤
 │ providerId          kind   API Key         活跃   操作     │
-│ moyu-claude-...     TEXT   ••••xzRr        ✓     [测试]   │
-│ moyu-seedance-...   VIDEO  (未配)          ✗     [测试]   │
+│ relay-claude-...     TEXT   ••••xzRr        ✓     [测试]   │
+│ relay-seedance-...   VIDEO  (未配)          ✗     [测试]   │
 │ claude-sonnet-4-5   TEXT   ••••(env)       ✗     [测试]   │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -89,11 +89,11 @@
 │ 📦 中转站 (relay)                                            │
 │   moyu / OpenRouter:1 个 token 覆盖多模型                   │
 │   ┌──────────────────────────────────────────────┐           │
-│   │ [设 moyu token]  套用到 8 个 Provider [启用]│           │
+│   │ [设中转站 token]  套用到 8 个 Provider [启用]│           │
 │   └──────────────────────────────────────────────┘           │
-│   ✓ moyu-claude-sonnet-4-5   25 元/Mtoken  ✓启用 [测试]    │
-│   ✓ moyu-seedance-1-0-pro    1 元/秒        ✓启用 [测试]    │
-│   ☐ moyu-seedream-4-0        0.10 元/张     ✗未启 [测试]    │
+│   ✓ relay-claude-sonnet-4-5   25 元/Mtoken  ✓启用 [测试]    │
+│   ✓ relay-seedance-1-0-pro    1 元/秒        ✓启用 [测试]    │
+│   ☐ relay-seedream-4-0        0.10 元/张     ✗未启 [测试]    │
 │                                                             │
 │ 🎁 Poe 订阅(包月 token,model 范围 PoE 决定)                 │
 │   ☐ [+ 添加 Poe Provider]                                    │
@@ -152,7 +152,7 @@
 - **多 token 故障转移**
   - 一个 Provider 配多个 key(主 + 备),429 自动切备份
 - **/admin/health 加 Provider 余额**
-  - 调 moyu /api/user/quota 等显示剩余额度
+  - 调中转站 /api/user/quota 等显示剩余额度(各站接口不同)
 - **导出 / 导入 Provider 配置**
   - admin 备份 .env 风格(加密 key 走二级加密)
   - 跨设备同步(Phase 2 云端化前的过渡)
@@ -174,25 +174,25 @@
 | 用例 | 命令 | 状态 |
 |---|---|---|
 | admin login | login API | ✅ smoke 18/18 |
-| setApiKey 加密存 | trpc admin.provider.setApiKey | ✅ moyu-real-test |
+| setApiKey 加密存 | trpc admin.provider.setApiKey | ✅ relay-real-test |
 | setActive | trpc admin.provider.setActive | ✅ |
 | list 显示 masked | trpc admin.provider.list | ✅ `••••xzRr` |
 | testConnection text 真调 | trpc admin.provider.testConnection | ✅ 24ms + tokens=15+5 |
 | testConnection image dryRun | dryRun=true | ✅ 配置 OK |
 | testConnection video dryRun | dryRun=true | ✅ 配置 OK |
-| **script.analyze 真调 LLM** | trpc script.analyze + moyu Provider | ✅ 24s + 真返回 |
+| **script.analyze 真调 LLM** | trpc script.analyze + 中转站 Provider | ✅ 24s + 真返回 |
 
 ---
 
 ## § 6. 推荐入场顺序(给 admin)
 
 ### 第 1 步(¥10 内验证全链路)
-1. moyu.info 申请 1 个 token,设额度 ¥10 / 月
-2. 录入 `moyu-claude-sonnet-4-5`(剧本分析)→ setActive → testConnection
+1. 在你选的中转站(如 moyu.info / OpenRouter / Poe / OneAPI 自部署)申请 1 个 token,设额度 ¥10 / 月
+2. 录入 `relay-claude-sonnet-4-5`(剧本分析)→ 把 apiUrl 改成你的中转站 → setActive → testConnection
 3. 上传 1 集短剧本(< 5000 字)→ analyze → 看 8 维评分出来
 
 ### 第 2 步(¥50 内跑全模块)
-4. 录入 `moyu-doubao-seedance-1-0-pro`(视频)+ `moyu-doubao-seedream-4-0`(图像)
+4. 录入 `relay-doubao-seedance-1-0-pro`(视频)+ `relay-doubao-seedream-4-0`(图像)
 5. 真触发 1 个资产 breakdown + 1 个 AIGC 抽卡
 6. 看 /admin/api-usage / /insights 真有数据
 

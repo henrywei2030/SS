@@ -5,6 +5,93 @@
 
 ---
 
+## 2026-05-24(周日,win-laptop · 二十次收工)— Phase 1.5 P0 完整落地 + moyu→relay 全面去特征化 + 真接入 verify 19/19
+
+**完成 — Phase 1.5 代码层 100% ready,真接中转站全链路通**
+
+### Phase 1.5 主次重审 v2.1(规划阶段)
+- ✅ docs/integrations/phase-1.5-plan.md 升级 v2.1:**P0-2 4 倍率 → 2 倍率压简**(cache/group 推 Phase 2,SaaS 多租户产物)+ **P0-3 maskSecret 降级 P1-5**(纯 UI polish)
+- ✅ 净省 0.5-1 天工作量,P0 从 6 项 → 5 项核心,聚焦"上线必需"
+
+### P0-1 ⭐⭐⭐ CostLedgerEntry 加 entryType + 预扣/退还机制
+- ✅ schema:`LedgerEntryType` enum(NORMAL/PREPAY/REFUND/ADJUSTMENT)+ refundReason + parentEntryId(自引用链)
+- ✅ schema:CostLedgerEntry.attemptId 从 `@unique` 改 `@@index`,允许 1 attempt N 条 entry(PREPAY + REFUND 配对)
+- ✅ GenerationAttempt.costEntry 1:1 改 costEntries[] 1:N(反向 relation)
+- ✅ migration `20260524130000_phase15_ledger_prepay_refund_provider_rates` 手写 SQL + apply
+- ✅ aigc.generateVideo:transaction 内创建 attempt + 同时写 PREPAY entry(用 provider.estimateCost 预扣)
+- ✅ aigc.failPlaceholder:任何前置 check 失败时 update attempt FAILED + **同时写 REFUND 全退** PREPAY(防误扣)
+- ✅ worker processor 失败路径:不再写 NORMAL failed entry,改写 REFUND 全退 + idempotent 防 retry 双写
+- ✅ worker processor 成功路径:不再写 NORMAL success entry,改写 REFUND(-(prepaid-actual))退多扣 OR ADJUSTMENT(actual>prepaid 罕见补扣)
+- ✅ dailyBudget query 加 `attemptId: { not: earlyAttempt.id }` 排除自己 PREPAY 防双计
+- ✅ REFUND 永远 success=true(退还动作执行成功,task 成败用 GenerationAttempt.status 表达)— SUM(success:true) 自然抵消
+
+### P0-2 ⭐⭐⭐ ProviderConfig 加 2 倍率(modelRate/outputRate · 压简版)
+- ✅ schema:ProviderConfig 加 `modelRate Decimal?(10,6)` + `outputRate Decimal?(10,4)`(同 migration)
+- ✅ BaseProvider.recordLedger:加 `calcCostCnyDecimal()` 公共函数:modelRate 非空走 2 倍率(input/1M × modelRate + output/1M × modelRate × outputRate),否则 fallback 旧 unitPriceCny
+- ✅ RecordLedgerOpts:加 entryType / refundReason / parentEntryId / costCnyOverride / modelRate / outputRate 6 个可选字段
+- ✅ OpenAICompatTextProvider:calcCost + estimateCost 优先 modelRate,recordLedger 传 costCnyOverride 避免双重计算
+- ✅ provider/index.ts loadConfig:读 DB modelRate/outputRate 透传到 OpenAICompatTextProvider
+- ✅ seed.ts 给 3 个 LLM provider 填真倍率:claude-sonnet(22/4.9091)/ claude-haiku(5/1)/ deepseek(1/2)
+- ✅ cache/group 倍率注释占位 Phase 2(SaaS 多租户才用)
+
+### P0-4 ⭐⭐ /admin/api-usage 加 CSV 导出
+- ✅ adminRouter.apiUsage.exportCsv procedure:输入 days/providerId/userId/projectId/includePrepayRefund/maxRows
+- ✅ CSV 字段 13 列:时间/用户/项目/Provider/模型/Action/类型(entryType)/输入/输出/单价/花费/成功/退款原因
+- ✅ RFC 4180 escape(含 , 或 " 或 \n 字段包双引号 + 内部 " 翻倍)+ UTF-8 BOM(Excel/WPS 正确识别中文)
+- ✅ adminProcedure 守门 + logOperation 审计 + maxRows 10000 上限防 OOM
+- ✅ api-usage-view.tsx 加导出按钮 + trpc.useUtils().fetch + Blob + URL.createObjectURL 下载 + truncated 提示
+
+### P0-5 ⭐⭐⭐ 中转站素材库 asset:// 引用机制
+- ✅ 新建 `packages/adapters/provider/relay-asset.ts` RelayAssetProvider(createAsset / getAsset / listAssets / deleteAsset)
+- ✅ getRelayAssetProvider factory:从 ProviderConfig 找第一个 active relay-* 复用 token(任意 OpenAI 兼容中转站 1 token 覆盖素材库)
+- ✅ getRelayDefaultGroupId:读 SystemSetting `relay.assets.default_group_id`,≤0 跳过
+- ✅ mediaRouter.upload:加 `syncToRelay: boolean = false`(显式开启) + storage.getSignedUrl(12h) 拿公网 URL + moyuApiProvider.createAsset + 存 meta.relayAssetUrl / relayAssetId
+- ✅ aigc.generateVideo refImageUrls:provider 是 `relay-*` 时优先用 meta.relayAssetUrl(asset://),否则 cdnUrl(MinIO 签名 URL)
+- ✅ SystemSetting `relay.assets.default_group_id` 默认 0(关闭)— 用户后台填具体 group_id 才启用
+
+### moyu → "中转站(relay)" 全面去特征化(2 原则)
+- ✅ **代码层 identifier 全去**:providerId × 8(moyu- → relay-)/ env(MOYU_API_KEY → RELAY_API_KEY)/ endpointStyle 'moyu' → 'relay' / 文件名 moyu-asset.ts → relay-asset.ts / 类名 MoyuAssetProvider → RelayAssetProvider / SystemSetting key / aigc isMoyuProvider → isRelayProvider / media syncToMoyu → syncToRelay / meta.moyuAssetUrl → relayAssetUrl
+- ✅ **数据字段(apiUrl)清空**:seed.ts 默认 apiUrl='',用户后台必填(去 moyu URL 默认绑定)
+- ✅ **保留**:docs/integrations/moyu-*.md 归档(文件名固定)+ "参考来源"叙述(moyu 是参考源不是设计模板,符合 v2.1 重审原则)+ 并列举例(OpenRouter / Poe / OneAPI / moyu.info 等中性列举)
+- ✅ Memory 写入 [[feedback-moyu-reference-principle]]:严格分主次,警惕 UI/风格过度借鉴
+
+### 真接入验证(用户 1h 临时 token)
+- ✅ relay-real-test.mjs 真触发:admin 登录 → setApiKey relay-claude-sonnet-4-5 → setActive → list 返 masked → **testConnection 真调中转站 chat 14.9s tokens=29+5** → image+video dryRun → **W3 script.analyze 真跑 LLM 37s** → cleanup
+- ✅ Smoke 19/19 全过(admin/UUID/login/session/UI 5 页/insights/branding/presets)
+- ✅ typecheck 15/15 + test 85/85(api 25 + core 60)
+
+### 系统层操作(用户授权)
+- ✅ `pnpm infra:up`(docker compose)+ `pnpm db:migrate:deploy` 应用 migration
+- ✅ DB 清理 8 条旧 moyu-* provider + 0 条孤儿 ledger + seed 重建 15 个 provider + 26 条 SystemSetting
+- ✅ DB 真活跃 provider 3 个(claude-sonnet/seedance/seedream)apiUrl=https://www.moyu.info/v1
+- ✅ web + worker 后台重启(prisma client 同步 schema)
+
+**进行中**
+- 🚧 (无在途,Phase 1.5 代码层 100% ready,等用户决定 W8 实战时间)
+
+**问题 / 待决策**
+- ❓ 1h 测试 token 处理(用户决定:立即 revoke vs 趁机做 W8 实战 1-2 次真生成)
+- ❓ 中转站素材库 group_id(P0-5 全启用):用户去中转站后台创建 group + 后台填 SystemSetting
+- ❓ W8 5 人冷启动会议时间(协调人决定)
+
+**下次接着做**
+- 📌 **W8 实战 12 步**(详见 docs/W1-W7-followup.md):配 group_id → 跑 1 集 7 镜头 → 收集 P0/P1 bug
+- 📌 或者启动 Phase 2:ADR-26 Agent 联动 hook 落地 + Mastra 编排
+
+**质量**
+- 20 文件改 + 3 新文件 + 2 删除 = **20 + 5 文件**,**+707/-524 行**(净 +183)
+- 1 migration(20260524130000)/ 0 schema breaking(向后兼容 unitPriceCny / costEntries 1:N 反向自动)
+- 5 新 ledger 字段(entryType / refundReason / parentEntryId / modelRate / outputRate)
+- 0 安全回归(adminProcedure / rateLimit / sanitize / OperationLog 链路完整)
+
+**累计**
+- **20 次收工 / 60+ debug / Phase 1.5 代码层 100% / 真接入 verify pass**
+- 28 ADR(ADR-28 Phase 1.5 完整决议)/ 20 migration / ~110 audit / 110+ 单测
+- 11 workspace 包 / 5 package README / MODULES.md
+- **真接中转站全链路通**(setApiKey 14ms / chat 15s / script.analyze 37s),Phase 1.5 上线 ready
+
+---
+
 ## 2026-05-24(周日,win-laptop · 十九次收工)— moyu 真接入 + Phase 1.5 P0 规划 + 最终 audit(12 commits)
 
 **完成 — moyu 中转站全栈接入 + 后台 4 类入口设计 + Phase 1.5 启动 ready**

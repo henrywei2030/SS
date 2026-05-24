@@ -37,12 +37,12 @@ export interface SeedanceConfig {
   /**
    * Endpoint 风格:
    * - 'ark'  (默认) = Volcengine ARK 原生 path /contents/generations/tasks,body 用 content+parameters 结构
-   * - 'moyu' = moyu.info 中转 path /video/generations,body 用 OpenAI 兼容简化结构 { model, prompt, duration, ratio }
+   * - 'relay' = OpenAI 兼容中转站 path /video/generations,body 用简化结构 { model, prompt, duration, ratio }
    *
-   * 加这个的原因(2026-05-24 第 21 轮 audit):moyu 透传 Seedance 但改了 endpoint path + body 结构。
+   * 加这个的原因(2026-05-24 第 21 轮 audit):多数 OpenAI 兼容中转站透传 Seedance 但改了 endpoint path + body 结构。
    * 同一个 SeedanceProvider 类支持两个 backend,避免代码重复。
    */
-  endpointStyle?: 'ark' | 'moyu';
+  endpointStyle?: 'ark' | 'relay';
 }
 
 interface CreateTaskResponse {
@@ -71,13 +71,13 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
   readonly info: ProviderInfo;
   private readonly pollIntervalMs: number;
   private readonly pollTimeoutMs: number;
-  private readonly endpointStyle: 'ark' | 'moyu';
+  private readonly endpointStyle: 'ark' | 'relay';
 
   constructor(private readonly cfg: SeedanceConfig) {
     super();
     this.info = {
       id: cfg.defaultModel,
-      displayName: cfg.endpointStyle === 'moyu' ? 'Seedance via Moyu (视频)' : 'Seedance（视频）',
+      displayName: cfg.endpointStyle === 'relay' ? 'Seedance via 中转站 (视频)' : 'Seedance（视频）',
       kind: 'video',
       unitName: 'second',
       defaultUnitPriceCny: cfg.unitPriceCny,
@@ -91,19 +91,19 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
 
   /** create task endpoint path(根据 endpointStyle 切换) */
   private get createTaskPath(): string {
-    return this.endpointStyle === 'moyu' ? '/video/generations' : '/contents/generations/tasks';
+    return this.endpointStyle === 'relay' ? '/video/generations' : '/contents/generations/tasks';
   }
 
   private queryTaskPath(taskId: string): string {
-    return this.endpointStyle === 'moyu'
+    return this.endpointStyle === 'relay'
       ? `/video/generations/${taskId}`
       : `/contents/generations/tasks/${taskId}`;
   }
 
-  /** 构造 create task body(根据 endpointStyle 切换 — moyu 简化结构 / ark 原生 content+parameters) */
+  /** 构造 create task body(根据 endpointStyle 切换 — relay 简化结构 / ark 原生 content+parameters) */
   private buildCreateBody(req: VideoRequest, modelId: string): Record<string, unknown> {
-    if (this.endpointStyle === 'moyu') {
-      // moyu /v1/video/generations OpenAI 兼容简化结构
+    if (this.endpointStyle === 'relay') {
+      // 中转站 /v1/video/generations OpenAI 兼容简化结构
       const body: Record<string, unknown> = {
         model: modelId,
         prompt: req.prompt,
@@ -136,7 +136,7 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
     };
   }
 
-  /** 从 create task 响应中抽 task_id(兼容 moyu 的 task_id 和 ark 的 id) */
+  /** 从 create task 响应中抽 task_id(兼容中转站的 task_id 和 ark 的 id) */
   private extractTaskId(json: Record<string, unknown>): string {
     return (json.task_id as string) ?? (json.id as string) ?? '';
   }
@@ -152,7 +152,7 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
     // 预算护栏
     await this.checkBudget(ctx.projectId, estimated);
 
-    // 构造 task 请求 body(根据 endpointStyle 切换 ark / moyu)
+    // 构造 task 请求 body(根据 endpointStyle 切换 ark / relay)
     const taskBody = this.buildCreateBody(req, modelId);
 
     let providerJobId: string;

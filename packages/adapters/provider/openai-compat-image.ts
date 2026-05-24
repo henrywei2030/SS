@@ -2,7 +2,7 @@
  * OpenAI-Compatible Image Provider
  *
  * 适配 OpenAI /v1/images/generations 兼容的中转 / 原生站:
- *   - moyu.info 的 doubao-seedream-3.0/4.0/4.5/5.0 / FLUX.2-dev
+ *   - OpenAI 兼容中转站(moyu / OpenRouter 等)的 doubao-seedream-3.0/4.0/4.5/5.0 / FLUX.2-dev
  *   - OpenAI DALL-E
  *   - 任意 OpenAI 兼容的图像生成 endpoint
  *

@@ -11,11 +11,18 @@
  *
  * W1-W5 audit P1 followup(R9):costCny 用 Prisma.Decimal 计算,防 IEEE-754 误差
  *   原 `outputUnits * unitPriceCny` 是 JS 浮点乘法,大额抽卡(5000+ 行)累加会漂。
+ *
+ * Phase 1.5 P0-1 + P0-2(2026-05-24,主次重审 v2.1):
+ *   - 加 entryType / refundReason / parentEntryId 支持视频预扣/退还
+ *   - 加 modelRate / outputRate 2 倍率公式(优先);未提供则 fallback 到 unitPriceCny 单价
+ *   - 加 costCnyOverride:PREPAY/REFUND/ADJUSTMENT 不算 cost,直接传金额落库
  */
 import { prisma, Prisma } from '@ss/db';
 import { ProviderError, BudgetExceededError } from '@ss/shared';
 
 import type { CallContext, ProviderInfo } from './types.js';
+
+export type LedgerEntryType = 'NORMAL' | 'PREPAY' | 'REFUND' | 'ADJUSTMENT';
 
 export interface RecordLedgerOpts {
   ctx: CallContext;
@@ -26,6 +33,39 @@ export interface RecordLedgerOpts {
   outputUnits: number;
   unitPriceCny: number;
   success: boolean;
+  // Phase 1.5 P0-1 字段(可选,默认 NORMAL)
+  entryType?: LedgerEntryType;
+  refundReason?: string;
+  parentEntryId?: string;
+  /** 直接传 costCny(预扣/退还/手动调整时用),跳过 2 倍率公式 */
+  costCnyOverride?: Prisma.Decimal | string | number;
+  // Phase 1.5 P0-2 字段(可选,优先于 unitPriceCny)
+  modelRate?: number;
+  outputRate?: number;
+}
+
+/**
+ * Phase 1.5 P0-2 计费公式(主次重审 v2.1):
+ *   modelRate 非空 → 2 倍率:input/1M × modelRate + output/1M × modelRate × outputRate
+ *   modelRate 空 → fallback 旧 unitPriceCny 单价(outputUnits × unitPriceCny)
+ */
+export function calcCostCnyDecimal(opts: {
+  inputUnits: number;
+  outputUnits: number;
+  unitPriceCny: number;
+  modelRate?: number;
+  outputRate?: number;
+}): Prisma.Decimal {
+  const { inputUnits, outputUnits, unitPriceCny, modelRate, outputRate } = opts;
+  if (modelRate != null && Number.isFinite(modelRate) && modelRate > 0) {
+    const rate = new Prisma.Decimal(modelRate);
+    const oRate = new Prisma.Decimal(outputRate ?? 1);
+    const inputCost = new Prisma.Decimal(inputUnits).div(1_000_000).mul(rate);
+    const outputCost = new Prisma.Decimal(outputUnits).div(1_000_000).mul(rate).mul(oRate);
+    return inputCost.plus(outputCost);
+  }
+  // fallback 旧逻辑:outputUnits × unitPriceCny(向后兼容)
+  return new Prisma.Decimal(outputUnits).mul(new Prisma.Decimal(unitPriceCny));
 }
 
 export abstract class BaseProvider {
@@ -34,10 +74,17 @@ export abstract class BaseProvider {
   /** 记录 Cost Ledger（同步落库,Decimal 算 cost） */
   protected async recordLedger(opts: RecordLedgerOpts): Promise<void> {
     if (opts.ctx.skipLedger) return;
-    // R9:Decimal 乘法,Prisma 写库时把 Decimal 序列化为 NUMERIC 不丢精度
-    const costCny = new Prisma.Decimal(opts.outputUnits).mul(
-      new Prisma.Decimal(opts.unitPriceCny),
-    );
+    // costCnyOverride 优先(预扣/退还/调整时用),否则按 2 倍率 / 单价公式算
+    const costCny =
+      opts.costCnyOverride !== undefined
+        ? new Prisma.Decimal(opts.costCnyOverride as never)
+        : calcCostCnyDecimal({
+            inputUnits: opts.inputUnits,
+            outputUnits: opts.outputUnits,
+            unitPriceCny: opts.unitPriceCny,
+            modelRate: opts.modelRate,
+            outputRate: opts.outputRate,
+          });
     try {
       await prisma.costLedgerEntry.create({
         data: {
@@ -55,6 +102,9 @@ export abstract class BaseProvider {
           unitPriceCny: opts.unitPriceCny,
           costCny,
           success: opts.success,
+          entryType: opts.entryType ?? 'NORMAL',
+          refundReason: opts.refundReason ?? null,
+          parentEntryId: opts.parentEntryId ?? null,
           billingCycle: new Date().toISOString().slice(0, 7), // YYYY-MM
         },
       });

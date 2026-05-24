@@ -1,8 +1,9 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-05-24(十七收工 · W1-W7 待完成事项详细盘点 + W8 启动 checklist)
+> 最后更新:2026-05-24(**二十收工 · Phase 1.5 代码层 100% + 真接中转站 verify 通过**)
 > 仓库:https://github.com/henrywei2030/SS
 > **📖 实战前必读**:[docs/W1-W7-followup.md](docs/W1-W7-followup.md)(完整留尾清单 + 12 步启动 checklist)
+> **📖 Phase 1.5 规划**:[docs/integrations/phase-1.5-plan.md](docs/integrations/phase-1.5-plan.md) v2.1 主次重审版(5 项 P0 全完成)
 
 ---
 
@@ -49,6 +50,7 @@
 - [x] **README + CHANGELOG**(十六收工)— 完整重写 README(完成度徽章+模块全景+快速启动)+ CHANGELOG 16 次收工日志
 - [x] **第 19-20 轮 audit 60 次 debug**(十八收工)— Sprint A/A2/B/C/D + R2 F/G/H · 修 15+ P0/P1 · 13 mutation .meta 100% · requestId 全链 · EventBus 4 publish 补 · Tauri capabilities DRAFT · 6 模块文档 · ADR-27 — 2026-05-24
 - [x] **moyu 真接入 + 4 类 Provider 入口 + Phase 1.5 P0 规划**(十九收工)— OpenAICompatProvider × 2 + 8 个 moyu Provider + admin.testConnection 真实现 + admin.provider.create/delete + admin.dashboard.platformOverview + 7 项 P0/P1 修(SSRF/requestId 防伪造/zodIssues 脱敏/lowercase 标准化/双 toast/admin ¥0.00→真 data)+ moyu 浏览器深度学习(24 章 docs + 148 模型 + 设计要素归档)+ Phase 1.5 P0 plan v2(预扣退还/4 倍率/asset://) — 2026-05-24
+- [x] **Phase 1.5 代码层 100% + moyu→relay 全面去特征化 + 真接入 verify**(二十收工)— Phase 1.5 主次重审 v2.1(6→5 P0 压简)/ P0-1 entryType+预扣退还(schema+migration+aigc.generateVideo+worker processor+failPlaceholder)/ P0-2 2 倍率(BaseProvider.calcCostCnyDecimal+OpenAICompatTextProvider 优先 modelRate+seed)/ P0-4 CSV 导出 13 字段(adminRouter.apiUsage.exportCsv+UTF-8 BOM+OperationLog)/ P0-5 RelayAssetProvider + mediaRouter.syncToRelay + aigc 优先 asset:// / moyu→relay 全代码层去特征(providerId×8+env+endpointStyle+文件名+类名+字段+SystemSetting key+meta key)/ DB seed 重建 15 provider + 26 setting / **真接中转站 verify(testConnection 14.9s + script.analyze 37s 真跑)+ smoke 19/19 + typecheck 15/15 + test 85/85** — 2026-05-24
 - [ ] **W5.6 进阶**(留 Phase 2)— 音频波形(wavesurfer.js)/ AI 自动打标(BPM/时长)/ pgvector 向量搜索
 - [ ] **Polish 剩余**(留 Phase 2)— 34 处硬编码颜色 / a11y / listBindings N+1 / OperationLog 命名规范
 - [ ] **W8 团队实战**(下次启动)— 5 人冷启动 + 配 API Key 真接 Seedance + 1 集 7 镜头

@@ -85,8 +85,38 @@ function DailyTrend({
 
 export function ApiUsageView(): React.ReactElement {
   const [days, setDays] = React.useState(30);
+  const [exporting, setExporting] = React.useState(false);
   const { data, isLoading, isError, error, refetch } =
     trpc.admin.apiUsage.summary.useQuery({ days });
+
+  // Phase 1.5 P0-4(主次重审 v2.1):CSV 导出 — 拿到 csv string 直接 Blob 下载
+  const utils = trpc.useUtils();
+  const handleExport = async (): Promise<void> => {
+    setExporting(true);
+    try {
+      const result = await utils.admin.apiUsage.exportCsv.fetch({
+        days,
+        includePrepayRefund: true,
+      });
+      const blob = new Blob([result.csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = result.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      if (result.truncated) {
+        alert(`已导出 ${result.rowCount} 行(已达上限,需更多请按用户/项目筛选或缩短时间范围)`);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      alert(`导出失败:${msg}`);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <div>
@@ -97,17 +127,27 @@ export function ApiUsageView(): React.ReactElement {
             GenerationAttempt + CostLedger 全局聚合 — 跨项目用量 / 成本 / 分布
           </p>
         </div>
-        <select
-          value={days}
-          onChange={(e) => setDays(Number(e.target.value))}
-          className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-3 py-1.5 text-xs"
-        >
-          <option value={7}>近 7 天</option>
-          <option value={14}>近 14 天</option>
-          <option value={30}>近 30 天</option>
-          <option value={60}>近 60 天</option>
-          <option value={90}>近 90 天</option>
-        </select>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleExport}
+            disabled={exporting || !data}
+            className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-3 py-1.5 text-xs hover:bg-[hsl(var(--color-muted))] disabled:opacity-50"
+            title="导出 CostLedger CSV(含 PREPAY/REFUND 完整审计)"
+          >
+            {exporting ? '导出中...' : '导出 CSV'}
+          </button>
+          <select
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+            className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-3 py-1.5 text-xs"
+          >
+            <option value={7}>近 7 天</option>
+            <option value={14}>近 14 天</option>
+            <option value={30}>近 30 天</option>
+            <option value={60}>近 60 天</option>
+            <option value={90}>近 90 天</option>
+          </select>
+        </div>
       </header>
 
       {isError && (

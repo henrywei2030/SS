@@ -1,15 +1,18 @@
 #!/usr/bin/env node
 /**
- * Moyu 真接入端到端测试
+ * OpenAI 兼容中转站(Relay)真接入端到端测试
  *
- * 用 MOYU_TOKEN env 注入 token,**脚本本身零凭据**
- * 跑法:`MOYU_TOKEN=sk-xxx node scripts/moyu-real-test.mjs`
+ * 适用于任意 OpenAI 兼容中转站(如 moyu.info / OpenRouter / Poe 等),
+ * 走 ProviderConfig 中的 relay-* 系列(seed.ts 已预置 8 个)。
+ *
+ * 用 RELAY_TOKEN env 注入 token,**脚本本身零凭据**
+ * 跑法:`RELAY_TOKEN=sk-xxx node scripts/relay-real-test.mjs`
  *
  * 验证链路:
  *   1. admin 登录
- *   2. admin.provider.setApiKey(moyu-claude-sonnet-4-5)
+ *   2. admin.provider.setApiKey(relay-claude-sonnet-4-5)
  *   3. admin.provider.setActive(true)
- *   4. admin.provider.testConnection → 真调 moyu chat verify
+ *   4. admin.provider.testConnection → 真调中转站 chat verify
  *   5. admin.provider.list → verify 新启用项 + masked key
  *   6. (可选)script.analyze 真触发 LLM
  *
@@ -23,10 +26,10 @@ const BASE = 'http://localhost:3000';
 const ADMIN_USER = 'admin';
 const ADMIN_PASS = 'admin123!@#';
 
-const TOKEN = process.env.MOYU_TOKEN;
+const TOKEN = process.env.RELAY_TOKEN;
 if (!TOKEN || !TOKEN.startsWith('sk-')) {
-  console.error('❌ MOYU_TOKEN env 未设置或格式不对(需 sk- 开头)');
-  console.error('   跑法: MOYU_TOKEN=sk-xxx node scripts/moyu-real-test.mjs');
+  console.error('❌ RELAY_TOKEN env 未设置或格式不对(需 sk- 开头)');
+  console.error('   跑法: RELAY_TOKEN=sk-xxx node scripts/relay-real-test.mjs');
   process.exit(1);
 }
 const tokenMask = '••••' + TOKEN.slice(-4);
@@ -82,10 +85,10 @@ function trpcError(res) {
   return res.json?.error?.json;
 }
 
-const TARGET = 'moyu-claude-sonnet-4-5';
+const TARGET = 'relay-claude-sonnet-4-5';
 
 (async () => {
-  console.log(`🚀 Moyu 真接入端到端测试(token=${tokenMask})\n`);
+  console.log(`🚀 中转站(Relay)真接入端到端测试(token=${tokenMask})\n`);
 
   // [1] admin 登录
   console.log('🔐 [1] admin 登录...');
@@ -134,8 +137,8 @@ const TARGET = 'moyu-claude-sonnet-4-5';
   console.log(`     apiKeyMasked=${target.apiKeyMasked ?? '(无该字段)'}`);
   console.log('');
 
-  // [5] testConnection 真调 moyu chat
-  console.log(`🧪 [5] testConnection 真调 moyu chat 验证...`);
+  // [5] testConnection 真调中转站 chat
+  console.log(`🧪 [5] testConnection 真调中转站 chat 验证...`);
   const test = await trpcMut('admin.provider.testConnection', { providerId: TARGET, dryRun: false });
   const testData = unwrap(test);
   if (test.status !== 200) {
@@ -154,11 +157,11 @@ const TARGET = 'moyu-claude-sonnet-4-5';
   console.log('');
 
   // [6] 顺手测一个 image / video 兼容 dryRun
-  console.log(`🖼️ [6] 启用 moyu-doubao-seedream-4-0 + dryRun 测试...`);
-  await trpcMut('admin.provider.setApiKey', { providerId: 'moyu-doubao-seedream-4-0', apiKey: TOKEN });
-  await trpcMut('admin.provider.setActive', { providerId: 'moyu-doubao-seedream-4-0', isActive: true });
+  console.log(`🖼️ [6] 启用 relay-doubao-seedream-4-0 + dryRun 测试...`);
+  await trpcMut('admin.provider.setApiKey', { providerId: 'relay-doubao-seedream-4-0', apiKey: TOKEN });
+  await trpcMut('admin.provider.setActive', { providerId: 'relay-doubao-seedream-4-0', isActive: true });
   const testImg = await trpcMut('admin.provider.testConnection', {
-    providerId: 'moyu-doubao-seedream-4-0',
+    providerId: 'relay-doubao-seedream-4-0',
     dryRun: true,
   });
   const testImgData = unwrap(testImg);
@@ -169,11 +172,11 @@ const TARGET = 'moyu-claude-sonnet-4-5';
   }
   console.log('');
 
-  console.log(`🎬 [7] 启用 moyu-doubao-seedance-1-0-pro + dryRun 测试...`);
-  await trpcMut('admin.provider.setApiKey', { providerId: 'moyu-doubao-seedance-1-0-pro', apiKey: TOKEN });
-  await trpcMut('admin.provider.setActive', { providerId: 'moyu-doubao-seedance-1-0-pro', isActive: true });
+  console.log(`🎬 [7] 启用 relay-doubao-seedance-1-0-pro + dryRun 测试...`);
+  await trpcMut('admin.provider.setApiKey', { providerId: 'relay-doubao-seedance-1-0-pro', apiKey: TOKEN });
+  await trpcMut('admin.provider.setActive', { providerId: 'relay-doubao-seedance-1-0-pro', isActive: true });
   const testVid = await trpcMut('admin.provider.testConnection', {
-    providerId: 'moyu-doubao-seedance-1-0-pro',
+    providerId: 'relay-doubao-seedance-1-0-pro',
     dryRun: true,
   });
   const testVidData = unwrap(testVid);
@@ -187,7 +190,7 @@ const TARGET = 'moyu-claude-sonnet-4-5';
   // [8] 真触发 W3 script.analyze — 真调 LLM 走全业务链路
   console.log(`📝 [8] W3 真触发: project + script + analyze...`);
   const proj = await trpcMut('project.create', {
-    name: `Moyu Test ${new Date().toISOString().slice(0, 19)}`,
+    name: `Relay Test ${new Date().toISOString().slice(0, 19)}`,
     type: 'AI_REAL',
     aspect: '9:16',
   });
@@ -228,7 +231,7 @@ const TARGET = 'moyu-claude-sonnet-4-5';
   const analyzeStart = Date.now();
   const analyze = await trpcMut('script.analyze', {
     scriptId,
-    modelId: 'moyu-claude-sonnet-4-5',
+    modelId: 'relay-claude-sonnet-4-5',
   });
   const analyzeMs = Date.now() - analyzeStart;
   const analyzeData = unwrap(analyze);
@@ -263,7 +266,7 @@ const TARGET = 'moyu-claude-sonnet-4-5';
   console.log('📌 cleanup 选项:');
   console.log(`  - 三个 Provider 已 setActive=true,后续真用会扣钱`);
   console.log(`  - 不再用时跑: PROVIDER=${TARGET} 等手动 setActive=false`);
-  console.log(`  - **强烈建议你回 moyu 后台 revoke 此 token**(用过的应 rotate)`);
+  console.log(`  - **强烈建议你回中转站后台 revoke 此 token**(用过的应 rotate)`);
 })().catch((e) => {
   console.error(`💥 脚本崩溃: ${e.message}`);
   console.error(e);
