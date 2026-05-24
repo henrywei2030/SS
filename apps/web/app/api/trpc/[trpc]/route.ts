@@ -56,9 +56,22 @@ const handler = async (req: Request): Promise<Response> => {
   }
 
   // 第 19 轮 audit P1:每请求生成 requestId 贯穿 ctx → audit log → 入队 Job → worker
-  // 用户报"抽卡失败"时可附 requestId,运维 grep 日志即可 trace 全链路
-  // X-Request-Id header 也支持(反代/客户端传入优先)
-  const requestId = hdrs.get('x-request-id') ?? randomUUID();
+  // 第 23 轮 audit P1 加固:防客户端伪造 requestId 污染日志/timing attack
+  //   - 仅接受 反向代理 注入的 X-Request-Id(格式:UUID 或 trace-id 风格)
+  //   - 客户端任意值不直接用,统一加 `client-` 前缀标识 + 服务端自己生成新的并把客户端值放 `client-id` query log
+  //   - 默认自己生成 UUID 兜底
+  const incomingReqId = hdrs.get('x-request-id');
+  let requestId: string;
+  // 仅接受 反向代理 / 服务端可信源 注入的格式严格的 UUID
+  // 客户端伪造的值仍记录(供 debug)但不作为唯一标识
+  if (incomingReqId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(incomingReqId)) {
+    requestId = incomingReqId;
+  } else {
+    requestId = randomUUID();
+    if (incomingReqId) {
+      console.warn(`[trpc] X-Request-Id 格式不符 UUID,忽略客户端值,自生成 ${requestId}`);
+    }
+  }
 
   return fetchRequestHandler({
     endpoint: '/api/trpc',

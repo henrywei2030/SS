@@ -26,6 +26,8 @@ import { sanitizeErrorMsg } from '@ss/shared';
 
 import { router, adminProcedure, rateLimit } from '../trpc.js';
 import { logOperation } from '../middleware/audit.js';
+// 第 23 轮 audit P1:apiUrl SSRF 防御
+import { validateApiUrl } from '../utils/url-safety.js';
 
 // ---------------------------------------------------------------------------
 // admin.provider
@@ -96,19 +98,26 @@ const providerRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      // 第 23 轮 audit P0:apiUrl SSRF 防御 — 拒内网/metadata
+      const urlErr = validateApiUrl(input.apiUrl);
+      if (urlErr) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `apiUrl 被拒:${urlErr}` });
+      }
+      // 第 23 轮 audit P1:providerId case 标准化(防 "MOYU-X" vs "moyu-x" 并发 create race)
+      const normalizedProviderId = input.providerId.toLowerCase().trim();
       // providerId 防重(schema @unique 也防,提前拦更友好错误)
       const existing = await ctx.prisma.providerConfig.findUnique({
-        where: { providerId: input.providerId },
+        where: { providerId: normalizedProviderId },
       });
       if (existing) {
         throw new TRPCError({
           code: 'CONFLICT',
-          message: `providerId "${input.providerId}" 已存在 — 改用 setApiKey/updatePricing 修改,或换 providerId`,
+          message: `providerId "${normalizedProviderId}" 已存在 — 改用 setApiKey/updatePricing 修改,或换 providerId`,
         });
       }
       const created = await ctx.prisma.providerConfig.create({
         data: {
-          providerId: input.providerId,
+          providerId: normalizedProviderId,
           displayName: input.displayName,
           kind: input.kind,
           apiUrl: input.apiUrl,
@@ -1697,7 +1706,44 @@ const dbExplorerRouter = router({
 // 聚合
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// admin.dashboard(第 23 轮 audit:接通 /admin 首页 KPI 卡真 data,替换 ¥0.00 hardcode)
+// ---------------------------------------------------------------------------
+
+const dashboardRouter = router({
+  /** 平台级 4 KPI(跨全 project 聚合,所有 entryType 全算) */
+  platformOverview: adminProcedure.query(async ({ ctx }) => {
+    const where = { success: true };
+    const [total, image, video, seedance, projectCount, userCount] = await Promise.all([
+      ctx.prisma.costLedgerEntry.aggregate({ where, _sum: { costCny: true } }),
+      ctx.prisma.costLedgerEntry.aggregate({
+        where: { ...where, action: { startsWith: 'image' } },
+        _sum: { costCny: true },
+      }),
+      ctx.prisma.costLedgerEntry.aggregate({
+        where: { ...where, action: { startsWith: 'video' } },
+        _sum: { costCny: true },
+      }),
+      ctx.prisma.costLedgerEntry.aggregate({
+        where: { ...where, providerId: { contains: 'seedance', mode: 'insensitive' } },
+        _sum: { costCny: true },
+      }),
+      ctx.prisma.project.count({ where: { deletedAt: null } }),
+      ctx.prisma.user.count({ where: { deletedAt: null } }),
+    ]);
+    return {
+      totalCny: Number(total._sum.costCny ?? 0),
+      imageCny: Number(image._sum.costCny ?? 0),
+      videoCny: Number(video._sum.costCny ?? 0),
+      seedanceCny: Number(seedance._sum.costCny ?? 0),
+      projectCount,
+      userCount,
+    };
+  }),
+});
+
 export const adminRouter = router({
+  dashboard: dashboardRouter,
   provider: providerRouter,
   style: styleRouter,
   prompt: promptRouter,

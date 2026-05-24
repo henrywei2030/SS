@@ -154,17 +154,30 @@ async function trpcMutation(path, input) {
   }
 
   // ============================================================
-  // 4. 自定义 X-Request-Id 透传(verify header 优先级)
+  // 4. X-Request-Id 严格 UUID 校验(第 23 轮 audit 安全加固)
   // ============================================================
-  log('🔄', '[4] 自定义 X-Request-Id header 优先级');
-  const customReqId = 'custom-test-req-' + Date.now();
-  const withCustom = await api('/api/trpc/me.session?input=' + encodeURIComponent(JSON.stringify({ json: {} })), {
-    requestId: customReqId,
+  // 4a. UUID 格式合法 X-Request-Id 被透传(反向代理 / 服务端可信源场景)
+  log('🔄', '[4a] 严格 UUID 格式的 X-Request-Id 被透传');
+  const validUuid = '12345678-1234-4abc-9def-1234567890ab';
+  const withValid = await api('/api/trpc/me.session?input=' + encodeURIComponent(JSON.stringify({ json: {} })), {
+    requestId: validUuid,
   });
-  if (withCustom.requestId === customReqId) {
-    ok(`自定义 X-Request-Id 被透传: ${customReqId}`);
+  if (withValid.requestId === validUuid) {
+    ok(`UUID 格式 X-Request-Id 被透传: ${validUuid.slice(-8)}`);
   } else {
-    bad(`自定义 X-Request-Id 未透传 sent=${customReqId} got=${withCustom.requestId}`);
+    bad(`UUID 格式 X-Request-Id 未透传 sent=${validUuid} got=${withValid.requestId}`);
+  }
+
+  // 4b. 非 UUID 格式被拒(防伪造日志/timing attack)
+  log('🚫', '[4b] 非 UUID 格式的 X-Request-Id 被拒(自生成新 UUID)');
+  const fakeId = 'attacker-injected-fake-id-' + Date.now();
+  const withFake = await api('/api/trpc/me.session?input=' + encodeURIComponent(JSON.stringify({ json: {} })), {
+    requestId: fakeId,
+  });
+  if (withFake.requestId !== fakeId && /^[0-9a-f-]{36}$/.test(withFake.requestId ?? '')) {
+    ok(`非 UUID 客户端值被拒,server 自生成 UUID ${withFake.requestId?.slice(-8)}`);
+  } else {
+    bad(`SSRF 防御失败 — 客户端值未被拒 got=${withFake.requestId}`);
   }
 
   // ============================================================

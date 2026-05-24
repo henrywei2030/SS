@@ -53,6 +53,23 @@ const t = initTRPC.context<Context>().meta<TRPCMeta>().create({
     if (isProd) {
       delete (baseData as Record<string, unknown>).stack;
     }
+    // 第 23 轮 audit P1:zodIssues 脱敏 — 只保留 path+code,丢弃 message(message 可能含正则 pattern 暴露 password 规则等)
+    // dev 模式保留完整(开发 debug 用),prod 只返路径
+    let safeZodIssues: unknown;
+    if (error.cause instanceof ZodError) {
+      const flat = error.cause.flatten();
+      if (isProd) {
+        // prod:仅返 field paths,不暴露 message(防 regex / 密码规则泄漏)
+        safeZodIssues = {
+          formErrors: flat.formErrors.length > 0 ? ['校验失败'] : [],
+          fieldErrors: Object.fromEntries(
+            Object.entries(flat.fieldErrors).map(([k, v]) => [k, v && v.length > 0 ? ['校验失败'] : []]),
+          ),
+        };
+      } else {
+        safeZodIssues = flat;
+      }
+    }
     return {
       ...shape,
       data: {
@@ -61,8 +78,7 @@ const t = initTRPC.context<Context>().meta<TRPCMeta>().create({
         requestId: ctx?.requestId,
         ssCode:
           error.cause instanceof SsError ? error.cause.code : undefined,
-        zodIssues:
-          error.cause instanceof ZodError ? error.cause.flatten() : undefined,
+        zodIssues: safeZodIssues,
       },
     };
   },

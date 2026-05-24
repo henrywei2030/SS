@@ -28,10 +28,14 @@ export function TrpcProvider({ children }: { children: React.ReactNode }): React
         // 注:仅对 mutation 兜底;query 错误通常在 component 内 isError 分支处理,不全局 toast 防刷屏
         mutationCache: new MutationCache({
           onError: (error, _vars, _ctx, mutation) => {
-            // 若 mutation 配置了自己的 onError,框架会同时调用两边 — 全局这里仍打 toast 是 OK 的兜底
-            // 若想 mutation 完全静默(如已用自定义 dialog 处理),可在 mutation options 设 meta:{ silent:true }
-            const silent = (mutation.options.meta as { silent?: boolean } | undefined)?.silent;
-            if (silent) return;
+            // 第 20 轮 audit + 第 23 轮加固:全局兜底 toast policy
+            // - `meta: { silent: true }`     → 完全跳过(component 自己 dialog 处理)
+            // - `meta: { customError: true }` → component 自己 onError 显式 toast,cache 跳过(防双 toast)
+            // - 默认(无 meta):cache 兜底显示(避免 mutation 漏 onError 时静默失败)
+            const meta = mutation.options.meta as
+              | { silent?: boolean; customError?: boolean }
+              | undefined;
+            if (meta?.silent || meta?.customError) return;
             showTrpcError(error);
           },
         }),
