@@ -153,8 +153,10 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
           // 透传上游 trace id(若 ctx 有 requestId,Phase 2 加)
         },
         body: JSON.stringify(body),
-        bodyTimeout: 120_000,
-        headersTimeout: 60_000,
+        // Phase 1.5.3:Sonnet 4.5 详细 prompt + 大响应偶尔慢,bump 到 180s
+        // 原 60s headersTimeout 在 moyu 中转 + Anthropic 队列拥挤时常超("Headers Timeout Error")
+        bodyTimeout: 300_000,
+        headersTimeout: 180_000,
       });
       const text = await respBody.text();
       if (statusCode >= 400) {

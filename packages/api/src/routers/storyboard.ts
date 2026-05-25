@@ -85,7 +85,8 @@ async function getStoryboardBindings(ctx: Context): Promise<{
     modelId,
     maxDurationS: Number(map.get('storyboard.maxDurationS') ?? '15'),
     defaultShotDurationS: Number(map.get('storyboard.defaultShotDurationS') ?? '3'),
-    autoMerge: (map.get('storyboard.autoMergeOnGenerate') ?? 'true') === 'true',
+    // Phase 1.5.3 精炼 9:默认不自动合并组 — 用户用每行 ↑↓ 按钮手动组合
+    autoMerge: (map.get('storyboard.autoMergeOnGenerate') ?? 'false') === 'true',
   };
 }
 

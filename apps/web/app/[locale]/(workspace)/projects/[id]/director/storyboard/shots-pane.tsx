@@ -160,6 +160,32 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
     doMergeShots([anchorId, next.id]);
   };
 
+  // Phase 1.5.3 精炼 9:每行 ↑↓ 按钮直接合并(不需勾选)
+  const mergeUpForShot = (shotId: string): void => {
+    const idx = flatShots.findIndex((s) => s.id === shotId);
+    if (idx <= 0) {
+      toast.error('已是首镜,无法向上合并');
+      return;
+    }
+    doMergeShots([flatShots[idx - 1]!.id, shotId]);
+  };
+  const mergeDownForShot = (shotId: string): void => {
+    const idx = flatShots.findIndex((s) => s.id === shotId);
+    if (idx < 0 || idx >= flatShots.length - 1) {
+      toast.error('已是末镜,无法向下合并');
+      return;
+    }
+    doMergeShots([shotId, flatShots[idx + 1]!.id]);
+  };
+  const canMergeUpForShot = (shotId: string): boolean => {
+    const idx = flatShots.findIndex((s) => s.id === shotId);
+    return idx > 0;
+  };
+  const canMergeDownForShot = (shotId: string): boolean => {
+    const idx = flatShots.findIndex((s) => s.id === shotId);
+    return idx >= 0 && idx < flatShots.length - 1;
+  };
+
   const mergeSelected = (): void => {
     // 选中的 shotIds 按 positionIdx 排序
     const ids = flatShots
@@ -298,6 +324,10 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
                 onSplit={() => splitGroup.mutate({ groupId: g.id })}
                 onEditGroup={() => setEditingGroup(g)}
                 onEditShot={(s) => setEditingShot(s)}
+                onMergeUp={mergeUpForShot}
+                onMergeDown={mergeDownForShot}
+                canMergeUp={canMergeUpForShot}
+                canMergeDown={canMergeDownForShot}
                 disabled={mutating}
               />
             ))}
@@ -318,6 +348,10 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
                 selected={selected.has(s.id)}
                 onToggleSelect={() => toggleSelected(s.id)}
                 onEdit={() => setEditingShot(s)}
+                onMergeUp={() => mergeUpForShot(s.id)}
+                onMergeDown={() => mergeDownForShot(s.id)}
+                canMergeUp={canMergeUpForShot(s.id)}
+                canMergeDown={canMergeDownForShot(s.id)}
                 disabled={mutating}
                 indent={false}
               />
@@ -361,6 +395,10 @@ function GroupRows({
   onSplit,
   onEditGroup,
   onEditShot,
+  onMergeUp,
+  onMergeDown,
+  canMergeUp,
+  canMergeDown,
   disabled,
 }: {
   group: Group;
@@ -369,6 +407,10 @@ function GroupRows({
   onSplit: () => void;
   onEditGroup: () => void;
   onEditShot: (shot: Shot) => void;
+  onMergeUp: (shotId: string) => void;
+  onMergeDown: (shotId: string) => void;
+  canMergeUp: (shotId: string) => boolean;
+  canMergeDown: (shotId: string) => boolean;
   disabled: boolean;
 }): React.ReactElement {
   return (
@@ -428,6 +470,10 @@ function GroupRows({
           selected={selected.has(s.id)}
           onToggleSelect={() => onToggleSelect(s.id)}
           onEdit={() => onEditShot(s)}
+          onMergeUp={() => onMergeUp(s.id)}
+          onMergeDown={() => onMergeDown(s.id)}
+          canMergeUp={canMergeUp(s.id)}
+          canMergeDown={canMergeDown(s.id)}
           disabled={disabled}
           indent
         />
@@ -445,6 +491,10 @@ function ShotRow({
   selected,
   onToggleSelect,
   onEdit,
+  onMergeUp,
+  onMergeDown,
+  canMergeUp,
+  canMergeDown,
   disabled,
   indent,
 }: {
@@ -452,6 +502,10 @@ function ShotRow({
   selected: boolean;
   onToggleSelect: () => void;
   onEdit: () => void;
+  onMergeUp?: () => void;
+  onMergeDown?: () => void;
+  canMergeUp?: boolean;
+  canMergeDown?: boolean;
   disabled: boolean;
   indent: boolean;
 }): React.ReactElement {
@@ -510,16 +564,42 @@ function ShotRow({
         </div>
       </td>
       <td className="px-3 py-2 text-right">
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={onEdit}
-          disabled={disabled}
-          className="size-7 p-0"
-          title="编辑分镜(改动入 PromptEdit 训练集)"
-        >
-          <Pencil className="size-3.5" />
-        </Button>
+        <div className="flex items-center justify-end gap-0.5">
+          {onMergeUp && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onMergeUp}
+              disabled={disabled || !canMergeUp}
+              className="size-7 p-0"
+              title={canMergeUp ? '与上一镜合并为一组' : '已是首镜'}
+            >
+              <ArrowUp className="size-3.5" />
+            </Button>
+          )}
+          {onMergeDown && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onMergeDown}
+              disabled={disabled || !canMergeDown}
+              className="size-7 p-0"
+              title={canMergeDown ? '与下一镜合并为一组' : '已是末镜'}
+            >
+              <ArrowDown className="size-3.5" />
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onEdit}
+            disabled={disabled}
+            className="size-7 p-0"
+            title="编辑分镜(改动入 PromptEdit 训练集)"
+          >
+            <Pencil className="size-3.5" />
+          </Button>
+        </div>
       </td>
     </tr>
   );
