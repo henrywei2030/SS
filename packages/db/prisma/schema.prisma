@@ -285,6 +285,10 @@ model Episode {
   // try/finally 释放回原 status。startedAt 超过 SOFT_LOCK_TTL_MS 视为 stale,允许抢回。
   generatingStartedAt DateTime?
 
+  // Phase 1.5.3:批量生成排除标记 — true 时,storyboard.generateForAllEpisodes / 全部集数生成 跳过本集
+  // 区别于 generatingStartedAt 的瞬时软锁:这是用户手动设置的"永久跳过",直到手动解锁
+  batchLocked Boolean @default(false)
+
   project     Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
   shots       Shot[]
   shotGroups  ShotGroup[]

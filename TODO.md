@@ -1,6 +1,6 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-05-25(**二十二收工 · /admin/providers 多中转站架构 + 142 catalog + r22/r22.1 双重 audit + 批量测试脚本就绪**)
+> 最后更新:2026-05-25(**二十三收工 · Phase 1.5.3 Scripts/Storyboard 完整工作流 + 7 bug 大修 + 实测 14 镜生成**)
 > 仓库:https://github.com/henrywei2030/SS
 > **🚀 一键启动**:`pnpm start`(详见 [README.md](README.md#快速启动) / [CLAUDE.md](CLAUDE.md#设备登记))
 > **📖 实战前必读**:[docs/W1-W7-followup.md](docs/W1-W7-followup.md)(P0 已完成,留 Phase 1.5/2/3 续做项)
@@ -58,6 +58,8 @@
 - [x] **/admin/providers UI 重构 + 多中转站架构 Phase 1.5.1/1.5.2**(二十二收工)— admin.relay 子 router(get/set/clearCredential)+ 分类 Toggle 启停 + Phase 1.5.1 RelayProvider 表(多 token)+ 静态 catalog JSON + 数据迁移 SQL + Phase 1.5.2 catalog 扩到 142 完整 moyu 模型(95 TEXT + 12 IMAGE + 35 VIDEO)+ 删除按钮 + 简化直连为 4 字段 — 2026-05-25
 - [x] **/admin/providers 双重深度 audit r22 / r22.1**(二十二收工)— r22:3 并行 agent 修真 P0 × 8 + P1 × 6 + 死代码清理(setActive ledger 跨度 / updateRelayProvider transaction 级联 / deleteRelayProvider 级联停用 / catalog 6 modelId 剥 ` L` 后缀 / IMAGE 4 模型补 unitPriceCny / RelayModelKind 扩) · r22.1:5 遍深审修 zod cuid 真 P0(migration 用 gen_random_uuid 不是 cuid,5 处 admin.relay.* .cuid() → .min(1))+ 4 流程改进(添加对话框保持开连续添加 / existingSuffixesByRelay → existingModelIdsByRelay 用 catalog.modelId 匹配 / 按 kind 价格智能显示 / saving state) — 2026-05-25
 - [x] **relay-batch-test.mjs 批量测试脚本就绪**(二十二收工)— 107 非视频模型(95 TEXT + 12 IMAGE)· 直连 moyu HTTP 绕 admin 5/min rate limit · 并发 5 · TEXT 真调 max_tokens=1 总成本 < ¥0.01 · IMAGE 走 /models 探活不真生成 · 报告 ok/fail/latency p50/p90/p99 + 按 vendor 分组 + CSV 详单 · token 只读 env · tmp 加 .gitignore — **待用户给新 token** — 2026-05-25
+- [x] **Phase 1.5.3 Scripts/Storyboard 完整工作流**(二十三收工)— 15 项功能 + 7 bug 大修 + 1 migration · 1413 行净增 · **AIGC sync toast + 多集 docx 切分(60 集实测)+ 双模式生成 + 全集 CSV 导出 + 集数删除/锁定/编辑/清空 + parser 短剧 fallback + prompt 强化(14 镜实测)+ shots 分组显示(GroupRows + ShotRow + 合并/拆分/删除)** · 真 bug:buildUserPrompt 空 lines 没 fallback 到 rawContent(LLM 拿到空剧本只产 1 镜)/ createNextVersion soft-delete 复用 unique 撞车 / uploadMultiEpisode 不复活软删 Episode / 第1集右侧空白 cache / 两栏滚动 min-h-0 / DB storyboard_main 不要 JSON / generate 后 ShotsPane 不刷新 — 2026-05-25
+- [x] **r22.1 UI 部分验证 + window.confirm 留尾**(二十三收工)— Chrome MCP 实测:添加 catalog(zod cuid P0 fix 通过)+ 连续添加 + existingModelIdsByRelay 过滤;删除 + 直连 4 字段被 `window.confirm` 阻塞,留 Phase 2 换自定义 Dialog — 2026-05-25
 - [ ] **W5.6 进阶**(留 Phase 2)— 音频波形(wavesurfer.js)/ AI 自动打标(BPM/时长)/ pgvector 向量搜索
 - [ ] **Polish 剩余**(留 Phase 2)— 34 处硬编码颜色 / a11y / listBindings N+1 / OperationLog 命名规范
 - [ ] **W8 团队实战**(下次启动)— 5 人冷启动 + 配 API Key 真接 Seedance + 1 集 7 镜头

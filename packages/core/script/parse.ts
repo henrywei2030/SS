@@ -120,6 +120,23 @@ export function parseScriptText(text: string): ParsedScript {
   }
 
   flushScene();
+
+  // Phase 1.5.3 精炼 5:短剧 / 自由格式 fallback
+  // 全文未识别到任何场头("1-1 日 内 地点"格式) → 整段作为一个默认场塞进去
+  // 让 LLM 接管拆镜:generateStoryboard 能直接读自然段 + "【镜头N】" 标记自动产出 shot
+  if (result.scenes.length === 0 && text.trim().length > 0) {
+    result.scenes.push({
+      number: '1-1',
+      episodeNumber: 1,
+      sceneNumber: 1,
+      timeOfDay: 'DAY',
+      location: 'INDOOR',
+      place: '未指定',
+      characters: [],
+      lines: [],
+      rawContent: text.trim(),
+    });
+  }
   return result;
 }
 
@@ -249,3 +266,82 @@ function classifyLine(line: string): ParsedLine {
     text: line,
   };
 }
+
+// ---------------------------------------------------------------------------
+// 多集切分(短剧 / 网剧格式) — Phase 1.5.3
+// ---------------------------------------------------------------------------
+
+export interface EpisodeBoundary {
+  /** 1-based,从"第N集"标题识别 */
+  episodeNumber: number;
+  /** 标题部分(":" 后的内容),无则空 */
+  title: string;
+  /** 该集完整原文(含标题行) */
+  content: string;
+  /** 该集解析后的场数(用 parseScriptText 二次解析) */
+  sceneCount: number;
+}
+
+/**
+ * 切多集 — 把一份含多集的文本按 "第N集" 标题切到各集。
+ *
+ * 识别规则(任一匹配即视为新集开始):
+ *   - `第1集` / `第 1 集`
+ *   - `第1集：抠门租客` / `第1集 抠门租客`
+ *   - `Episode 1` / `EP 1` / `EP1` (英文兼容)
+ *
+ * 切分规则:
+ *   - 标题行**之前**的所有内容算 preamble(剧名 / 作者签名等),弃用
+ *   - 标题行**之后**到下一个标题行(或 EOF)间为该集 content
+ *   - 每集 content 再喂给 parseScriptText 拿 sceneCount(短剧场头识别率可能 0,但允许)
+ *
+ * 单集 fallback:
+ *   - 全文没匹配到 `第N集` 标题 → 返回单元素数组 `[{ episodeNumber: 1, content: text }]`
+ *
+ * 二十三收工 Phase 1.5.3:支持"一份 docx 含 Ep1-N,自动切到各集"
+ */
+export function parseEpisodeBoundaries(text: string): EpisodeBoundary[] {
+  const HEAD_RE =
+    /^\s*(?:第\s*(\d+)\s*集|Episode\s+(\d+)|EP\s*(\d+))\s*[:：]?\s*(.*)$/i;
+  const lines = text.split(/\r?\n/);
+
+  type Frame = { episodeNumber: number; title: string; buf: string[] };
+  const frames: Frame[] = [];
+  let current: Frame | null = null;
+
+  for (const rawLine of lines) {
+    const m = rawLine.match(HEAD_RE);
+    if (m) {
+      const n = Number(m[1] ?? m[2] ?? m[3]);
+      if (!Number.isNaN(n) && n > 0) {
+        if (current) frames.push(current);
+        current = { episodeNumber: n, title: (m[4] ?? '').trim(), buf: [rawLine] };
+        continue;
+      }
+    }
+    if (current) current.buf.push(rawLine);
+  }
+  if (current) frames.push(current);
+
+  if (frames.length === 0) {
+    return [
+      {
+        episodeNumber: 1,
+        title: '',
+        content: text,
+        sceneCount: parseScriptText(text).scenes.length,
+      },
+    ];
+  }
+
+  return frames.map((f) => {
+    const content = f.buf.join('\n').trim();
+    return {
+      episodeNumber: f.episodeNumber,
+      title: f.title,
+      content,
+      sceneCount: parseScriptText(content).scenes.length,
+    };
+  });
+}
+

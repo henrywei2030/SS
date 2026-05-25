@@ -11,7 +11,7 @@ import { TRPCError } from '@trpc/server';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
-import { parseScriptText } from '@ss/core/script';
+import { parseEpisodeBoundaries, parseScriptText } from '@ss/core/script';
 // 第 18 轮 audit P1:LLM 失败错误信息脱敏入库
 import { sanitizeErrorMsg } from '@ss/shared';
 
@@ -96,23 +96,28 @@ async function createNextVersion(ctx: Context, input: NewVersionInput) {
       input.episodeId,
     );
 
-    const existing = await tx.script.findMany({
-      where: { episodeId: input.episodeId, deletedAt: null },
+    // Phase 1.5.3 bugfix:version 号计算必须基于"全部"(含软删)的 script,
+    // 否则用户清空剧本(deleteAllForEpisode)后再上传,会撞 unique (episodeId, version)
+    // — 软删后旧行仍占用 unique key 空间。
+    const all = await tx.script.findMany({
+      where: { episodeId: input.episodeId },
       orderBy: { version: 'desc' },
     });
+    const liveExisting = all.filter((s) => !s.deletedAt);
 
     // 同内容已存在且仍是当前版本 → 直接返回，避免无意义新建
-    const current = existing.find((s) => s.isCurrent);
+    const current = liveExisting.find((s) => s.isCurrent);
     if (current && current.contentHash === contentHash) {
       return { script: current, created: false };
     }
 
-    const nextVersion = (existing[0]?.version ?? 0) + 1;
+    // 关键:nextVersion 跨过软删的最大 version,防止 unique 撞车
+    const nextVersion = (all[0]?.version ?? 0) + 1;
 
-    // 1. 旧的 isCurrent 清空
-    if (existing.length > 0) {
+    // 1. 旧的 isCurrent 清空(只动 live)
+    if (liveExisting.length > 0) {
       await tx.script.updateMany({
-        where: { episodeId: input.episodeId, isCurrent: true },
+        where: { episodeId: input.episodeId, isCurrent: true, deletedAt: null },
         data: { isCurrent: false },
       });
     }
@@ -337,6 +342,289 @@ export const scriptRouter = router({
         parsedSceneCount: parsed.scenes.length,
         title: parsed.title,
       };
+    }),
+
+  /**
+   * 预览文件 — 多集切分前看一眼解析结果(不入库)
+   *
+   * Phase 1.5.3:一份 docx 含 Ep1-N 时,前端用此接口拿到切分预览,
+   * 弹确认对话框让用户校对集号/标题/场数,确认后再调 uploadMultiEpisode。
+   */
+  previewParseFile: protectedProcedure
+    .input(
+      z.object({
+        projectId: z.string().cuid(),
+        filename: z
+          .string()
+          .min(1)
+          .max(255)
+          .regex(/^[^/\\\x00]+$/, '文件名不能包含 / \\ 或控制字符'),
+        fileBase64: z.string().min(1).max(11_000_000),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId);
+
+      let text: string;
+      let format: string;
+      try {
+        const buffer = Buffer.from(input.fileBase64, 'base64');
+        const docxParserBinding = await ctx.prisma.systemSetting.findUnique({
+          where: { key: 'binding.script.docx.parser' },
+          select: { value: true },
+        });
+        const extracted = await extractScriptText(buffer, input.filename, {
+          docxParser: docxParserBinding?.value,
+        });
+        text = extracted.text;
+        format = extracted.format;
+      } catch (e) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: e instanceof Error ? e.message : '文件解析失败',
+        });
+      }
+      if (!text) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '文件内容为空' });
+      }
+      if (text.length > 5_000_000) {
+        throw new TRPCError({
+          code: 'PAYLOAD_TOO_LARGE',
+          message: `解压后文本过大 (${(text.length / 1024 / 1024).toFixed(1)}MB)`,
+        });
+      }
+
+      const boundaries = parseEpisodeBoundaries(text);
+      return {
+        format,
+        textLength: text.length,
+        episodes: boundaries.map((b) => ({
+          episodeNumber: b.episodeNumber,
+          title: b.title,
+          sceneCount: b.sceneCount,
+          contentLength: b.content.length,
+          preview: b.content.slice(0, 120),
+        })),
+        multiEpisode: boundaries.length > 1,
+      };
+    }),
+
+  /**
+   * 多集上传 — 一份 docx 含 Ep1-N,自动切到各集
+   *
+   * Phase 1.5.3:与 uploadFile 区别在于不指定 episodeNumber,parser 按 "第N集" 切分。
+   * 每个识别到的集 → upsert Episode + 创建 Script 版本。
+   * 单集 fallback:全文没匹配到标题 → 等同于 uploadFile 上传到 episode 1。
+   *
+   * 注:并发安全由 createNextVersion 内部 advisory_xact_lock 保证。
+   */
+  uploadMultiEpisode: protectedProcedure
+    .input(
+      z.object({
+        projectId: z.string().cuid(),
+        filename: z
+          .string()
+          .min(1)
+          .max(255)
+          .regex(/^[^/\\\x00]+$/, '文件名不能包含 / \\ 或控制字符'),
+        fileBase64: z.string().min(1).max(11_000_000),
+        language: z.string().default('zh-CN'),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId);
+
+      let text: string;
+      let format: string;
+      try {
+        const buffer = Buffer.from(input.fileBase64, 'base64');
+        const docxParserBinding = await ctx.prisma.systemSetting.findUnique({
+          where: { key: 'binding.script.docx.parser' },
+          select: { value: true },
+        });
+        const extracted = await extractScriptText(buffer, input.filename, {
+          docxParser: docxParserBinding?.value,
+        });
+        text = extracted.text;
+        format = extracted.format;
+      } catch (e) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: e instanceof Error ? e.message : '文件解析失败',
+        });
+      }
+      if (!text) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '文件内容为空' });
+      }
+      if (text.length > 5_000_000) {
+        throw new TRPCError({
+          code: 'PAYLOAD_TOO_LARGE',
+          message: `解压后文本过大 (${(text.length / 1024 / 1024).toFixed(1)}MB)`,
+        });
+      }
+
+      const boundaries = parseEpisodeBoundaries(text);
+
+      // 防覆盖正在生成分镜的集
+      for (const b of boundaries) {
+        await assertEpisodeNotGenerating(ctx, input.projectId, b.episodeNumber);
+      }
+
+      const results: Array<{
+        episodeNumber: number;
+        title: string;
+        scriptId: string;
+        version: number;
+        created: boolean;
+        sceneCount: number;
+      }> = [];
+
+      for (const b of boundaries) {
+        // Phase 1.5.3 bugfix:upsert 若命中软删 Episode(deletedAt!=null),复活它
+        // 否则用户删了的集再上传会更新 title 但留 deletedAt,导致 listEpisodes 看不到
+        const episode = await ctx.prisma.episode.upsert({
+          where: {
+            projectId_number: { projectId: input.projectId, number: b.episodeNumber },
+          },
+          create: {
+            projectId: input.projectId,
+            number: b.episodeNumber,
+            title: b.title || undefined,
+          },
+          update: {
+            ...(b.title && { title: b.title }),
+            deletedAt: null,
+            status: 'NOT_STARTED',
+          },
+        });
+
+        const { script, created } = await createNextVersion(ctx, {
+          projectId: input.projectId,
+          episodeId: episode.id,
+          title: b.title || undefined,
+          content: b.content,
+          language: input.language,
+          source: 'UPLOAD',
+        });
+
+        results.push({
+          episodeNumber: b.episodeNumber,
+          title: b.title,
+          scriptId: script.id,
+          version: script.version,
+          created,
+          sceneCount: b.sceneCount,
+        });
+      }
+
+      await logOperation(ctx, 'script.file.upload.multi', 'project', input.projectId, null, {
+        projectId: input.projectId,
+        format,
+        textLength: text.length,
+        episodeCount: results.length,
+        episodes: results.map((r) => ({ n: r.episodeNumber, v: r.version, created: r.created })),
+      });
+
+      return {
+        format,
+        textLength: text.length,
+        episodeCount: results.length,
+        episodes: results,
+      };
+    }),
+
+  /**
+   * 在线编辑剧本 — 用 episodeId 直接存新版本(不需 projectId / episodeNumber)
+   *
+   * Phase 1.5.3 追加 2:剧本工坊右栏直接编辑 textarea + 保存。
+   * 内容 hash 与当前版本相同 → 不新建,等同于无变化。
+   * 复用 createNextVersion 的 advisory lock + isCurrent 翻新逻辑。
+   */
+  saveContent: protectedProcedure
+    .input(
+      z.object({
+        episodeId: z.string().cuid(),
+        content: z.string().min(1, '剧本内容不能为空').max(5_000_000, '内容过大'),
+        title: z.string().max(500).optional(),
+        language: z.string().default('zh-CN'),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.user) throw new TRPCError({ code: 'UNAUTHORIZED' });
+      const ep = await ctx.prisma.episode.findFirst({
+        where: { id: input.episodeId, deletedAt: null },
+      });
+      if (!ep) throw new TRPCError({ code: 'NOT_FOUND', message: '集不存在' });
+      await assertProjectAccess(ctx, ep.projectId);
+      // 软锁守卫:生成分镜中禁止改剧本(防跨版本 shot)
+      if (isEpisodeLockedNow(ep)) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: '本集正在生成分镜,无法保存编辑(等生成完成或解锁后重试)',
+        });
+      }
+
+      const { script, created } = await createNextVersion(ctx, {
+        projectId: ep.projectId,
+        episodeId: ep.id,
+        title: input.title,
+        content: input.content,
+        language: input.language,
+        source: 'UPLOAD',
+      });
+
+      await logOperation(
+        ctx,
+        created ? 'script.edit.save' : 'script.edit.no_change',
+        'script',
+        script.id,
+        null,
+        { episodeId: ep.id, version: script.version, length: input.content.length },
+      );
+
+      return { script, created };
+    }),
+
+  /**
+   * 清空本集所有剧本版本(软删) — Phase 1.5.3 精炼 1
+   *
+   * 不影响 Episode 本身,允许重新上传新剧本。
+   * 软删 deletedAt 标记,数据库可手动恢复。
+   *
+   * 安全门槛:软锁中的集不允许清空(防覆盖正在生成的工作)。
+   */
+  deleteAllForEpisode: protectedProcedure
+    .input(
+      z.object({
+        episodeId: z.string().cuid(),
+        confirmDelete: z.literal(true, {
+          errorMap: () => ({ message: '需显式 confirmDelete=true(防误删)' }),
+        }),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.user) throw new TRPCError({ code: 'UNAUTHORIZED' });
+      const ep = await ctx.prisma.episode.findFirst({
+        where: { id: input.episodeId, deletedAt: null },
+      });
+      if (!ep) throw new TRPCError({ code: 'NOT_FOUND', message: '集不存在' });
+      await assertProjectAccess(ctx, ep.projectId);
+      if (isEpisodeLockedNow(ep)) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: '本集正在生成分镜,无法清空剧本',
+        });
+      }
+      const now = new Date();
+      const result = await ctx.prisma.script.updateMany({
+        where: { episodeId: ep.id, deletedAt: null },
+        data: { deletedAt: now, isCurrent: false },
+      });
+      await logOperation(ctx, 'script.delete.all', 'episode', ep.id, null, {
+        episodeId: ep.id,
+        deletedCount: result.count,
+      });
+      return { ok: true, deletedCount: result.count };
     }),
 
   /**

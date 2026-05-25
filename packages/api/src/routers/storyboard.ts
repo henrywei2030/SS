@@ -181,10 +181,121 @@ export const storyboardRouter = router({
         status: e.status,
         publishedAt: e.publishedAt,
         publishedVersion: e.publishedVersion,
+        batchLocked: e.batchLocked,
         sceneCount: e._count.scenes,
         shotCount: e._count.shots,
         groupCount: e._count.shotGroups,
       }));
+    }),
+
+  /**
+   * 切换集数批量生成锁定 — Phase 1.5.3 精炼 4
+   *
+   * 锁定后:storyboard.listEligibleForGeneration 不返回本集,
+   * "全部集数生成" 会跳过(不影响"当前集生成"按钮)。
+   */
+  setBatchLock: protectedProcedure
+    .input(
+      z.object({
+        episodeId: z.string().cuid(),
+        locked: z.boolean(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const ep = await loadEpisodeOrThrow(ctx, input.episodeId);
+      const updated = await ctx.prisma.episode.update({
+        where: { id: ep.id },
+        data: { batchLocked: input.locked },
+      });
+      await logOperation(
+        ctx,
+        input.locked ? 'episode.batch_lock' : 'episode.batch_unlock',
+        'episode',
+        ep.id,
+        { batchLocked: ep.batchLocked },
+        { batchLocked: updated.batchLocked },
+      );
+      return { ok: true, batchLocked: updated.batchLocked };
+    }),
+
+  /**
+   * 软删整集 — 项目成员级
+   *
+   * Phase 1.5.3 点追加 1:用户在剧本工坊左栏需要直接删除测试集。
+   * 复用 admin.archive 的级联逻辑(scenes/shots/shotGroups/bindings 一并软删),
+   * 但允许项目成员调用而非仅 admin。
+   *
+   * 安全门槛:
+   *   - 软锁中的集不允许删(防覆盖正在生成的工作)
+   *   - 已发布的集不允许删(防止 AIGC 后续引用悬空)— 可改为 ARCHIVED 状态备份
+   */
+  archiveEpisode: protectedProcedure
+    .meta({
+      agentTool: {
+        description: '软删整集 + 级联清 scenes/shots/shotGroups/bindings:不可逆,需 confirmDelete',
+        sideEffects: [
+          'db.update:Episode.deletedAt',
+          'db.updateMany:Scene/Shot/ShotGroup/AssetUsageBinding.deletedAt',
+          'OperationLog.write',
+        ],
+        costEstimateCny: 0,
+        requireConfirm: true,
+      },
+    })
+    .input(
+      z.object({
+        episodeId: z.string().cuid(),
+        confirmDelete: z.literal(true, {
+          errorMap: () => ({ message: '需显式 confirmDelete=true(防误删)' }),
+        }),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const before = await loadEpisodeOrThrow(ctx, input.episodeId);
+      if (before.deletedAt) {
+        return { ok: true, alreadyArchived: true };
+      }
+      if (isEpisodeLockedNow(before)) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: '本集正在生成分镜,无法删除(请等生成完成或解锁后再删)',
+        });
+      }
+      if (before.publishedAt) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message:
+            '本集已发布,无法直接删除(下游 AIGC 可能引用)。需先在 admin 后台强制归档。',
+        });
+      }
+      const now = new Date();
+      await ctx.prisma.$transaction([
+        ctx.prisma.episode.update({
+          where: { id: before.id },
+          data: { deletedAt: now, status: 'ARCHIVED' },
+        }),
+        ctx.prisma.scene.updateMany({
+          where: { episodeId: before.id, deletedAt: null },
+          data: { deletedAt: now },
+        }),
+        ctx.prisma.shot.updateMany({
+          where: { episodeId: before.id, deletedAt: null },
+          data: { deletedAt: now },
+        }),
+        ctx.prisma.shotGroup.updateMany({
+          where: { episodeId: before.id, deletedAt: null },
+          data: { deletedAt: now },
+        }),
+        ctx.prisma.assetUsageBinding.updateMany({
+          where: { episodeId: before.id, deletedAt: null },
+          data: { deletedAt: now },
+        }),
+      ]);
+      await logOperation(ctx, 'episode.archive', 'episode', before.id, before, {
+        deletedAt: now,
+        projectId: before.projectId,
+      });
+      return { ok: true, alreadyArchived: false };
     }),
 
   getEpisode: protectedProcedure
@@ -792,6 +903,116 @@ export const storyboardRouter = router({
    *   4. 若 autoMerge=true，调 mergeShots 算法预合并组
    *   5. 触发 EVENTS.STORYBOARD_GENERATED
    */
+  /**
+   * 列出项目所有集的分镜 — 给"导出全部"用,一次返回省 N+1
+   *
+   * 返回结构按集分组,每集含 groups + ungrouped(同 listShots grouped=true 形状),
+   * 前端用相同 buildShotsCsv 逻辑遍历各集即可拼出多集 CSV。
+   *
+   * Phase 1.5.3 点 3:全部集 CSV 导出
+   */
+  listShotsByProject: protectedProcedure
+    .input(z.object({ projectId: z.string().cuid() }))
+    .query(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId);
+      const episodes = await ctx.prisma.episode.findMany({
+        where: { projectId: input.projectId, deletedAt: null },
+        orderBy: { number: 'asc' },
+      });
+      const episodeIds = episodes.map((e) => e.id);
+      if (episodeIds.length === 0) return { episodes: [] };
+
+      const [allShots, allGroups] = await Promise.all([
+        ctx.prisma.shot.findMany({
+          where: { episodeId: { in: episodeIds }, deletedAt: null },
+          orderBy: [{ episodeId: 'asc' }, { positionIdx: 'asc' }],
+        }),
+        ctx.prisma.shotGroup.findMany({
+          where: { episodeId: { in: episodeIds }, deletedAt: null },
+          orderBy: [{ episodeId: 'asc' }, { positionIdx: 'asc' }],
+        }),
+      ]);
+
+      const shotsByEp = new Map<string, typeof allShots>();
+      for (const s of allShots) {
+        if (!shotsByEp.has(s.episodeId)) shotsByEp.set(s.episodeId, []);
+        shotsByEp.get(s.episodeId)!.push(s);
+      }
+      const groupsByEp = new Map<string, typeof allGroups>();
+      for (const g of allGroups) {
+        if (!groupsByEp.has(g.episodeId)) groupsByEp.set(g.episodeId, []);
+        groupsByEp.get(g.episodeId)!.push(g);
+      }
+
+      return {
+        episodes: episodes.map((ep) => {
+          const shots = shotsByEp.get(ep.id) ?? [];
+          const groups = groupsByEp.get(ep.id) ?? [];
+          const byGroup = new Map<string, typeof shots>();
+          const ungrouped: typeof shots = [];
+          for (const s of shots) {
+            if (s.groupId) {
+              if (!byGroup.has(s.groupId)) byGroup.set(s.groupId, []);
+              byGroup.get(s.groupId)!.push(s);
+            } else {
+              ungrouped.push(s);
+            }
+          }
+          return {
+            episodeId: ep.id,
+            episodeNumber: ep.number,
+            title: ep.title,
+            groups: groups.map((g) => ({ ...g, shots: byGroup.get(g.id) ?? [] })),
+            ungrouped,
+            shotCount: shots.length,
+          };
+        }),
+      };
+    }),
+
+  /**
+   * 列出项目内"可生成分镜"的集 — 给前端"全部集生成"用,先看再循环 generateForEpisode
+   *
+   * 筛选条件:
+   *   - status NOT_STARTED 或 IN_PROGRESS(发布过的也可重新生成)
+   *   - 有当前剧本(isCurrent=true)
+   *   - 不在 fresh GENERATING 软锁中
+   *
+   * Phase 1.5.3 点 2:全集 vs 单集双模式
+   */
+  listEligibleForGeneration: protectedProcedure
+    .input(z.object({ projectId: z.string().cuid() }))
+    .query(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId);
+      const episodes = await ctx.prisma.episode.findMany({
+        where: {
+          projectId: input.projectId,
+          deletedAt: null,
+          status: { in: ['NOT_STARTED', 'IN_PROGRESS'] },
+          batchLocked: false, // Phase 1.5.3 精炼 4:用户锁定的集不进批量
+        },
+        include: {
+          scripts: {
+            where: { isCurrent: true, deletedAt: null },
+            select: { id: true, version: true },
+            take: 1,
+          },
+          _count: { select: { shots: { where: { deletedAt: null } } } },
+        },
+        orderBy: { number: 'asc' },
+      });
+      return episodes
+        .filter((e) => e.scripts.length > 0 && !isEpisodeLockedNow(e))
+        .map((e) => ({
+          episodeId: e.id,
+          episodeNumber: e.number,
+          title: e.title,
+          scriptVersion: e.scripts[0]?.version ?? 0,
+          existingShotCount: e._count.shots,
+          status: e.status,
+        }));
+    }),
+
   generateForEpisode: protectedProcedure
     // 第 19 轮 audit / ADR-27:Mastra agent 调用前必看 episode 状态 + LLM 配额
     .meta({
@@ -1319,6 +1540,7 @@ export const storyboardRouter = router({
       return {
         eventName: EVENTS.STORYBOARD_PUBLISHED,
         episodeId: ep.id,
+        projectId: ep.projectId,
         publishedAt: now,
         version: updated.publishedVersion,
         shotCount,

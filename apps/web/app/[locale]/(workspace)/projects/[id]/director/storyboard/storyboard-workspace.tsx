@@ -23,9 +23,9 @@ const FONT_SIZES = [11, 12, 13, 14, 15, 16, 17, 18] as const;
 type FontSize = (typeof FONT_SIZES)[number];
 
 function readFontSize(): FontSize {
-  if (typeof window === 'undefined') return 13;
+  if (typeof window === 'undefined') return 15;
   const stored = Number(window.localStorage.getItem(FONT_SIZE_KEY));
-  return (FONT_SIZES as readonly number[]).includes(stored) ? (stored as FontSize) : 13;
+  return (FONT_SIZES as readonly number[]).includes(stored) ? (stored as FontSize) : 15;
 }
 
 export function StoryboardWorkspace({
@@ -41,7 +41,7 @@ export function StoryboardWorkspace({
   const { data: episodes, refetch: refetchEpisodes } =
     trpc.storyboard.listEpisodes.useQuery({ projectId });
 
-  const [fontSize, setFontSize] = React.useState<FontSize>(13);
+  const [fontSize, setFontSize] = React.useState<FontSize>(15);
   React.useEffect(() => {
     setFontSize(readFontSize());
   }, []);
@@ -84,7 +84,7 @@ export function StoryboardWorkspace({
 
   return (
     <div
-      className="grid h-[calc(100vh-2.75rem)] grid-cols-[260px_1fr] gap-0 bg-[hsl(var(--color-background))]"
+      className="grid h-[calc(100vh-2.75rem)] grid-cols-[260px_1fr] gap-0 overflow-hidden bg-[hsl(var(--color-background))]"
       style={{ ['--storyboard-fs' as string]: `${fontSize}px` }}
     >
       {/* 左栏：分集列表 */}
@@ -92,10 +92,18 @@ export function StoryboardWorkspace({
         episodes={episodes ?? []}
         selectedId={selectedEpisodeId}
         onSelect={selectEpisode}
+        onAfterArchive={(archivedId) => {
+          // 删的是当前选中集 → 清 URL 上的 ep,让 selectedId 落到第一集
+          if (archivedId === selectedEpisodeId) {
+            const params = new URLSearchParams(window.location.search);
+            params.delete('ep');
+            router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+          }
+        }}
       />
 
       {/* 右侧：顶部 bar + tab 内容 */}
-      <div className="flex flex-col overflow-hidden">
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <TopBar
           projectId={projectId}
           episodeId={selectedEpisodeId}
@@ -106,7 +114,7 @@ export function StoryboardWorkspace({
           onFontSizeChange={changeFontSize}
           onAfterAction={() => void refetchEpisodes()}
         />
-        <div className="flex-1 overflow-auto">
+        <div className="min-h-0 flex-1 overflow-auto">
           {!selectedEpisodeId ? (
             <EmptyEpisodeState projectId={projectId} locale={locale} />
           ) : tab === 'script' ? (

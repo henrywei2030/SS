@@ -5,6 +5,69 @@
 
 ---
 
+## 2026-05-25(周一,win-laptop · 二十三次收工)— Phase 1.5.3 Scripts/Storyboard 完整工作流 + 7 bug 大修
+
+**完成 — 15 项功能 + 7 bug + 1 migration · 1413 行净增 · LLM 实测 14 镜 + 2 组生成**
+
+### 开工:r22.1 UI 验证(浏览器 MCP 驱动)
+- ✅ 添加模型 catalog dropdown 实测(Haiku + Sonnet 添加成功,zod cuid P0 fix 验证)
+- ✅ 连续添加(dialog 保持开,existingModelIdsByRelay 过滤正确)
+- ⚠️ 删除 / 直连 4 字段未测(`window.confirm` 阻塞 Chrome MCP,记为留尾)
+
+### Phase 1.5.3 主功能 4 项
+- ✅ **AIGC 同步 toast**:publishEpisode 返 projectId + 「前往 AIGC」action link
+- ✅ **多集 docx 一次上传 + 自动切集**:parseEpisodeBoundaries + previewParseFile + uploadMultiEpisode + 预览 modal(60 集实测识别)
+- ✅ **生成分镜双模式**:listEligibleForGeneration + 全部集数生成 modal + 串行批量 + 失败跳过
+- ✅ **全部集 CSV 导出**:listShotsByProject + 合并 CSV with 集号列
+
+### 追加 3 项
+- ✅ **集数删除**:archiveEpisode procedure(级联 scenes/shots/groups/bindings) + hover trash + 自定义确认对话框
+- ✅ **剧本直接编辑**:saveContent procedure + textarea 工具条 + 保存/取消
+- ✅ **0 场 0 镜 自动刷新**(已有 onAfterAction → refetchEpisodes,无需新代码)
+
+### 精炼 8 项
+- ✅ **清空剧本按钮**:deleteAllForEpisode procedure + 红色按钮 + 确认对话框
+- ✅ **拆分生成按钮**:dropdown → 2 独立按钮(生成分镜 / 全部集数生成),改名「全部集数生成」
+- ✅ **集数锁定状态**:schema 加 `Episode.batchLocked` + migration `20260525120000_phase153_episode_batch_locked` + setBatchLock procedure + listEligibleForGeneration 过滤 + 🔒 amber lock icon + hover toggle + 醒目 badge
+- ✅ **parser 短剧格式 fallback**:0 场识别时整段作为单 scene 喂给 LLM
+- ✅ **prompt 模板强化**:DB `storyboard_main` 更新为严格 JSON + 「每个【镜头N】独立 + 不要少于 4-15 镜」约束
+- ✅ **字体放大**:默认 13 → 15
+- ✅ **shots 分组显示**:已是完整实现(GroupRows + ShotRow + 选中合并向上/向下/勾选合并/删除 + 组级拆分 + edit),之前 1 镜看不到,生成 14 镜后视觉完美
+- ✅ **生成后自动刷新右侧 + 已分镜醒目**:onSuccess 加 listShots.invalidate + 绿色边 + ●dot + shotCount 数字 + 「已分镜 N」 badge
+
+### Bug 大修 7 项
+- 🐛 **createNextVersion soft-delete 复用 unique 撞车**:version 号基于 ALL(含软删)取 max,避免重用已软删 V1 时 unique 撞车
+- 🐛 **uploadMultiEpisode 不复活软删 Episode**:upsert update 加 `deletedAt:null + status:NOT_STARTED`,否则用户上传到曾删除的集会看不到
+- 🐛 **第1集右侧空白**:uploadFile / uploadMulti onSuccess 加 `listVersions.invalidate`(原只 refetchEpisodes,scriptVersion cache stale)
+- 🐛 **两栏滚动**:storyboard-workspace + sidebar 加 `min-h-0 + overflow-hidden + shrink-0`,固定框内滚
+- 🐛 **生成 0 输出真根因(最关键)**:`buildUserPrompt` 用 `scene.lines.map(...)` 但 fallback 合成 scene `lines=[]`,LLM 拿到**空剧本** → 摆烂只产 1 镜。修:lines 为空时 fallback 到 `scene.rawContent` → LLM 看到完整剧本 → 实测 14 镜 / ¥0.33
+- 🐛 **storyboard_main prompt 不要 JSON**:原 DB template 简化版只要求「输出分镜」没要求 JSON 格式 → LLM 返自然语言 → extractShots 0 镜
+- 🐛 **生成后右侧 ShotsPane 不刷新**:generate.onSuccess 加 `listShots.invalidate`(grouped:true + false 双失效)
+
+### 实测结果(LLM 累计 ~¥0.5)
+- 第1集(784 字短剧):14 镜 / 2 组 / ¥0.33 / 0 errors ✅(图2 风格完整渲染:1-6 组 + 8-12 组,每组 5-6 镜,各带拆分按钮)
+- 第2集:2 镜(早期 prompt 还没强化时生成)
+- 第1-60 集:全 60 集多集 docx 一次切分成功
+
+**质量**
+- typecheck:@ss/api ✅ @ss/core ✅ @ss/web ✅
+- tests:95/95(adapters 10 / core 60 / api 25)
+- migration:20260525120000 已 apply(Episode.batchLocked)
+- 浏览器实测:删除集 / 编辑取消 / 锁定切换 / 批量过滤(0 集)/ 14 镜生成 / 分组显示 — 全通过
+
+**问题 / 待决策**
+- ❓ 批量测试 107 模型仍待用户给新 moyu token
+- ❓ providers-table.tsx 3 处 `window.confirm()` 仍未换自定义对话框(r22.1 卡壳根因)
+- ❓ parseEpisodeBoundaries 缺单元测试
+
+**下次接着做**
+- 📌 **W8 实战**:配 binding + 真接 Seedance + 跑 1 集分镜→视频生成全链路
+- 📌 r22.1 UI 验证补完(删除 / 直连 4 字段),顺手把 3 处 `window.confirm()` 换 Dialog
+- 📌 prompt 调优:更多剧本格式适配 / framing/angle 预设清单灌给 LLM
+- 📌 测试覆盖:parseEpisodeBoundaries + uploadMultiEpisode unit tests
+
+---
+
 ## 2026-05-25(周一,win-laptop · 二十二次收工)— /admin/providers 多中转站架构 + 142 catalog + r22/r22.1 双重 audit + 批量测试脚本
 
 **完成 — Phase 1.5.1/1.5.2 落地 + 13 项真 P0/P1 修复(2 轮 audit)+ 107 模型批量测试脚本就绪**

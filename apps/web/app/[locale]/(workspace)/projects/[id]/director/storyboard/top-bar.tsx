@@ -1,5 +1,6 @@
 'use client';
 import * as React from 'react';
+import { useRouter, useParams } from 'next/navigation';
 import {
   Loader2,
   Sparkles,
@@ -10,6 +11,8 @@ import {
   Download,
   Minus,
   Plus,
+  ChevronDown,
+  Package,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -19,8 +22,23 @@ import type { AppRouter } from '@ss/api';
 import { trpc } from '@/lib/trpc/client';
 
 type ListShotsResult = inferRouterOutputs<AppRouter>['storyboard']['listShots'];
+type PreviewResult = inferRouterOutputs<AppRouter>['script']['previewParseFile'];
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -75,6 +93,7 @@ export function TopBar({
           />
         ) : (
           <ShotsActions
+            projectId={projectId}
             episodeId={episodeId}
             episodeNumber={episodeNumber}
             onAfterAction={onAfterAction}
@@ -131,6 +150,10 @@ function ScriptActions({
   const fileRef = React.useRef<HTMLInputElement>(null);
   // 默认跟随左栏选中集，用户也可手动改成 N+1 上传新集
   const [episodeNumber, setEpisodeNumber] = React.useState<number>(currentEpisodeNumber ?? 1);
+  const [pendingFile, setPendingFile] = React.useState<{ base64: string; filename: string } | null>(
+    null,
+  );
+  const [preview, setPreview] = React.useState<PreviewResult | null>(null);
 
   // 选中集变化时同步集号(避免误传到错集)
   React.useEffect(() => {
@@ -139,6 +162,15 @@ function ScriptActions({
     }
   }, [currentEpisodeNumber]);
 
+  const utilsScript = trpc.useUtils();
+  const previewParse = trpc.script.previewParseFile.useMutation({
+    onSuccess: (res, vars) => {
+      setPendingFile({ base64: vars.fileBase64, filename: vars.filename });
+      setPreview(res);
+    },
+    onError: (e) => toast.error(`预览解析失败: ${e.message}`),
+  });
+
   const uploadFile = trpc.script.uploadFile.useMutation({
     onSuccess: (res) => {
       toast.success(
@@ -146,6 +178,29 @@ function ScriptActions({
           ? `第 ${res.episode.number} 集 V${res.script.version} 上传成功（${res.format} · ${res.parsedSceneCount} 场）`
           : '内容未变化，未创建新版本',
       );
+      setPendingFile(null);
+      setPreview(null);
+      void utilsScript.script.listVersions.invalidate();
+      void utilsScript.storyboard.listEpisodes.invalidate();
+      onSaved();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const uploadMulti = trpc.script.uploadMultiEpisode.useMutation({
+    onSuccess: (res) => {
+      const created = res.episodes.filter((e) => e.created).length;
+      const unchanged = res.episodeCount - created;
+      toast.success(
+        `多集上传完成:${res.episodeCount} 集解析 · ${created} 集新版本${
+          unchanged > 0 ? ` · ${unchanged} 集内容未变化` : ''
+        }`,
+      );
+      setPendingFile(null);
+      setPreview(null);
+      // 刷新所有受影响的集的 listVersions cache(防 ScriptPane 显示空白)
+      void utilsScript.script.listVersions.invalidate();
+      void utilsScript.storyboard.listEpisodes.invalidate();
       onSaved();
     },
     onError: (e) => toast.error(e.message),
@@ -153,22 +208,43 @@ function ScriptActions({
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = e.target.files?.[0];
+    e.target.value = ''; // 允许重选同一文件
     if (!file) return;
     try {
       const base64 = await fileToBase64(file);
+      previewParse.mutate({ projectId, filename: file.name, fileBase64: base64 });
+    } catch (err) {
+      toast.error(`文件读取失败: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  const confirmUpload = (): void => {
+    if (!pendingFile || !preview) return;
+    if (preview.multiEpisode) {
+      uploadMulti.mutate({
+        projectId,
+        filename: pendingFile.filename,
+        fileBase64: pendingFile.base64,
+      });
+    } else {
+      // 单集 — 用户指定集号
       uploadFile.mutate({
         projectId,
         episodeNumber,
-        filename: file.name,
-        fileBase64: base64,
-        title: file.name.replace(/\.[a-z0-9]+$/i, ''),
+        filename: pendingFile.filename,
+        fileBase64: pendingFile.base64,
+        title: pendingFile.filename.replace(/\.[a-z0-9]+$/i, ''),
       });
-    } catch (err) {
-      toast.error(`文件读取失败: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      e.target.value = ''; // 允许重选同一文件
     }
   };
+
+  const cancelUpload = (): void => {
+    setPendingFile(null);
+    setPreview(null);
+  };
+
+  const submitting = uploadFile.isPending || uploadMulti.isPending;
+  const loading = previewParse.isPending || submitting;
 
   return (
     <>
@@ -178,7 +254,7 @@ function ScriptActions({
         value={episodeNumber}
         onChange={(e) => setEpisodeNumber(Number(e.target.value))}
         className="h-7 w-14 rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 text-sm"
-        title="集号(默认跟随左栏选中集,改成新数字则上传到新集)"
+        title="集号(单集上传用 · 多集 docx 由 parser 自动切)"
       />
       <input
         ref={fileRef}
@@ -191,17 +267,70 @@ function ScriptActions({
         size="sm"
         variant="default"
         onClick={() => fileRef.current?.click()}
-        disabled={uploadFile.isPending}
+        disabled={loading}
         className="gap-1.5"
-        title="支持 docx / txt / md / rtf / html"
+        title="支持 docx / txt / md / rtf / html · 含「第N集」标题自动切多集"
       >
-        {uploadFile.isPending ? (
+        {loading ? (
           <Loader2 className="size-3.5 animate-spin" />
         ) : (
           <Upload className="size-3.5" />
         )}
         上传剧本
       </Button>
+
+      <Dialog open={preview !== null} onOpenChange={(o) => !o && cancelUpload()}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              {preview?.multiEpisode
+                ? `检测到 ${preview.episodes.length} 集,确认导入?`
+                : '单集上传,确认?'}
+            </DialogTitle>
+            <DialogDescription>
+              {preview?.multiEpisode
+                ? '按「第N集」标题自动切分到各集。已存在的集号会新增版本。'
+                : `未识别到「第N集」标题,作为单集上传到第 ${episodeNumber} 集。`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-80 space-y-2 overflow-y-auto text-sm">
+            {preview?.episodes.map((ep) => (
+              <div
+                key={ep.episodeNumber}
+                className="rounded border border-[hsl(var(--color-border))] p-2"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">第 {ep.episodeNumber} 集</span>
+                  <span className="font-mono text-[10px] text-[hsl(var(--color-muted-foreground))]">
+                    {ep.contentLength.toLocaleString()} 字 · {ep.sceneCount} 场
+                  </span>
+                </div>
+                {ep.title && (
+                  <div className="mt-0.5 text-[12px] text-[hsl(var(--color-muted-foreground))]">
+                    {ep.title}
+                  </div>
+                )}
+                <div className="mt-1 line-clamp-2 text-[11px] text-[hsl(var(--color-muted-foreground))]">
+                  {ep.preview}…
+                </div>
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={cancelUpload} disabled={submitting}>
+              取消
+            </Button>
+            <Button size="sm" onClick={confirmUpload} disabled={submitting}>
+              {submitting ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Upload className="size-3.5" />
+              )}
+              确认上传
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -237,38 +366,86 @@ async function fileToBase64(file: File): Promise<string> {
 // ---------------------------------------------------------------------------
 
 function ShotsActions({
+  projectId,
   episodeId,
   episodeNumber,
   onAfterAction,
 }: {
+  projectId: string;
   episodeId: string | undefined;
   episodeNumber: number | undefined;
   onAfterAction: () => void;
 }): React.ReactElement {
   const utils = trpc.useUtils();
 
+  // 全集生成进度状态
+  const [batchOpen, setBatchOpen] = React.useState(false);
+  const [batchRunning, setBatchRunning] = React.useState(false);
+  const [batchProgress, setBatchProgress] = React.useState<{
+    current: number;
+    total: number;
+    currentLabel: string;
+    succeeded: number;
+    failed: Array<{ episodeNumber: number; error: string }>;
+  }>({ current: 0, total: 0, currentLabel: '', succeeded: 0, failed: [] });
+
+  const eligibleQuery = trpc.storyboard.listEligibleForGeneration.useQuery(
+    { projectId },
+    { enabled: batchOpen },
+  );
+
   const generate = trpc.storyboard.generateForEpisode.useMutation({
-    onSuccess: (res) => {
-      const msg = `生成完成：${res.shotCount} 镜，${res.groupCount} 组`;
-      if (res.errors.length > 0) {
-        toast.warning(`${msg}（${res.errors.length} 场有警告）`);
+    onSuccess: (res, vars) => {
+      const msg = `生成完成:${res.shotCount} 镜 / ${res.groupCount} 组`;
+      if (res.shotCount === 0) {
+        toast.error(
+          res.errors.length > 0
+            ? `生成失败:${res.errors[0]}`
+            : '生成 0 镜 — 剧本可能为空或 LLM 返回格式异常,看后台日志',
+          { duration: 8000 },
+        );
+      } else if (res.errors.length > 0) {
+        toast.warning(`${msg}(${res.errors.length} 场有警告)`);
       } else {
         toast.success(msg);
       }
+      // 刷新右侧分镜内容 + 左栏集数统计
+      void utils.storyboard.listShots.invalidate({ episodeId: vars.episodeId, grouped: true });
+      void utils.storyboard.listShots.invalidate({ episodeId: vars.episodeId, grouped: false });
+      void utils.storyboard.listEpisodes.invalidate();
       onAfterAction();
     },
     onError: (e) => toast.error(e.message),
   });
+
+  const router = useRouter();
+  const params = useParams<{ locale: string }>();
+  const locale = params?.locale ?? 'zh-CN';
 
   const publish = trpc.storyboard.publishEpisode.useMutation({
     onSuccess: (res) => {
-      toast.success(`已发布 v${res.version}（${res.shotCount} 镜 / ${res.groupCount} 组）`);
+      const aigcReady = res.groupCount > 0;
+      toast.success(
+        aigcReady
+          ? `已发布 v${res.version} · ${res.shotCount} 镜 / ${res.groupCount} 组 · 已同步到 AIGC`
+          : `已发布 v${res.version}（${res.shotCount} 镜 / ${res.groupCount} 组 · 无分镜可同步到 AIGC）`,
+        aigcReady
+          ? {
+              duration: 6000,
+              action: {
+                label: '前往 AIGC',
+                onClick: () =>
+                  router.push(`/${locale}/projects/${res.projectId}/aigc/${res.episodeId}`),
+              },
+            }
+          : undefined,
+      );
       onAfterAction();
     },
     onError: (e) => toast.error(e.message),
   });
 
-  const handleExport = async (): Promise<void> => {
+  const handleExportCurrent = async (): Promise<void> => {
     if (!episodeId) return;
     try {
       const data = await utils.storyboard.listShots.fetch({ episodeId, grouped: true });
@@ -280,16 +457,88 @@ function ShotsActions({
     }
   };
 
+  const handleExportAll = async (): Promise<void> => {
+    try {
+      const data = await utils.storyboard.listShotsByProject.fetch({ projectId });
+      const nonEmpty = data.episodes.filter((ep) => ep.shotCount > 0);
+      if (nonEmpty.length === 0) {
+        toast.warning('项目内还没有任何已生成的分镜');
+        return;
+      }
+      const headerRow = buildShotsCsv({ groups: [], ungrouped: [] }, 0).split('\n')[0] ?? '';
+      const bodies: string[] = [];
+      for (const ep of nonEmpty) {
+        const full = buildShotsCsv(
+          { groups: ep.groups, ungrouped: ep.ungrouped },
+          ep.episodeNumber,
+        );
+        // 去掉第一行(表头),只取数据行
+        const lines = full.split('\n');
+        if (lines.length > 1) bodies.push(lines.slice(1).join('\n'));
+      }
+      const csv = [headerRow, ...bodies].filter(Boolean).join('\n');
+      downloadFile(
+        csv,
+        `项目全部分镜(${nonEmpty.length}集).csv`,
+        'text/csv;charset=utf-8;',
+      );
+      toast.success(`已导出 ${nonEmpty.length} 集分镜`);
+    } catch (e) {
+      toast.error(`导出失败: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
   const disabled = !episodeId;
+
+  const runBatch = async (): Promise<void> => {
+    const eligible = eligibleQuery.data ?? [];
+    if (eligible.length === 0) return;
+    setBatchRunning(true);
+    setBatchProgress({
+      current: 0,
+      total: eligible.length,
+      currentLabel: '',
+      succeeded: 0,
+      failed: [],
+    });
+    for (let i = 0; i < eligible.length; i++) {
+      const ep = eligible[i];
+      if (!ep) continue;
+      setBatchProgress((p) => ({
+        ...p,
+        current: i + 1,
+        currentLabel: `第 ${ep.episodeNumber} 集${ep.title ? ` · ${ep.title}` : ''}`,
+      }));
+      try {
+        await generate.mutateAsync({ episodeId: ep.episodeId, replaceExisting: false });
+        setBatchProgress((p) => ({ ...p, succeeded: p.succeeded + 1 }));
+      } catch (e) {
+        setBatchProgress((p) => ({
+          ...p,
+          failed: [
+            ...p.failed,
+            {
+              episodeNumber: ep.episodeNumber,
+              error: e instanceof Error ? e.message : String(e),
+            },
+          ],
+        }));
+      }
+    }
+    setBatchRunning(false);
+    onAfterAction();
+  };
 
   return (
     <>
+      {/* 生成分镜 — 仅当前集 */}
       <Button
         size="sm"
         variant="default"
         onClick={() => episodeId && generate.mutate({ episodeId, replaceExisting: false })}
-        disabled={disabled || generate.isPending}
+        disabled={disabled || generate.isPending || batchRunning}
         className="gap-1.5"
+        title={episodeNumber ? `为第 ${episodeNumber} 集生成分镜` : '请先选集'}
       >
         {generate.isPending ? (
           <Loader2 className="size-3.5 animate-spin" />
@@ -298,17 +547,143 @@ function ShotsActions({
         )}
         生成分镜
       </Button>
+
+      {/* 全部集数生成 — 独立按钮,打开列表 modal */}
       <Button
         size="sm"
         variant="outline"
-        onClick={handleExport}
-        disabled={disabled}
+        onClick={() => setBatchOpen(true)}
+        disabled={generate.isPending || batchRunning}
         className="gap-1.5"
-        title="导出为 CSV(Excel 可直接打开)"
+        title="批量生成所有未锁定 + 有剧本的集"
       >
-        <Download className="size-3.5" />
-        导出
+        {batchRunning ? (
+          <Loader2 className="size-3.5 animate-spin" />
+        ) : (
+          <Package className="size-3.5" />
+        )}
+        全部集数生成
       </Button>
+
+      <Dialog
+        open={batchOpen}
+        onOpenChange={(o) => {
+          if (!o && batchRunning) return; // running 中不允许关
+          setBatchOpen(o);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {batchRunning
+                ? `生成中… ${batchProgress.current}/${batchProgress.total}`
+                : batchProgress.total > 0
+                  ? '生成结果'
+                  : '为全部集生成分镜'}
+            </DialogTitle>
+            <DialogDescription>
+              {batchRunning
+                ? batchProgress.currentLabel
+                : batchProgress.total > 0
+                  ? `成功 ${batchProgress.succeeded} 集 · 失败 ${batchProgress.failed.length} 集`
+                  : '只列出"有剧本 + 未锁"的集。生成串行进行,失败的集会跳过(不影响其它)。'}
+            </DialogDescription>
+          </DialogHeader>
+          {!batchRunning && batchProgress.total === 0 && (
+            <div className="max-h-64 space-y-1 overflow-y-auto text-sm">
+              {eligibleQuery.isLoading ? (
+                <div className="flex items-center gap-2 text-[hsl(var(--color-muted-foreground))]">
+                  <Loader2 className="size-3.5 animate-spin" /> 加载…
+                </div>
+              ) : (eligibleQuery.data ?? []).length === 0 ? (
+                <div className="text-[hsl(var(--color-muted-foreground))]">
+                  没有可生成的集(每集需有当前剧本 + 不在生成锁中)
+                </div>
+              ) : (
+                (eligibleQuery.data ?? []).map((e) => (
+                  <div
+                    key={e.episodeId}
+                    className="flex items-center justify-between rounded border border-[hsl(var(--color-border))] px-2 py-1"
+                  >
+                    <span>
+                      第 {e.episodeNumber} 集{e.title ? ` · ${e.title}` : ''}
+                    </span>
+                    <span className="font-mono text-[10px] text-[hsl(var(--color-muted-foreground))]">
+                      v{e.scriptVersion}
+                      {e.existingShotCount > 0 ? ` · 已有 ${e.existingShotCount} 镜` : ''}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+          {(batchRunning || batchProgress.total > 0) && batchProgress.failed.length > 0 && (
+            <div className="max-h-32 space-y-1 overflow-y-auto rounded border border-red-500/40 p-2 text-xs">
+              {batchProgress.failed.map((f) => (
+                <div key={f.episodeNumber} className="text-red-500">
+                  第 {f.episodeNumber} 集: {f.error}
+                </div>
+              ))}
+            </div>
+          )}
+          <DialogFooter>
+            {batchRunning ? (
+              <Button variant="outline" size="sm" disabled>
+                运行中…
+              </Button>
+            ) : batchProgress.total > 0 ? (
+              <Button
+                size="sm"
+                onClick={() => {
+                  setBatchOpen(false);
+                  setBatchProgress({
+                    current: 0,
+                    total: 0,
+                    currentLabel: '',
+                    succeeded: 0,
+                    failed: [],
+                  });
+                }}
+              >
+                关闭
+              </Button>
+            ) : (
+              <>
+                <Button variant="outline" size="sm" onClick={() => setBatchOpen(false)}>
+                  取消
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={runBatch}
+                  disabled={(eligibleQuery.data ?? []).length === 0 || eligibleQuery.isLoading}
+                >
+                  <Sparkles className="size-3.5" />
+                  开始生成({(eligibleQuery.data ?? []).length} 集)
+                </Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button size="sm" variant="outline" className="gap-1.5">
+            <Download className="size-3.5" />
+            导出
+            <ChevronDown className="size-3" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuItem onClick={handleExportCurrent} disabled={disabled}>
+            <FileText className="mr-2 size-3.5" />
+            当前集 CSV
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={handleExportAll}>
+            <Package className="mr-2 size-3.5" />
+            全部集 CSV(合并)
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <Button
         size="sm"
         variant="outline"

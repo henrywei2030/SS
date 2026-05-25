@@ -188,20 +188,25 @@ export async function generateStoryboard(
 function buildUserPrompt(input: GenerateStoryboardInput): string {
   const { scene, styleSlug, stylePrompt, knownCharacters, presets } = input;
 
-  const lines = scene.lines
-    .map((l) => {
-      switch (l.kind) {
-        case 'action':
-          return `△ ${l.text}`;
-        case 'dialog':
-          return `${l.speaker}${l.emotion ? `（${l.emotion}）` : ''}：${l.text}`;
-        case 'voiceover':
-          return `${l.speaker}（${l.emotion ?? 'OS'}）：${l.text}`;
-        default:
-          return l.text;
-      }
-    })
-    .join('\n');
+  // Phase 1.5.3 bugfix:fallback 合成 scene 时 scene.lines=[],必须 fallback 到 rawContent
+  // 否则 LLM 拿到空 "剧本原文:" 就摆烂,只产 1 个通用镜
+  const lines =
+    scene.lines.length > 0
+      ? scene.lines
+          .map((l) => {
+            switch (l.kind) {
+              case 'action':
+                return `△ ${l.text}`;
+              case 'dialog':
+                return `${l.speaker}${l.emotion ? `（${l.emotion}）` : ''}：${l.text}`;
+              case 'voiceover':
+                return `${l.speaker}（${l.emotion ?? 'OS'}）：${l.text}`;
+              default:
+                return l.text;
+            }
+          })
+          .join('\n')
+      : scene.rawContent;
 
   // 完整风格段:scene/character/prop 三段 prompt + forbiddenWords
   // W7 audit R5:补 propPrompt(原漏传,跟 W4/W5 拼接公式对齐)
