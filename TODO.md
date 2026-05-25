@@ -60,6 +60,7 @@
 - [x] **relay-batch-test.mjs 批量测试脚本就绪**(二十二收工)— 107 非视频模型(95 TEXT + 12 IMAGE)· 直连 moyu HTTP 绕 admin 5/min rate limit · 并发 5 · TEXT 真调 max_tokens=1 总成本 < ¥0.01 · IMAGE 走 /models 探活不真生成 · 报告 ok/fail/latency p50/p90/p99 + 按 vendor 分组 + CSV 详单 · token 只读 env · tmp 加 .gitignore — **待用户给新 token** — 2026-05-25
 - [x] **Phase 1.5.3 Scripts/Storyboard 完整工作流**(二十三收工)— 15 项功能 + 7 bug 大修 + 1 migration · 1413 行净增 · **AIGC sync toast + 多集 docx 切分(60 集实测)+ 双模式生成 + 全集 CSV 导出 + 集数删除/锁定/编辑/清空 + parser 短剧 fallback + prompt 强化(14 镜实测)+ shots 分组显示(GroupRows + ShotRow + 合并/拆分/删除)** · 真 bug:buildUserPrompt 空 lines 没 fallback 到 rawContent(LLM 拿到空剧本只产 1 镜)/ createNextVersion soft-delete 复用 unique 撞车 / uploadMultiEpisode 不复活软删 Episode / 第1集右侧空白 cache / 两栏滚动 min-h-0 / DB storyboard_main 不要 JSON / generate 后 ShotsPane 不刷新 — 2026-05-25
 - [x] **r22.1 UI 部分验证 + window.confirm 留尾**(二十三收工)— Chrome MCP 实测:添加 catalog(zod cuid P0 fix 通过)+ 连续添加 + existingModelIdsByRelay 过滤;删除 + 直连 4 字段被 `window.confirm` 阻塞,留 Phase 2 换自定义 Dialog — 2026-05-25
+- [x] **二十三收工后补丁(commit 25e9980)**— autoMerge 关闭(平铺单镜不自动组)+ ShotRow 行内 ↑↓ 合并按钮(不需勾选直接合并到上/下镜)+ openai-compat headers/body timeout bump(60s→180s / 120s→300s)解决 Ep3+ 偶发 0 shots「Headers Timeout Error」根因 — 2026-05-25
 - [ ] **W5.6 进阶**(留 Phase 2)— 音频波形(wavesurfer.js)/ AI 自动打标(BPM/时长)/ pgvector 向量搜索
 - [ ] **Polish 剩余**(留 Phase 2)— 34 处硬编码颜色 / a11y / listBindings N+1 / OperationLog 命名规范
 - [ ] **W8 团队实战**(下次启动)— 5 人冷启动 + 配 API Key 真接 Seedance + 1 集 7 镜头

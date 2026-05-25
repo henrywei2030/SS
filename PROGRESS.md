@@ -5,9 +5,16 @@
 
 ---
 
-## 2026-05-25(周一,win-laptop · 二十三次收工)— Phase 1.5.3 Scripts/Storyboard 完整工作流 + 7 bug 大修
+## 2026-05-25(周一,win-laptop · 二十三次收工)— Phase 1.5.3 Scripts/Storyboard 完整工作流 + 8 bug 大修 · 2 个 commit
 
-**完成 — 15 项功能 + 7 bug + 1 migration · 1413 行净增 · LLM 实测 14 镜 + 2 组生成**
+**完成 — 17 项功能 + 8 bug + 1 migration · 1579 行净增 · LLM 实测 14 镜 + 2 组生成**
+
+### 收工后补丁(commit 25e9980)
+- 🔧 **autoMerge 关闭**:DB setting `storyboard.autoMergeOnGenerate` + getStoryboardBindings 默认双改 `false` — 生成出来按序号平铺单镜,不自动组
+- 🔧 **ShotRow 行内 ↑↓ 合并按钮**:不需勾选,直接点 ↑ 与上一镜合并 / 点 ↓ 与下一镜合并(首镜 ↑ disabled,末镜 ↓ disabled)。GroupRows 透传 onMergeUp/onMergeDown/canMergeUp/canMergeDown
+- 🐛 **Ep3+ 偶发 0 shots 根因(Issue 2)**:DB operation_logs 06:35 + 06:41 两次 0 shots 都附「Headers Timeout Error」— Claude Sonnet 4.5 详细 prompt + 长响应在 moyu 中转 + Anthropic 队列拥堵时偶 >60s 返 header。修:openai-compat.ts `headersTimeout: 60s → 180s` + `bodyTimeout: 120s → 300s`
+
+### 主体功能(commit 06d4bde · 见下方原始记录)
 
 ### 开工:r22.1 UI 验证(浏览器 MCP 驱动)
 - ✅ 添加模型 catalog dropdown 实测(Haiku + Sonnet 添加成功,zod cuid P0 fix 验证)
