@@ -1,10 +1,10 @@
-/* r10 fix:Turbopack 严格遵守 CSS @import-rules-must-precede 标准
- *   所有 @import 必须排在文件最前(@charset / @layer 之外的规则之前)
- *   原来 @import url('fonts.googleapis...') 在 @import 'tailwindcss' 之后,
- *   而 tailwindcss 展开后含 @layer base 等规则 → Turbopack 拒绝后续 @import
- *   解决:Google fonts @import 提前到第一行,所有 @import 集中在文件顶 */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import 'tailwindcss';
+
+/* r10 fix:字体已迁移到 next/font/google self-host(见 [locale]/layout.tsx)
+ *   - 无外部网络请求(国内可用)· production build 静态化
+ *   - 不再触发 Turbopack 严格 @import-rules-must-precede 检查
+ *   - 自动 preload + display:swap 防 FOUT
+ *   字体 var 在 :root 通过 className 注入:--font-inter / --font-noto-sc / --font-jetbrains-mono */
 
 /* =============================================================================
  * StarsAlign Studio · 星垣工坊 设计系统 v4 · Cursor + 双主题
@@ -54,8 +54,9 @@
   --color-mod-library: 38 80% 55%;
   --color-mod-analytics: 0 65% 55%;
 
-  --font-sans: 'Inter', 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
+  /* r10 fix:next/font/google 注入 var · CSS 里通过 var(--font-X) 引用 */
+  --font-sans: var(--font-inter), var(--font-noto-sc), 'PingFang SC', system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), 'SF Mono', ui-monospace, monospace;
 
   --radius-sm: 0.25rem;
   --radius: 0.375rem;
