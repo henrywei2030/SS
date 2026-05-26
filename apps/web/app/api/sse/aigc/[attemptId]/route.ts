@@ -18,7 +18,11 @@ import type { NextRequest } from 'next/server';
 import { prisma } from '@ss/db';
 import { createRedisSubscriber } from '@ss/queue/redis';
 import { verifyStreamToken } from '@ss/queue/sse-token';
-import { videoGenChannel, type VideoGenProgressEvent } from '@ss/queue/types';
+import {
+  videoGenChannel,
+  VideoGenProgressEventSchema,
+  type VideoGenProgressEvent,
+} from '@ss/queue/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -148,13 +152,15 @@ export async function GET(
       subscriber.on('message', (ch, msg) => {
         if (ch !== channel) return;
         try {
-          const event = JSON.parse(msg) as VideoGenProgressEvent;
-          send(event);
-          if (event.type === 'success' || event.type === 'failed') {
+          // r10 audit:用 Zod runtime validate · JSON.parse + as cast 在协议升级 / 异常 publish 时
+          //   payload 不符合类型仍 cast 成功 → 推到前端崩 UI。改成 schema.parse 失败直接 log + 跳过
+          const parsed = VideoGenProgressEventSchema.parse(JSON.parse(msg));
+          send(parsed);
+          if (parsed.type === 'success' || parsed.type === 'failed') {
             close();
           }
         } catch (err) {
-          console.error(`[sse:${attemptId}] parse message failed:`, err);
+          console.error(`[sse:${attemptId}] parse/validate message failed:`, err instanceof Error ? err.message : err);
         }
       });
 

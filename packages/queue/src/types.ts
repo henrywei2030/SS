@@ -79,20 +79,45 @@ export type VideoGenJobData = z.infer<typeof VideoGenJobDataSchema>;
  * SSE Progress Event — Redis pub/sub 推到前端的事件类型
  *
  * ADR-25 M6:worker → Redis publish → SSE endpoint → EventSource → 前端 hook
+ *
+ * r10 audit:加 Zod schema 给 SSE route runtime validate
+ *   防 worker 协议升级 / DB 异常 publish 错位 payload 时 SSE 转发畸形数据给前端
+ *   Zod parse 失败时 SSE 走 catch 路径 log + 跳过该消息,不冒泡崩接
  */
-export type VideoGenProgressEvent =
-  | { type: 'queued'; attemptId: string; position?: number }
-  | { type: 'running'; attemptId: string; providerJobId?: string }
-  | { type: 'progress'; attemptId: string; percent?: number; message?: string }
-  | {
-      type: 'success';
-      attemptId: string;
-      mediaId: string;
-      videoUrl: string;
-      thumbnailUrl?: string;
-      costCny: number;
-    }
-  | { type: 'failed'; attemptId: string; errorMsg: string; retryable: boolean };
+export const VideoGenProgressEventSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('queued'),
+    attemptId: z.string(),
+    position: z.number().optional(),
+  }),
+  z.object({
+    type: z.literal('running'),
+    attemptId: z.string(),
+    providerJobId: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal('progress'),
+    attemptId: z.string(),
+    percent: z.number().optional(),
+    message: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal('success'),
+    attemptId: z.string(),
+    mediaId: z.string(),
+    videoUrl: z.string(),
+    thumbnailUrl: z.string().optional(),
+    costCny: z.number(),
+  }),
+  z.object({
+    type: z.literal('failed'),
+    attemptId: z.string(),
+    errorMsg: z.string(),
+    retryable: z.boolean(),
+  }),
+]);
+
+export type VideoGenProgressEvent = z.infer<typeof VideoGenProgressEventSchema>;
 
 /**
  * Redis pub/sub channel 名构造器 — ADR-25 M6 domain:resource 风格

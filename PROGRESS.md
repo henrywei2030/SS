@@ -9,6 +9,25 @@
 
 **完成 — 跨 24 文件 ~30 处改动 + 1 新 migration · web+api+adapters+shared typecheck 全 pass**
 
+### 收工后补丁:r10 全栈 audit 3 遍 + 投产就绪 3 真修(2026-05-27 深夜+)
+
+**4 并行 explore agent 各 3 遍审视 · 新维度覆盖**(生产就绪 / 失败恢复 / 类型安全 / 前端 UX)
+
+- 🚀 **P0 #1 加公开 health endpoint**(`apps/web/app/api/health/route.ts` 新文件)
+  - 此前只有 `admin.health`(adminProcedure 需登录),K8s liveness probe / Docker HEALTHCHECK / Nginx upstream check **无法探活**
+  - 新端点:GET + HEAD 双方法 · 返 `{ ok, service, version, uptimeSec, timestamp }` · `Cache-Control: no-store` 防 CDN 缓存假活 · 不查 DB/Redis 避免每秒数次打爆下游
+- 🛡️ **P0 #2 SSE Redis message Zod runtime validate**(`packages/queue/src/types.ts` + `apps/web/.../sse/aigc/[attemptId]/route.ts`)
+  - 此前 `JSON.parse(msg) as VideoGenProgressEvent` cast 不验 · 协议升级 / worker 异常 publish 时畸形 payload 仍 cast 成功 → 推到前端崩 UI
+  - 加 `VideoGenProgressEventSchema = z.discriminatedUnion('type', [...])` · SSE route 用 `.parse()` · 失败 log + 跳过该消息不冒泡崩接
+- 🛡️ **P1 #3 storyboard.mergeShots 链式 non-null 断言改 robust**(`storyboard.ts` L765-789)
+  - `shots[0]!.episode!.projectId` 在 prisma include 异常时(虽极罕见)运行时 crash · 改成 narrow `firstShot.episode` 并抛明确 INTERNAL_SERVER_ERROR 告知用户刷新
+- ✅ **agent 报告其余项验证为已修/设计/低 ROI**:
+  - APP_MASTER_KEY 弱密钥 warn(r13 已有 preflight) / ADMIN_DEFAULT_PASSWORD seed warn(无 fail-fast 是 dev-friendly 取舍)
+  - EventBus publish 在 transaction 外(STORYBOARD_PUBLISHED 是 best-effort 下游处理重复事件 OK)
+  - admin db-explorer `(prisma as any)[table]` 已 allowlist 21 表保护
+  - rate-limit in-memory(Phase 1 单实例 OK,Phase 2 上云换 Redis 已注释)
+- 📊 typecheck:api/queue/web 全 pass · 25/25 vitest pass
+
 ### 收工后补丁:r8 性能优化批 + r9 深度 audit 3 遍(2026-05-27 深夜)
 
 **r8 性能优化(7 项,~30 处改动跨 9 文件 + 1 新 migration + 1 新文件)**

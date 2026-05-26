@@ -766,11 +766,19 @@ export const storyboardRouter = router({
       if (episodeIds.size !== 1) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: '只能合并同一集分镜' });
       }
-      const episodeId = shots[0]!.episodeId;
-      const projectId = shots[0]!.episode!.projectId;
+      // r10 audit:防御性 narrow · 替代链式 ! non-null(若 prisma include 未返 episode 则给明确错而非运行时崩)
+      const firstShot = shots[0];
+      if (!firstShot || !firstShot.episode) {
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: '分镜数据不完整(缺 episode 关联)— 可能数据异常,请刷新重试',
+        });
+      }
+      const episodeId = firstShot.episodeId;
+      const projectId = firstShot.episode.projectId;
 
       // W1-W5 audit P1 followup(P1-2):本集 fresh GENERATING 时不允许 merge
-      if (isEpisodeLockedNow(shots[0]!.episode!)) {
+      if (isEpisodeLockedNow(firstShot.episode)) {
         throw new TRPCError({
           code: 'CONFLICT',
           message: '本集正在生成分镜,请等导演侧完成后再合并镜头',
