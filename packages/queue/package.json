@@ -10,7 +10,8 @@
     "./video-gen": "./src/video-gen-queue.ts",
     "./redis": "./src/redis.ts",
     "./types": "./src/types.ts",
-    "./sse-token": "./src/sse-token.ts"
+    "./sse-token": "./src/sse-token.ts",
+    "./cache": "./src/cache.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

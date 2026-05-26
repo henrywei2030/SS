@@ -29,9 +29,33 @@
  *   }
  *   unitPriceCny: <CNY per 1K tokens 合并价>
  */
-import { request } from 'undici';
+import { Agent, request, setGlobalDispatcher } from 'undici';
 
 import { ProviderError } from '@ss/shared';
+
+// 性能优化 r8:全局 undici Agent · keep-alive + 连接池
+// 默认 undici 每个请求新建 socket,TLS handshake 50-200ms/次浪费严重
+// 用 Agent keep-alive 复用 socket,大幅降低 LLM 调用 latency
+// keepAliveTimeout 30s:Provider 端 idle 后会主动关连接,我们略短防写已关 socket
+// connections: 32:per-origin 上限,够 5-10 并发 worker + 主进程用
+const sharedDispatcher = new Agent({
+  keepAliveTimeout: 30_000,
+  keepAliveMaxTimeout: 60_000,
+  connections: 32,
+  pipelining: 1,
+  bodyTimeout: 300_000, // 跟 generate() 内 fetch 一致 · LLM 长响应留余
+  headersTimeout: 180_000, // 跟 r23 timeout bump 一致 · moyu 中转 + Anthropic 队列拥堵兜底
+});
+
+// 单次设置 process 级 dispatcher · 所有 undici.request 默认走这个 Agent
+// 仅在 Node 进程内生效,跨 worker 各自初始化
+let globalDispatcherSet = false;
+function ensureGlobalDispatcher(): void {
+  if (!globalDispatcherSet) {
+    setGlobalDispatcher(sharedDispatcher);
+    globalDispatcherSet = true;
+  }
+}
 
 import { BaseProvider } from './base.js';
 import type {
@@ -123,6 +147,9 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
   }
 
   async generate(req: TextRequest, ctx: CallContext): Promise<TextResult> {
+    // 性能优化:第一次调用时设置全局 undici dispatcher(keep-alive Agent)
+    ensureGlobalDispatcher();
+
     const modelId = req.model ?? this.cfg.defaultModel;
     await this.checkBudget(ctx.projectId, this.estimateCost(req));
 

@@ -1192,6 +1192,13 @@ const bindingRouter = router({
         where: { key: input.key },
         data: { value: input.value, updatedBy: ctx.user.id },
       });
+      // r8 性能优化:binding 改后失效相关 cache · 业务 router 下次读拿新值
+      try {
+        const { cacheInvalidatePrefix } = await import('@ss/queue/cache');
+        await cacheInvalidatePrefix('cache:bindings:');
+      } catch (e) {
+        console.warn('[binding.set] cache invalidate failed (non-blocking):', e instanceof Error ? e.message : e);
+      }
       await logOperation(ctx, 'binding.set', 'systemSetting', updated.id, before, updated);
       return updated;
     }),

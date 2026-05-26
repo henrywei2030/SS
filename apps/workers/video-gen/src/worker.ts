@@ -2,7 +2,11 @@
  * BullMQ Worker 实例 — VideoGen 队列消费者
  *
  * ADR-25 M2 + M8 + P0-1(langfuse audit 发现):
- *   - concurrency:1(视频生成 GPU 重,单条跑;fynt workflow 节点轻量是 5)
+ *   - concurrency:r8 性能优化改 1→2 默认(可 env 覆盖)
+ *     · 视频生成调远端 Provider API(Seedance/Kling),本地无 GPU 占用
+ *     · 实际是 60-180s 异步等待,1 个 worker 利用率太低
+ *     · concurrency=2 让单进程 throughput 翻倍 · clamp 1-10 防 Provider rate limit 爆
+ *     · env: VIDEO_GEN_WORKER_CONCURRENCY=N(N>2 时要确认 Provider 配额支持)
  *   - autorun:false,显式 .run()
  *   - lockDuration:5min(默认 30s 远小于视频生成 60-180s,会误触 stalled → 重复扣费)
  *   - maxStalledCount:1(stall 1 次直接 failed,不让视频任务无限重跑烧钱)
@@ -16,10 +20,16 @@ import { VIDEO_GEN_QUEUE_NAME, type VideoGenJobData } from '@ss/queue/types';
 
 import { processVideoGenJob } from './processor.js';
 
+// r8 性能优化:worker concurrency 可调(默认 2 · env clamp 1-10)
+const WORKER_CONCURRENCY = Math.max(
+  1,
+  Math.min(10, Number(process.env.VIDEO_GEN_WORKER_CONCURRENCY) || 2),
+);
+
 export function createWorker(workerId: string): Worker<VideoGenJobData> {
   const opts: WorkerOptions = {
     connection: getPrimaryRedis(),
-    concurrency: 1,
+    concurrency: WORKER_CONCURRENCY,
     autorun: false,
     // P0-1:防长任务被误判 stalled — 视频生成可跑 2-3 分钟,默认 30s 必触
     lockDuration: 5 * 60_000,

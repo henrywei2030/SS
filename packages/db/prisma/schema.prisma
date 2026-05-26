@@ -898,6 +898,7 @@ model GenerationAttempt {
   costEntries CostLedgerEntry[]
 
   @@index([projectId])
+  @@index([projectId, createdAt]) // r8 性能优化:insights / api-usage CSV 时间窗 query 高频用
   @@index([shotId])
   @@index([shotGroupId, action, status]) // W5.4:listVideoTakes 用
   @@index([providerId, status])

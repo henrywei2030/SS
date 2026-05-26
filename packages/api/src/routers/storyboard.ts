@@ -39,6 +39,29 @@ import {
 import { assertProjectAccess } from '../middleware/access.js';
 
 /**
+ * 性能优化:并发限流 map(自管 semaphore · 替代 p-limit 外部依赖)
+ *   按输入顺序保留输出数组;每时刻最多 `limit` 个 fn() 在跑
+ *   失败由 fn 自己 catch(返回 result 对象),不会 throw 中断其他任务
+ */
+async function pLimitMap<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, idx: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]!, i);
+    }
+  };
+  const workerCount = Math.min(limit, items.length);
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return results;
+}
+
+/**
  * 反向解析 group.prompt 为各子镜的 prompt 数组
  *
  * 新格式(r3 之后):`[1/N] framing angle <prompt>\n[2/N] framing angle <prompt>\n...`
@@ -109,19 +132,32 @@ async function getStoryboardBindings(ctx: Context): Promise<{
   defaultShotDurationS: number;
   autoMerge: boolean;
 }> {
-  const settings = await ctx.prisma.systemSetting.findMany({
-    where: {
-      key: {
-        in: [
-          'binding.storyboard.generation.modelId',
-          'storyboard.maxDurationS',
-          'storyboard.defaultShotDurationS',
-          'storyboard.autoMergeOnGenerate',
-        ],
-      },
+  // r8 性能优化:storyboard bindings 高频读(每次 generateForEpisode + N 场并发都走)
+  // 用 cache 缓 60s · admin.system.setSetting / admin.binding.set 后会 invalidate
+  // 失败 fallback 直接查 DB(降级不崩)
+  const { cacheGetOrSet } = await import('@ss/queue/cache');
+  const settingsMap = await cacheGetOrSet<Record<string, string>>(
+    'cache:bindings:storyboard',
+    60,
+    async () => {
+      const rows = await ctx.prisma.systemSetting.findMany({
+        where: {
+          key: {
+            in: [
+              'binding.storyboard.generation.modelId',
+              'storyboard.maxDurationS',
+              'storyboard.defaultShotDurationS',
+              'storyboard.autoMergeOnGenerate',
+            ],
+          },
+        },
+      });
+      const out: Record<string, string> = {};
+      for (const r of rows) out[r.key] = r.value;
+      return out;
     },
-  });
-  const map = new Map(settings.map((s) => [s.key, s.value]));
+  );
+  const map = new Map(Object.entries(settingsMap));
   const modelId = map.get('binding.storyboard.generation.modelId') ?? '';
   // 二十收工后用户反馈:不 hardcode 默认 provider,binding 空时显式拒绝
   if (!modelId) {
@@ -1130,6 +1166,10 @@ export const storyboardRouter = router({
       // W3.1.followup 软锁:抢锁失败抛 CONFLICT;抢到后必须配 release(finally 内)
       const lock = await acquireEpisodeLock(ctx.prisma, ep.id);
 
+      // r9 audit:outer-scoped refresh timer · outer finally 兜底 clearInterval
+      // 防 group 合并段(inner finally 之后)抛错时 timer 泄漏 → setInterval 仍跑 refresh
+      let activeRefreshTimer: ReturnType<typeof setInterval> | null = null;
+
       try {
       const bindings = await getStoryboardBindings(ctx);
 
@@ -1269,85 +1309,155 @@ export const storyboardRouter = router({
       });
       let positionIdx = (lastShot?.positionIdx ?? 0);
 
-      // W1-W5 audit P1 followup(P1-3):stale TTL 动态续约 — 长剧本可能 >15min,
-      // 每处理一定时间就续约一次防自己被判 stale。续约间隔取 TTL 的 1/3 留充足缓冲。
+      // W1-W5 audit P1 followup(P1-3):stale TTL 动态续约 — 长剧本可能 >15min
+      // r8 性能优化:并发改造后用 setInterval 续约(原 for-of 内同步续约失效)
+      // r9 audit:用 outer-scoped let + outer finally 兜底 clearInterval,
+      //   防 Phase 2 / group 合并段抛错时 timer 泄漏(原 inner finally 只保护 Phase 1+2)
       const REFRESH_INTERVAL_MS = Math.floor(SOFT_LOCK_TTL_MS / 3);
-      let lastRefreshAt = Date.now();
+      const refreshTimer = setInterval(() => {
+        void refreshEpisodeLock(ctx.prisma, ep.id).catch((err: unknown) =>
+          console.error('[generateForEpisode] refresh lock failed:', err),
+        );
+      }, REFRESH_INTERVAL_MS);
+      // 注册到 outer 作用域 · 外层 finally 兜底清理
+      activeRefreshTimer = refreshTimer;
 
-      for (const dbScene of scenes) {
-        // 续约判定:距离上次续约超过 1/3 TTL 就刷新一次
-        if (Date.now() - lastRefreshAt > REFRESH_INTERVAL_MS) {
-          await refreshEpisodeLock(ctx.prisma, ep.id);
-          lastRefreshAt = Date.now();
-        }
-        // 重新解析单场原文（已存的 rawContent 直接用）
-        const parsedScene = parseScriptText(dbScene.content).scenes[0];
-        if (!parsedScene) continue;
+      // r8 性能优化:Phase 1 并发跑 LLM(限流 3)· Phase 2 顺序写 Shot 表
+      //   原:5 场串行 × 8s/场 = 40s wall time
+      //   改:并发 3 → max(LLM 各场耗时) ≈ ~15-20s · 实测 2-3x 加速
+      //   关键约束:positionIdx / globalIdx 顺序递增,必须 Phase 2 顺序写
+      type SceneResult =
+        | {
+            ok: true;
+            dbScene: (typeof scenes)[number];
+            attemptId: string;
+            attemptStartedAt: Date;
+            shots: Awaited<ReturnType<typeof generateStoryboard>>['shots'];
+            cost: number;
+            warning?: string;
+          }
+        | {
+            ok: false;
+            dbScene: (typeof scenes)[number];
+            attemptId: string;
+            attemptStartedAt: Date;
+            errMsg: string;
+          }
+        | { skip: true; dbScene: (typeof scenes)[number] };
 
-        // W1-W5 audit P0(B1):每场起一条 GenerationAttempt(action=TEXT,status=RUNNING),
-        // 提供方拿 attemptId 回写 CostLedgerEntry.attemptId,后续 ROI / PromptEdit 回溯链路完整。
-        const attemptStartedAt = new Date();
-        const attempt = await ctx.prisma.generationAttempt.create({
-          data: {
-            projectId: ep.projectId,
-            episodeId: ep.id,
-            providerId: bindings.modelId,
-            modelId: bindings.modelId,
-            action: 'TEXT',
-            inputJson: {
-              kind: 'storyboard.generateForEpisode',
-              sceneNumber: dbScene.number,
-              sceneId: dbScene.id,
-              styleSlug,
-              defaultShotDurationS: bindings.defaultShotDurationS,
-              maxShotDurationS: bindings.maxDurationS,
-            },
-            outputMediaIds: [],
-            inputUnits: 0,
-            outputUnits: 0,
-            unitPriceCny: '0',
-            costCny: '0',
-            status: 'RUNNING',
-            startedAt: attemptStartedAt,
-            createdBy: ctx.user.id,
+      try {
+        // ----- Phase 1: 并发跑 LLM(限流 3)----------
+        const LLM_CONCURRENCY = 3;
+        const sceneResults: SceneResult[] = await pLimitMap(
+          scenes,
+          LLM_CONCURRENCY,
+          async (dbScene): Promise<SceneResult> => {
+            // 重新解析单场原文(已存的 rawContent 直接用)
+            const parsedScene = parseScriptText(dbScene.content).scenes[0];
+            if (!parsedScene) return { skip: true, dbScene };
+
+            // W1-W5 audit P0(B1):每场起一条 GenerationAttempt
+            const attemptStartedAt = new Date();
+            const attempt = await ctx.prisma.generationAttempt.create({
+              data: {
+                projectId: ep.projectId,
+                episodeId: ep.id,
+                providerId: bindings.modelId,
+                modelId: bindings.modelId,
+                action: 'TEXT',
+                inputJson: {
+                  kind: 'storyboard.generateForEpisode',
+                  sceneNumber: dbScene.number,
+                  sceneId: dbScene.id,
+                  styleSlug,
+                  defaultShotDurationS: bindings.defaultShotDurationS,
+                  maxShotDurationS: bindings.maxDurationS,
+                },
+                outputMediaIds: [],
+                inputUnits: 0,
+                outputUnits: 0,
+                unitPriceCny: '0',
+                costCny: '0',
+                status: 'RUNNING',
+                startedAt: attemptStartedAt,
+                createdBy: ctx.user.id,
+              },
+            });
+
+            try {
+              const gen = await generateStoryboard({
+                scene: parsedScene,
+                modelId: bindings.modelId,
+                styleSlug,
+                stylePrompt,
+                knownCharacters,
+                presets,
+                defaultShotDurationS: bindings.defaultShotDurationS,
+                maxShotDurationS: bindings.maxDurationS,
+                ctx: {
+                  userId: ctx.user.id,
+                  projectId: ep.projectId,
+                  episodeId: ep.id,
+                  attemptId: attempt.id,
+                },
+              });
+              return {
+                ok: true,
+                dbScene,
+                attemptId: attempt.id,
+                attemptStartedAt,
+                shots: gen.shots,
+                cost: gen.cost,
+                warning: gen.warning,
+              };
+            } catch (e) {
+              console.error('[storyboard.generateForEpisode] LLM failed (raw):', e);
+              return {
+                ok: false,
+                dbScene,
+                attemptId: attempt.id,
+                attemptStartedAt,
+                errMsg: sanitizeErrorMsg(e),
+              };
+            }
           },
-        });
+        );
 
-        try {
-          const gen = await generateStoryboard({
-            scene: parsedScene,
-            modelId: bindings.modelId,
-            styleSlug,
-            stylePrompt,
-            knownCharacters,
-            presets, // W7 followup:框定 framing/angle/movement/lighting 取值
-            defaultShotDurationS: bindings.defaultShotDurationS,
-            maxShotDurationS: bindings.maxDurationS,
-            ctx: {
-              userId: ctx.user.id,
-              projectId: ep.projectId,
-              episodeId: ep.id,
-              attemptId: attempt.id,
-            },
-          });
-          totalCost += gen.cost;
+        // ----- Phase 2: 顺序聚合 + 写 Shot 表(positionIdx/globalIdx 必须单调)
+        for (const result of sceneResults) {
+          if ('skip' in result) continue;
 
-          // 部分场扣费但未生成时显式告警，让前端能展示
-          if (gen.warning) {
-            errors.push(`场 ${dbScene.number}: ${gen.warning}`);
+          if (!result.ok) {
+            // 失败 attempt 更新 + 错误聚合
+            await ctx.prisma.generationAttempt.update({
+              where: { id: result.attemptId },
+              data: {
+                status: 'FAILED',
+                errorMsg: result.errMsg,
+                finishedAt: new Date(),
+                durationMs: Date.now() - result.attemptStartedAt.getTime(),
+              },
+            });
+            errors.push(`场 ${result.dbScene.number}: ${result.errMsg}`);
+            continue;
           }
 
-          for (const s of gen.shots) {
+          // 成功:写 shots(顺序 positionIdx/globalIdx)+ 更新 attempt
+          totalCost += result.cost;
+          if (result.warning) {
+            errors.push(`场 ${result.dbScene.number}: ${result.warning}`);
+          }
+
+          for (const s of result.shots) {
             globalIdx += 1;
             positionIdx += 1;
             const created = await ctx.prisma.shot.create({
               data: {
                 episodeId: ep.id,
-                sceneId: dbScene.id,
+                sceneId: result.dbScene.id,
                 number: String(globalIdx),
                 framing: s.framing,
                 angle: s.angle,
-                // W7 followup:movement/lighting 落库(LLM 可输出,可空)
                 movement: s.movement,
                 lighting: s.lighting,
                 content: s.content,
@@ -1362,31 +1472,18 @@ export const storyboardRouter = router({
 
           const finishedAt = new Date();
           await ctx.prisma.generationAttempt.update({
-            where: { id: attempt.id },
+            where: { id: result.attemptId },
             data: {
-              status: gen.warning ? 'FAILED' : 'SUCCESS',
-              errorMsg: gen.warning ?? null,
-              costCny: gen.cost.toFixed(4),
+              status: result.warning ? 'FAILED' : 'SUCCESS',
+              errorMsg: result.warning ?? null,
+              costCny: result.cost.toFixed(4),
               finishedAt,
-              durationMs: finishedAt.getTime() - attemptStartedAt.getTime(),
+              durationMs: finishedAt.getTime() - result.attemptStartedAt.getTime(),
             },
           });
-        } catch (e) {
-          const finishedAt = new Date();
-          // 第 18 轮 audit P1:errMsg 入 attempt.errorMsg + 推回前端前脱敏
-          console.error('[storyboard.generateForEpisode] LLM failed (raw):', e);
-          const errMsg = sanitizeErrorMsg(e);
-          await ctx.prisma.generationAttempt.update({
-            where: { id: attempt.id },
-            data: {
-              status: 'FAILED',
-              errorMsg: errMsg,
-              finishedAt,
-              durationMs: finishedAt.getTime() - attemptStartedAt.getTime(),
-            },
-          });
-          errors.push(`场 ${dbScene.number}: ${errMsg}`);
         }
+      } finally {
+        clearInterval(refreshTimer);
       }
 
       // 7. 自动合并组（按 maxDurationS）
@@ -1479,6 +1576,11 @@ export const storyboardRouter = router({
         errors,
       };
       } finally {
+        // r9 audit:兜底清 refreshTimer(inner finally 仅保护 Phase 1+2,group 合并抛错时漏清)
+        if (activeRefreshTimer !== null) {
+          clearInterval(activeRefreshTimer);
+          activeRefreshTimer = null;
+        }
         // 释放失败不能掩盖原始错误 — 只 log,等 stale TTL 自愈或人工解锁
         await releaseEpisodeLock(ctx.prisma, lock).catch((err) => {
           console.error('[generateForEpisode] failed to release lock', {

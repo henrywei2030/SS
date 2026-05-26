@@ -91,21 +91,55 @@ export const insightsRouter = router({
       const budgetWarnPct = Number(budgetWarnSetting?.value ?? '80');
       const projectBudgetCny = project?.budgetCny ? Number(project.budgetCny) : null;
 
-      // 1. 成本数据 — 从 ledger 拉(W6 audit:含 success 和 failed,分开统计)
-      const ledgers = await ctx.prisma.costLedgerEntry.findMany({
-        where: { projectId: input.projectId, createdAt: { gte: since } },
-        select: {
-          costCny: true,
-          action: true,
-          success: true,
-          createdAt: true,
-        },
-      });
+      // 1. 成本数据 — r8 性能优化:从 Node 7000+ 行 Decimal 累加 → PostgreSQL SUM 聚合
+      // ----------------------------------------------------------------------------
+      // 原:findMany 拉所有 ledger 行 → Node Decimal.plus 累加 4 维(total/success/byKind/byDay)
+      // 改:5 个并发 SQL 聚合,PostgreSQL numeric 端算,返聚合结果(<200 行)
+      //
+      // 精度:Prisma aggregate / groupBy 的 _sum 返回 Prisma.Decimal,跟原 Decimal.plus 等价
+      // 按天 / 按 kind 因 action 多样需 groupBy + Node 端 classify 到 kind
+      const whereLedger = {
+        projectId: input.projectId,
+        createdAt: { gte: since },
+      };
 
-      // W1-W5 audit P1 followup(R9):用 Prisma.Decimal 累加防大额 IEEE-754 误差
-      // (上量后 7000+ ledger 行累加 0.01-0.5 级别小额,Number 累加会漂)
-      let totalDec = new Prisma.Decimal(0);
-      let successDec = new Prisma.Decimal(0);
+      // 按天聚合用 raw SQL DATE_TRUNC(Prisma groupBy 不原生支持)
+      // 注:Postgres 列名带大小写要用 "createdAt"(quoted) · 表名 cost_ledger_entries(@@map)
+      const [
+        totalAgg,
+        successAgg,
+        byActionGrouped,
+        byDayRows,
+      ] = await Promise.all([
+        ctx.prisma.costLedgerEntry.aggregate({
+          where: whereLedger,
+          _sum: { costCny: true },
+        }),
+        ctx.prisma.costLedgerEntry.aggregate({
+          where: { ...whereLedger, success: true },
+          _sum: { costCny: true },
+        }),
+        ctx.prisma.costLedgerEntry.groupBy({
+          by: ['action'],
+          where: whereLedger,
+          _sum: { costCny: true },
+        }),
+        ctx.prisma.$queryRaw<Array<{ day: string; sum: Prisma.Decimal }>>`
+          SELECT to_char(date_trunc('day', "createdAt" AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
+                 SUM("costCny") AS sum
+          FROM "cost_ledger_entries"
+          WHERE "projectId" = ${input.projectId} AND "createdAt" >= ${since}
+          GROUP BY day
+          ORDER BY day
+        `,
+      ]);
+
+      const totalDec = totalAgg._sum.costCny ?? new Prisma.Decimal(0);
+      const successDec = successAgg._sum.costCny ?? new Prisma.Decimal(0);
+      const totalCostCny = totalDec.toNumber();
+      const successCostCny = successDec.toNumber();
+
+      // 按 action 聚合 → classify 到 kind(7 桶)
       const costByKindDec: Record<CostKind, Prisma.Decimal> = {
         image: new Prisma.Decimal(0),
         video: new Prisma.Decimal(0),
@@ -115,45 +149,41 @@ export const insightsRouter = router({
         analysis: new Prisma.Decimal(0),
         other: new Prisma.Decimal(0),
       };
+      for (const g of byActionGrouped) {
+        const kind = classifyLedgerAction(g.action);
+        costByKindDec[kind] = costByKindDec[kind].plus(g._sum.costCny ?? 0);
+      }
+
+      // 按天 SQL 已返 day(YYYY-MM-DD)+ sum,直接转 Map
       const dailyCostDec = new Map<string, Prisma.Decimal>();
       const activeDays = new Set<string>();
-
-      for (const l of ledgers) {
-        const c = new Prisma.Decimal(l.costCny);
-        totalDec = totalDec.plus(c);
-        if (l.success) successDec = successDec.plus(c);
-        const kind = classifyLedgerAction(l.action);
-        costByKindDec[kind] = costByKindDec[kind].plus(c);
-        const k = utcDayKey(l.createdAt);
-        dailyCostDec.set(k, (dailyCostDec.get(k) ?? new Prisma.Decimal(0)).plus(c));
-        activeDays.add(k);
+      for (const row of byDayRows) {
+        dailyCostDec.set(row.day, new Prisma.Decimal(row.sum));
+        activeDays.add(row.day);
       }
-      const totalCostCny = totalDec.toNumber();
-      const successCostCny = successDec.toNumber();
 
-      // 2. 计数 — 从 GenerationAttempt 拉(单一来源,跟 aigc.listGroups 对齐)
-      //    过滤 rejected:false(废片不算成功) + 关联 shotGroup/episode 软删
-      const attempts = await ctx.prisma.generationAttempt.findMany({
+      // 2. 计数 — r8 性能优化:Node count loop → PostgreSQL groupBy(status)
+      // 一次聚合返 3 行,Node 端 reduce 成 {success/failed/running}
+      const attemptStatusGrouped = await ctx.prisma.generationAttempt.groupBy({
+        by: ['status'],
         where: {
           projectId: input.projectId,
           createdAt: { gte: since },
           rejected: false,
-          // attempt 自身没 deletedAt,但 shotGroup/episode 软删时不算
           OR: [
             { shotGroupId: null },
             { shotGroup: { deletedAt: null, episode: { deletedAt: null } } },
           ],
         },
-        select: { status: true, createdAt: true },
+        _count: { _all: true },
       });
-
       let successCount = 0;
       let failedCount = 0;
       let runningCount = 0;
-      for (const a of attempts) {
-        if (a.status === 'SUCCESS') successCount++;
-        else if (a.status === 'FAILED') failedCount++;
-        else if (a.status === 'RUNNING' || a.status === 'QUEUED') runningCount++;
+      for (const g of attemptStatusGrouped) {
+        if (g.status === 'SUCCESS') successCount += g._count._all;
+        else if (g.status === 'FAILED') failedCount += g._count._all;
+        else if (g.status === 'RUNNING' || g.status === 'QUEUED') runningCount += g._count._all;
       }
       const totalAttempts = successCount + failedCount + runningCount;
 

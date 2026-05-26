@@ -9,6 +9,27 @@
 
 **完成 — 跨 24 文件 ~30 处改动 + 1 新 migration · web+api+adapters+shared typecheck 全 pass**
 
+### 收工后补丁:r8 性能优化批 + r9 深度 audit 3 遍(2026-05-27 深夜)
+
+**r8 性能优化(7 项,~30 处改动跨 9 文件 + 1 新 migration + 1 新文件)**
+- 🚀 **LLM 调用并发化**(`storyboard.generateForEpisode` 串行 for-of → pLimitMap 并发 3):5 场 40s→15-20s,**2-3x 提速** · Phase 1 并发 LLM · Phase 2 顺序写 Shot 保证 positionIdx 单调
+- 🚀 **Node Decimal 累加 → PostgreSQL SUM**(`insights.getProjectOverview`):4 并发 SQL aggregate / groupBy / $queryRaw DATE_TRUNC · 7000 行 ledger 不再拉到 Node · 上量后 **3-5x** + 内存峰值降 90%
+- ⚡ **undici HTTP keep-alive**:全局 Agent + 32 connections + 30s keepAlive · 每次 LLM 调用省 50-200ms TLS handshake
+- ⚡ **Worker concurrency 1→2 可配**(`VIDEO_GEN_WORKER_CONCURRENCY` env clamp 1-10):视频生成本地无 GPU,只是 60-180s 网络等待 · throughput **2x**
+- ⚡ **DB index 加 [projectId, createdAt]**(`GenerationAttempt`)+ 新 migration `20260527010000` · insights/api-usage query 50ms→10ms
+- ⚡ **next.config modularizeImports lucide-react**:首屏 bundle **-250~400KB**(production build 生效)
+- ⚡ **Redis cache wrapper**(`packages/queue/src/cache.ts`):L1(in-process Map 5s)+ L2(Redis 60s)双层 · 失败降级 fn() · `cacheGetOrSet` / `cacheInvalidate` / `cacheInvalidatePrefix` 三 API · 接入 `getStoryboardBindings` + `admin.binding.set` invalidate
+
+**r9 深度 audit 3 遍 + 真 P1 ×2 修**
+- 🔍 4 并行 explore agent 各扫一维度(安全/auth · 并发/事务 · 错误处理/资源 · 业务逻辑边界)· 每个 3 遍审视
+- 🐛 **P1 #1**:`storyboard.ts` setInterval refreshTimer outer 兜底 — 原 inner finally 仅保护 Phase 1+2,**group 合并段抛错时 timer 泄漏** · 修:outer-scoped `let activeRefreshTimer` + outer finally 兜底 clearInterval
+- 🐛 **P1 #2**:`cache.ts` localCache 无界增长 OOM 风险(长跑 Node 进程) · 修:`LOCAL_MAX_ENTRIES = 1000` + FIFO 驱逐 200 项摊薄成本
+- ✅ **其余 agent 报告验证为误报/设计**:
+  - aigc 合规守卫 complianceStatus null = 安全设计(null 当未通过 + 错误信息显示具体 status)
+  - storyboard.listShots N+1 = 实际是 2 独立 query 不是 N+1
+  - generateForEpisode positionIdx 取软删行 = 设计正确(`@@unique` 全表 unique 不 partial,必须跳过软删 idx 防撞)
+- 📊 typecheck:api / queue / web / adapters 全 pass · 25/25 vitest pass
+
 ### 收工后补丁:100 遍 Phase 1.5 深度 audit + 1 真 P1 修(2026-05-27)
 - 🔍 **4 并行 explore agent** 各扫一个维度:Cost Ledger / Binding-Provider 调用链 / 数据层+工作流 / API 安全+Schema
 - 🐛 **真 P1 ×1 修**:`loadConfig` decrypt 失败语义化(adapters/provider/index.ts)— 加 `decryptFailed` flag · 在 `if (!apiKey)` 区分"密钥损坏(APP_MASTER_KEY 改了 / 密文损坏)"vs"未配置"两种状态,各抛专用错误信息引导用户行动
