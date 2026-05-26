@@ -18,7 +18,7 @@
  *   Phase 1(W5.4)阶段,**只有 `GENERATION_COMPLETED`(kind=video)**真的被 publish
  *   (在 packages/api/src/routers/aigc.ts:generateVideo onSuccess)。
  *   其它所有 topic 定义齐全但 **router 端尚未 publish** — 订阅方不会收到。
- *   全量启用排在 W6 剪辑模块 + W5.5 BullMQ worker 一起落地。
+ *   全量启用排在下游订阅方 + W5.5 BullMQ worker 一起落地。
  *   接手人:加 publish 时跟着这里的 PayloadMap 类型走,跨包订阅自动得到类型 hint。
  */
 
@@ -66,10 +66,6 @@ export const EVENTS = {
   MEDIA_UPLOADED: 'media.uploaded',
   MEDIA_TAGGED: 'media.tagged',
   MEDIA_DELETED: 'media.deleted',
-
-  /* —— 剪辑 / 成片 —— */
-  EDIT_TIMELINE_UPDATED: 'edit.timeline.updated', // Phase 2
-  EDIT_REEL_EXPORTED: 'edit.reel.exported', // Phase 2
 
   /* —— 合规 —— */
   COMPLIANCE_FLAGGED: 'compliance.flagged',
@@ -219,9 +215,6 @@ export interface EventPayload {
   };
   [EVENTS.MEDIA_TAGGED]: { mediaId: string; tags: string[] };
   [EVENTS.MEDIA_DELETED]: { mediaId: string };
-
-  [EVENTS.EDIT_TIMELINE_UPDATED]: { episodeId: string; updatedBy: string };
-  [EVENTS.EDIT_REEL_EXPORTED]: { episodeId: string; reelId: string; format: string };
 
   [EVENTS.COMPLIANCE_FLAGGED]: {
     targetType: 'script' | 'shot' | 'asset' | 'reel';

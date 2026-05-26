@@ -50,7 +50,6 @@ const MODULE_ENUM = z.enum([
   'director',
   'art',
   'aigc',
-  'edit',
   'library',
   'analytics',
 ]);
@@ -154,7 +153,8 @@ export const projectRouter = router({
           where: {
             episode: { projectId: project.id, deletedAt: null },
             deletedAt: null, // 与 shotCount 一致,防 progressPct > 100%
-            status: { in: ['ADOPTED', 'IN_EDIT', 'FINAL'] },
+            // r7 audit:IN_EDIT 枚举值已删除(剪辑模块已移除)
+            status: { in: ['ADOPTED', 'FINAL'] },
           },
         }),
       ]);
@@ -191,7 +191,7 @@ export const projectRouter = router({
             create: {
               userId: ctx.user.id,
               role: 'OWNER',
-              modules: ['director', 'art', 'aigc', 'edit', 'library', 'analytics'],
+              modules: ['director', 'art', 'aigc', 'library', 'analytics'],
             },
           },
         },
@@ -279,7 +279,7 @@ export const projectRouter = router({
             create: {
               userId: ctx.user.id,
               role: 'OWNER',
-              modules: ['director', 'art', 'aigc', 'edit', 'library', 'analytics'],
+              modules: ['director', 'art', 'aigc', 'library', 'analytics'],
             },
           },
         },
@@ -361,7 +361,8 @@ export const projectRouter = router({
         projectId: z.string().cuid(),
         userId: z.string().cuid(),
         role: MEMBER_ROLE_ENUM,
-        modules: z.array(MODULE_ENUM).default([]),
+        // r7 audit:default 改为全 5 个模块,防前端传空数组导致新成员无任何权限
+        modules: z.array(MODULE_ENUM).default(['director', 'art', 'aigc', 'library', 'analytics']),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -398,7 +399,7 @@ export const projectRouter = router({
           modules:
             input.modules.length > 0
               ? input.modules
-              : ['director', 'art', 'aigc', 'edit', 'library', 'analytics'],
+              : ['director', 'art', 'aigc', 'library', 'analytics'],
         },
       });
       await logOperation(

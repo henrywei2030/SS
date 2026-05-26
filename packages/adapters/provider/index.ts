@@ -72,8 +72,16 @@ async function loadConfig(providerId: string): Promise<ResolvedConfig> {
     where: { providerId },
     include: { relayProvider: true },
   });
-  if (!row || !row.isActive) {
-    throw new Error(`Provider not configured or inactive: ${providerId}`);
+  // r5:精确区分 not configured / inactive,给前端可执行的提示
+  if (!row) {
+    throw new Error(
+      `Provider "${providerId}" 不存在于 ProviderConfig — 检查 /admin/bindings 选的 modelId 是否拼写正确,或在 /admin/providers 从中转站 catalog 添加该模型`,
+    );
+  }
+  if (!row.isActive) {
+    throw new Error(
+      `Provider "${providerId}" (${row.displayName}) 已停用 — 去 /admin/providers 找到该模型卡片点 Toggle 开关启用`,
+    );
   }
 
   let apiKey = '';

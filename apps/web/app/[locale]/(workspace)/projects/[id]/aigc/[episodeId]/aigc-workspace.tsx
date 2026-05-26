@@ -266,17 +266,38 @@ export function AigcWorkspace({
     setAutoSelectAttemptId(null);
   }, []);
 
+  // 用户反馈 r6:字号跟分镜界面联动 — 沿用 --storyboard-fs(分镜顶栏 A- 13 A+ 控制)
+  // localStorage key 同源 'storyboard.fontSize',跨页持久 + 跨工作台一致
+  const [fontSize, setFontSize] = React.useState<number>(15);
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const stored = Number(window.localStorage.getItem('storyboard.fontSize'));
+    if (stored >= 11 && stored <= 18) setFontSize(stored);
+  }, []);
+  const FONT_SIZES = [11, 12, 13, 14, 15, 16, 17, 18] as const;
+  const changeFontSize = (delta: 1 | -1): void => {
+    const idx = FONT_SIZES.indexOf(fontSize as (typeof FONT_SIZES)[number]);
+    const next = FONT_SIZES[Math.max(0, Math.min(FONT_SIZES.length - 1, idx + delta))]!;
+    setFontSize(next);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('storyboard.fontSize', String(next));
+    }
+  };
+
   return (
-    <div className="grid h-[calc(100vh-2.75rem)] grid-cols-[280px_1fr] gap-0 bg-[hsl(var(--color-background))]">
-      {/* 左:生成段列表 */}
+    <div
+      className="grid h-[calc(100vh-2.75rem)] grid-cols-[220px_1fr] gap-0 bg-[hsl(var(--color-background))]"
+      style={{ ['--storyboard-fs' as string]: `${fontSize}px`, fontSize: `${fontSize}px` }}
+    >
+      {/* 左:生成段列表(用户反馈 r5:缩短宽度从 280→220) */}
       <aside className="overflow-y-auto border-r border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))]">
-        <div className="sticky top-0 z-10 border-b border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-4 py-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-xs text-[hsl(var(--color-muted-foreground))]">
+        <div className="sticky top-0 z-10 border-b border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-3 py-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[11px] text-[hsl(var(--color-muted-foreground))]">
                 AIGC 生成段
               </div>
-              <div className="mt-1 text-sm font-medium">
+              <div className="text-sm font-medium">
                 {groups?.length ?? 0} 段
               </div>
             </div>
@@ -284,7 +305,7 @@ export function AigcWorkspace({
               onClick={onCreateGroup}
               disabled={createGroupMutation.isPending}
               title="新建空白生成段(可重命名 / 自定义命名,如'陆乘·开场')"
-              className="rounded-md border border-[hsl(var(--color-border))] px-2 py-1 text-xs hover:bg-[hsl(var(--color-muted))] disabled:opacity-50"
+              className="shrink-0 rounded-md border border-[hsl(var(--color-border))] px-2 py-1 text-xs hover:bg-[hsl(var(--color-muted))] disabled:opacity-50"
             >
               + 新建
             </button>
@@ -382,32 +403,80 @@ export function AigcWorkspace({
         </div>
       </aside>
 
-      {/* 右:详情面板 */}
-      <main className="overflow-y-auto p-6">
-        {selectedGroupId ? (
-          <GroupDetail
-            groupId={selectedGroupId}
-            onAutoMatch={onAutoMatch}
-            autoMatchPending={autoMatchMutation.isPending}
-            onAutoTag={onAutoTag}
-            autoTagPending={autoTagMutation.isPending}
-            onOpenBindDialog={onOpenBindDialog}
-            onUnbind={onUnbind}
-            unbindPending={unbindMutation.isPending}
-            onSavePrompt={onSavePrompt}
-            savePromptPending={updatePromptMutation.isPending}
-            onGenerateVideo={onGenerateVideo}
-            generateVideoPending={generateVideoMutation.isPending}
-            onRejectTake={onRejectTake}
-            rejectTakePending={rejectTakeMutation.isPending}
-            autoSelectAttemptId={autoSelectAttemptId}
-            onAutoSelectConsumed={onAutoSelectConsumed}
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center text-sm text-[hsl(var(--color-muted-foreground))]">
-            选择左侧一个生成段开始
+      {/* 右:详情面板 — 用户反馈 r6:参考分镜布局,加顶栏 toolbar + 主体横向 4 列 */}
+      <main className="flex h-full flex-col overflow-hidden">
+        {/* 顶栏 toolbar — 参考截图右上 A- 13 A+ 字号控制 */}
+        <div className="sticky top-0 z-10 flex h-11 shrink-0 items-center justify-between gap-2 border-b border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-4">
+          <div className="flex items-center gap-3 text-[length:0.85em] text-[hsl(var(--color-muted-foreground))]">
+            <span>共 <span className="text-[hsl(var(--color-foreground))] font-medium">{groups?.length ?? 0}</span> 段</span>
+            {groups && groups.length > 0 && (
+              <>
+                <span className="text-[hsl(var(--color-border))]">·</span>
+                <span>
+                  镜头 <span className="text-[hsl(var(--color-foreground))] font-medium">
+                    {groups.reduce((a, g) => a + g.shotCount, 0)}
+                  </span>
+                </span>
+                <span className="text-[hsl(var(--color-border))]">·</span>
+                <span>
+                  时长 <span className="text-[hsl(var(--color-foreground))] font-medium">
+                    {groups.reduce((a, g) => a + g.durationS, 0).toFixed(1)}s
+                  </span>
+                </span>
+              </>
+            )}
           </div>
-        )}
+          {/* 字号控制器(跟分镜共享 --storyboard-fs · localStorage 同 key) */}
+          <div className="flex items-center gap-0.5 rounded border border-[hsl(var(--color-border))] px-1 py-0.5">
+            <button
+              type="button"
+              onClick={() => changeFontSize(-1)}
+              disabled={fontSize <= 11}
+              className="rounded px-1.5 py-0.5 text-[10px] hover:bg-[hsl(var(--color-muted))] disabled:cursor-not-allowed disabled:opacity-30"
+              title="字号减小"
+              aria-label="字号减小"
+            >
+              A-
+            </button>
+            <span className="w-6 text-center font-mono text-[10px]">{fontSize}</span>
+            <button
+              type="button"
+              onClick={() => changeFontSize(1)}
+              disabled={fontSize >= 18}
+              className="rounded px-1.5 py-0.5 text-[10px] hover:bg-[hsl(var(--color-muted))] disabled:cursor-not-allowed disabled:opacity-30"
+              title="字号增大"
+              aria-label="字号增大"
+            >
+              A+
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">
+          {selectedGroupId ? (
+            <GroupDetail
+              groupId={selectedGroupId}
+              onAutoMatch={onAutoMatch}
+              autoMatchPending={autoMatchMutation.isPending}
+              onAutoTag={onAutoTag}
+              autoTagPending={autoTagMutation.isPending}
+              onOpenBindDialog={onOpenBindDialog}
+              onUnbind={onUnbind}
+              unbindPending={unbindMutation.isPending}
+              onSavePrompt={onSavePrompt}
+              savePromptPending={updatePromptMutation.isPending}
+              onGenerateVideo={onGenerateVideo}
+              generateVideoPending={generateVideoMutation.isPending}
+              onRejectTake={onRejectTake}
+              rejectTakePending={rejectTakeMutation.isPending}
+              autoSelectAttemptId={autoSelectAttemptId}
+              onAutoSelectConsumed={onAutoSelectConsumed}
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center text-sm text-[hsl(var(--color-muted-foreground))]">
+              选择左侧一个生成段开始
+            </div>
+          )}
+        </div>
       </main>
 
       {bindDialogOpen && selectedGroupId && (
@@ -707,53 +776,50 @@ function GroupDetail({
   };
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* 顶部 group 信息 */}
-      <header className="flex items-center justify-between border-b border-[hsl(var(--color-border))] pb-3">
-        <div>
-          <h2 className="text-lg font-semibold">{group.number}</h2>
-          <div className="mt-0.5 text-xs text-[hsl(var(--color-muted-foreground))]">
-            {shots.length} 个镜头 · {group.durationS.toFixed(1)}s · {group.status}
-          </div>
+    <div className="flex flex-col gap-3">
+      {/* 顶部 group 信息条(紧凑 · 一行平铺) */}
+      <header className="flex items-center justify-between rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-3 py-2">
+        <div className="flex items-baseline gap-3">
+          <h2 className="text-[length:1.1em] font-semibold">{group.number}</h2>
+          <span className="text-[length:0.85em] text-[hsl(var(--color-muted-foreground))]">
+            {shots.length} 镜 · {group.durationS.toFixed(1)}s · {group.status}
+          </span>
         </div>
-        <div className="text-xs text-[hsl(var(--color-muted-foreground))]">
+        <span className="text-[length:0.78em] text-[hsl(var(--color-muted-foreground))]">
           group #{group.positionIdx}
-        </div>
+        </span>
       </header>
 
+      {/* 用户反馈 r7:主体 4 section 改横向 4 列 grid(参考截图布局)
+       *   xl 屏:资产 260 / 剧本 280 / 提示词 1fr(吃剩余)/ 视频 360
+       *   小屏 fallback:单列上下堆 */}
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[16rem_18rem_1fr_22rem] xl:items-start">
       {/* Section 1: 资产关联 */}
-      <section>
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold">资产关联</h3>
-          <div className="flex gap-2">
+      <section className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] p-3">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-[length:0.95em] font-semibold">资产关联</h3>
+          <div className="flex flex-wrap gap-1">
             <button
               onClick={onAutoMatch}
               disabled={autoMatchPending}
-              className="rounded-md border border-[hsl(var(--color-border))] px-3 py-1.5 text-xs hover:bg-[hsl(var(--color-muted))] disabled:opacity-50"
+              className="rounded border border-[hsl(var(--color-border))] px-2 py-1 text-[length:0.78em] hover:bg-[hsl(var(--color-muted))] disabled:opacity-50"
             >
               {autoMatchPending ? '匹配中...' : '自动匹配'}
             </button>
             <button
               onClick={onOpenBindDialog}
-              className="rounded-md border border-[hsl(var(--color-border))] px-3 py-1.5 text-xs hover:bg-[hsl(var(--color-muted))]"
+              className="rounded border border-[hsl(var(--color-border))] px-2 py-1 text-[length:0.78em] hover:bg-[hsl(var(--color-muted))]"
             >
               关联素材
-            </button>
-            <button
-              disabled
-              title="W5.2.1.1:上传素材到项目库 — 暂走 /art 工作台手动上传"
-              className="rounded-md border border-[hsl(var(--color-border))] px-3 py-1.5 text-xs opacity-40"
-            >
-              上传素材
             </button>
           </div>
         </div>
         {bindings.length === 0 ? (
-          <p className="text-xs text-[hsl(var(--color-muted-foreground))]">
+          <p className="text-[length:0.78em] text-[hsl(var(--color-muted-foreground))]">
             还没有关联资产 — 点"自动匹配"或"关联素材"
           </p>
         ) : (
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2">
             {bindings.map((b) => (
               <BindingCard
                 key={b.id}
@@ -767,9 +833,9 @@ function GroupDetail({
       </section>
 
       {/* Section 2: 原始剧本(只读) */}
-      <section>
-        <h3 className="mb-3 text-sm font-semibold">原始剧本</h3>
-        <div className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-muted))] p-3 text-xs whitespace-pre-wrap leading-relaxed">
+      <section className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] p-3">
+        <h3 className="mb-2 text-[length:0.95em] font-semibold">原始剧本</h3>
+        <div className="max-h-[60vh] overflow-y-auto rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-muted))] p-2 text-[length:0.85em] whitespace-pre-wrap leading-relaxed">
           {shots.length === 0
             ? '(无 shot)'
             : shots
@@ -782,14 +848,14 @@ function GroupDetail({
       </section>
 
       {/* Section 3: 视频提示词 */}
-      <section>
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold">视频提示词</h3>
-          <div className="flex gap-2">
+      <section className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] p-3">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-[length:0.95em] font-semibold">视频提示词</h3>
+          <div className="flex flex-wrap gap-1">
             <button
               onClick={onAutoTag}
               disabled={autoTagPending || editingPrompt}
-              className="rounded-md border border-[hsl(var(--color-border))] px-3 py-1.5 text-xs hover:bg-[hsl(var(--color-muted))] disabled:opacity-50"
+              className="rounded border border-[hsl(var(--color-border))] px-2 py-1 text-[length:0.78em] hover:bg-[hsl(var(--color-muted))] disabled:opacity-50"
             >
               {autoTagPending ? '标记中...' : '自动 @'}
             </button>
@@ -800,14 +866,14 @@ function GroupDetail({
                     setDraftPrompt(group.prompt);
                     setEditingPrompt(false);
                   }}
-                  className="rounded-md border border-[hsl(var(--color-border))] px-3 py-1.5 text-xs hover:bg-[hsl(var(--color-muted))]"
+                  className="rounded border border-[hsl(var(--color-border))] px-2 py-1 text-[length:0.78em] hover:bg-[hsl(var(--color-muted))]"
                 >
                   取消
                 </button>
                 <button
                   onClick={savePrompt}
                   disabled={savePromptPending}
-                  className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                  className="rounded bg-blue-600 px-2 py-1 text-[length:0.78em] font-medium text-white hover:bg-blue-700 disabled:opacity-50"
                 >
                   {savePromptPending ? '保存中...' : '保存'}
                 </button>
@@ -815,7 +881,7 @@ function GroupDetail({
             ) : (
               <button
                 onClick={() => setEditingPrompt(true)}
-                className="rounded-md border border-[hsl(var(--color-border))] px-3 py-1.5 text-xs hover:bg-[hsl(var(--color-muted))]"
+                className="rounded border border-[hsl(var(--color-border))] px-2 py-1 text-[length:0.78em] hover:bg-[hsl(var(--color-muted))]"
               >
                 编辑
               </button>
@@ -826,11 +892,11 @@ function GroupDetail({
           <textarea
             value={draftPrompt}
             onChange={(e) => setDraftPrompt(e.target.value)}
-            className="h-48 w-full rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] p-3 text-xs leading-relaxed font-mono outline-none focus:border-blue-500"
+            className="min-h-[12rem] w-full rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] p-2 text-[length:0.85em] leading-relaxed outline-none focus:border-blue-500"
             placeholder="编辑提示词,保存会写入 PromptEdit 训练集"
           />
         ) : (
-          <div className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] p-3 text-xs whitespace-pre-wrap leading-relaxed font-mono">
+          <div className="max-h-[60vh] overflow-y-auto rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] p-2 text-[length:0.85em] whitespace-pre-wrap leading-relaxed">
             {group.prompt || '(还没有 prompt — 去导演工作台生成)'}
           </div>
         )}
@@ -866,15 +932,18 @@ function GroupDetail({
       </section>
 
       {/* Section 4: 视频预览(W5.4)*/}
-      <VideoPreviewSection
-        groupId={groupId}
-        onGenerate={onGenerateVideo}
-        generatePending={generateVideoPending}
-        onReject={onRejectTake}
-        rejectPending={rejectTakePending}
-        autoSelectAttemptId={autoSelectAttemptId}
-        onAutoSelectConsumed={onAutoSelectConsumed}
-      />
+      <section className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] p-3">
+        <VideoPreviewSection
+          groupId={groupId}
+          onGenerate={onGenerateVideo}
+          generatePending={generateVideoPending}
+          onReject={onRejectTake}
+          rejectPending={rejectTakePending}
+          autoSelectAttemptId={autoSelectAttemptId}
+          onAutoSelectConsumed={onAutoSelectConsumed}
+        />
+      </section>
+      </div>
     </div>
   );
 }

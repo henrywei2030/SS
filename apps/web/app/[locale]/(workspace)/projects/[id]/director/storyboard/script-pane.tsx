@@ -313,11 +313,15 @@ function ScriptContentView({
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             disabled={save.isPending}
-            className="h-full min-h-[60vh] w-full resize-none rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] p-3 font-sans text-[13px] leading-[1.7] text-[hsl(var(--color-foreground))] focus:border-[hsl(var(--color-accent))] focus:outline-none"
+            className="h-full min-h-[60vh] w-full resize-none rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] p-3 font-sans leading-[1.7] text-[hsl(var(--color-foreground))] focus:border-[hsl(var(--color-accent))] focus:outline-none"
+            style={{ fontSize: 'var(--storyboard-fs, 15px)' }}
             placeholder="在此编辑剧本内容…"
           />
         ) : (
-          <pre className="whitespace-pre-wrap font-sans text-[13px] leading-[1.7] text-[hsl(var(--color-foreground))]">
+          <pre
+            className="whitespace-pre-wrap font-sans leading-[1.7] text-[hsl(var(--color-foreground))]"
+            style={{ fontSize: 'var(--storyboard-fs, 15px)' }}
+          >
             {data.content}
           </pre>
         )}

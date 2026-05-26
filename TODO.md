@@ -1,6 +1,6 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-05-25(**二十三收工 · Phase 1.5.3 Scripts/Storyboard 完整工作流 + 7 bug 大修 + 实测 14 镜生成**)
+> 最后更新:2026-05-27(**二十四收工 · UI 大改造 r2~r7 + 删剪辑模块 + IN_EDIT 删枚举值 + 10 维度 audit 5 bug 修**)
 > 仓库:https://github.com/henrywei2030/SS
 > **🚀 一键启动**:`pnpm start`(详见 [README.md](README.md#快速启动) / [CLAUDE.md](CLAUDE.md#设备登记))
 > **📖 实战前必读**:[docs/W1-W7-followup.md](docs/W1-W7-followup.md)(P0 已完成,留 Phase 1.5/2/3 续做项)
@@ -61,6 +61,16 @@
 - [x] **Phase 1.5.3 Scripts/Storyboard 完整工作流**(二十三收工)— 15 项功能 + 7 bug 大修 + 1 migration · 1413 行净增 · **AIGC sync toast + 多集 docx 切分(60 集实测)+ 双模式生成 + 全集 CSV 导出 + 集数删除/锁定/编辑/清空 + parser 短剧 fallback + prompt 强化(14 镜实测)+ shots 分组显示(GroupRows + ShotRow + 合并/拆分/删除)** · 真 bug:buildUserPrompt 空 lines 没 fallback 到 rawContent(LLM 拿到空剧本只产 1 镜)/ createNextVersion soft-delete 复用 unique 撞车 / uploadMultiEpisode 不复活软删 Episode / 第1集右侧空白 cache / 两栏滚动 min-h-0 / DB storyboard_main 不要 JSON / generate 后 ShotsPane 不刷新 — 2026-05-25
 - [x] **r22.1 UI 部分验证 + window.confirm 留尾**(二十三收工)— Chrome MCP 实测:添加 catalog(zod cuid P0 fix 通过)+ 连续添加 + existingModelIdsByRelay 过滤;删除 + 直连 4 字段被 `window.confirm` 阻塞,留 Phase 2 换自定义 Dialog — 2026-05-25
 - [x] **二十三收工后补丁(commit 25e9980)**— autoMerge 关闭(平铺单镜不自动组)+ ShotRow 行内 ↑↓ 合并按钮(不需勾选直接合并到上/下镜)+ openai-compat headers/body timeout bump(60s→180s / 120s→300s)解决 Ep3+ 偶发 0 shots「Headers Timeout Error」根因 — 2026-05-25
+- [x] **UI 大改造 r2~r7 跨 6 波反馈连续修(二十四收工)**— 2026-05-27:
+  - **全局字号 +2**(globals.css html 13→15px,admin-pane 同步抬高)
+  - **分镜表 r2~r4 系列**:em 化解决字号加减失效 bug · 合并组只显组(子镜隐藏)· prompt 完整 inline 编辑(永远显保存按钮)· 拆分组按 positionIdx 排回原位 · expandToGroupShotIds 让散镜 3 向上合并组 1-2 真追加(变 1-3)· 二次生成 `replaceExisting:true` 自动覆盖去重复镜号 · 删除按钮加 · 列分割线 + 紧凑列距 · 列宽:拍摄景别 240 / 剧本 288 / 提示词吃剩余 · framing 单行不加粗 · `[i/N]` 标题与 prompt 同行空格分隔 · splitGroup 按 `[i/N]` 解析回写 shot.prompt · invalidate AIGC cache 同步发布
+  - **顶栏重构**:`HoverNav` 纯 React 自写无闪烁 hover dropdown(同 div 包含 trigger+content) · 模块按钮平铺直显(导演/美术/AIGC/素材库/数据/团队/管理) · 子菜单仅有意义项 · projectId 从 useParams 兜底拿(项目页按钮可点)
+  - **彻底删除剪辑模块**:删 top-nav 剪辑按钮 + project-overview WorkbenchRow + i18n editSuite + globals --color-mod-edit + project.ts MODULE_ENUM + shared/constants WORKBENCH_MODULES + schemas/team.ts + events.ts EDIT_TIMELINE/REEL 常量 + payload type + workers/storyboard 注释
+  - **AIGC 工坊改造 r6/r7**:listGroups 按首镜 positionIdx 排(1-6 在最上)· 左栏 280→220px · 顶栏 toolbar 加统计 + A- N A+ 字号控制(沿用 storyboard.fontSize localStorage 跨页同步)· GroupDetail 主体 4 section 改横向 grid 4 列(xl 屏:资产 16rem / 剧本 18rem / 提示词 1fr / 视频 22rem;小屏单列 fallback)
+  - **10 维度并行 audit + 5 bug 修**:4 agent 并行扫(IN_EDIT removal / 前端 UI / 后端 / 一致性)→ 修真 P1 ×3(project.ts modules default 空数组致新成员无权限 / GroupPromptEditor handleCancel normalize / aigc listGroups N+1 单 query 聚合)+ P2 ×2(HoverNav items 变化重置 open / expandToGroupShotIds 找不到组 warn)
+  - **IN_EDIT 枚举彻底删除**:schema.prisma 删枚举值 + project.ts 进度统计去 IN_EDIT + storyboard.ts 注释 + i18n zh/en 翻译 + 新 migration `20260527000000_drop_in_edit_shot_status`(防御 assert 0 数据后 ALTER TYPE)— ⚠️ migration 需 `pnpm db:migrate:deploy` 手动跑
+  - **loadConfig 错误信息精确化** + **删剪辑 IN_EDIT 数据决策注释**
+  - typecheck:web + api + adapters + shared 全 pass · 累计 ~30 处改动 跨 24 文件 + 1 新 migration
 - [ ] **W5.6 进阶**(留 Phase 2)— 音频波形(wavesurfer.js)/ AI 自动打标(BPM/时长)/ pgvector 向量搜索
 - [ ] **Polish 剩余**(留 Phase 2)— 34 处硬编码颜色 / a11y / listBindings N+1 / OperationLog 命名规范
 - [ ] **W8 团队实战**(下次启动)— 5 人冷启动 + 配 API Key 真接 Seedance + 1 集 7 镜头

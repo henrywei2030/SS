@@ -38,6 +38,55 @@ import {
 // W7+ audit R10:assertProjectAccess 抽到 middleware/access.ts
 import { assertProjectAccess } from '../middleware/access.js';
 
+/**
+ * 反向解析 group.prompt 为各子镜的 prompt 数组
+ *
+ * 新格式(r3 之后):`[1/N] framing angle <prompt>\n[2/N] framing angle <prompt>\n...`
+ *   - header `[i/N]` 后到下一个 `[i/N]`(行首)或文末是该镜内容
+ *   - 内容以 framing+angle 开头(若 sortedShots[i] 提供),会被自动剥离
+ *   - 兼容旧格式 `[i/N] header\n<prompt>` 多行结构(整段含 framing/angle 也能跳过前缀)
+ *
+ * 返回 string[] (长度 = sortedShots.length) 或 null(解析失败 → 调用方 fallback 保留原 shot.prompt)
+ */
+function parseGroupPromptSections(
+  prompt: string,
+  sortedShots: Array<{ framing: string | null; angle: string | null }>,
+): string[] | null {
+  const expectedCount = sortedShots.length;
+  if (expectedCount <= 0) return null;
+  // 匹配 [i/N] 标记位置(行首) — 仅匹配标记本身,不含后续内容
+  const headerRegex = /^\[(\d+)\/(\d+)\]/gm;
+  const headers: { idx: number; total: number; start: number; markerEnd: number }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = headerRegex.exec(prompt)) !== null) {
+    headers.push({
+      idx: Number(m[1]),
+      total: Number(m[2]),
+      start: m.index,
+      markerEnd: m.index + m[0].length,
+    });
+  }
+  if (headers.length !== expectedCount) return null;
+  for (let i = 0; i < headers.length; i++) {
+    if (headers[i]!.idx !== i + 1) return null;
+  }
+  const result: string[] = [];
+  for (let i = 0; i < headers.length; i++) {
+    const start = headers[i]!.markerEnd;
+    const end = i + 1 < headers.length ? headers[i + 1]!.start : prompt.length;
+    let body = prompt.slice(start, end).replace(/^[\s\n]+|[\s\n]+$/g, '');
+    // 尝试剥离 "framing angle" 前缀(若 shot 字段提供 + body 开头匹配)
+    const framing = (sortedShots[i]?.framing ?? '').trim();
+    const angle = (sortedShots[i]?.angle ?? '').trim();
+    const prefix = `${framing} ${angle}`.replace(/\s+/g, ' ').trim();
+    if (prefix && body.startsWith(prefix)) {
+      body = body.slice(prefix.length).replace(/^[\s\n]+/, '');
+    }
+    result.push(body);
+  }
+  return result;
+}
+
 async function loadEpisodeOrThrow(ctx: Context, episodeId: string) {
   if (!ctx.user) {
     throw new TRPCError({ code: 'UNAUTHORIZED' });
@@ -699,12 +748,17 @@ export const storyboardRouter = router({
 
       const totalDuration = sorted.reduce((s, x) => s + x.durationS, 0);
 
-      // 默认提示词：组内 shots 的 prompt 拼接（用户后续可编辑）
+      // 默认提示词：组内 shots 的 prompt 拼接(用户后续可编辑)
+      // 用户反馈 r3:[i/N] 标题 + prompt 同一行空格分隔(原本是 \n 换行)+ 段间用 \n 隔开
+      // 格式:[1/N] framing angle prompt\n[2/N] framing angle prompt\n...
       const defaultPrompt =
         input.promptOverride ??
         sorted
-          .map((s, i) => `[${i + 1}/${sorted.length}] ${s.framing ?? ''} ${s.angle ?? ''}\n${s.prompt}`)
-          .join('\n\n');
+          .map((s, i) => {
+            const title = `[${i + 1}/${sorted.length}] ${s.framing ?? ''} ${s.angle ?? ''}`.replace(/\s+/g, ' ').trim();
+            return `${title} ${s.prompt}`;
+          })
+          .join('\n');
 
       // 记录被选中 shots 当前所属的旧组 — 合并后这些组可能变空,需要清理
       const oldGroupIds = Array.from(
@@ -799,16 +853,34 @@ export const storyboardRouter = router({
         });
       }
 
-      await ctx.prisma.$transaction([
-        ctx.prisma.shotGroup.update({
+      // 用户反馈:在分镜组保存修改的 prompt,拆分时需同步到对应子镜
+      // 按合并时的拼接格式 `[i/N] <标题行>\n<prompt 内容>` 反向解析
+      // 解析失败(用户改乱了格式)→ fallback 保留 shot.prompt 原值
+      const sortedShots = [...group.shots].sort((a, b) => a.positionIdx - b.positionIdx);
+      const sectionUpdates = parseGroupPromptSections(group.prompt, sortedShots);
+
+      await ctx.prisma.$transaction(async (tx) => {
+        await tx.shotGroup.update({
           where: { id: input.groupId },
           data: { deletedAt: new Date() },
-        }),
-        ctx.prisma.shot.updateMany({
+        });
+        await tx.shot.updateMany({
           where: { groupId: input.groupId },
           data: { groupId: null },
-        }),
-      ]);
+        });
+        // 解析成功(段数等于子镜数)才回写,否则保留原 shot.prompt
+        if (sectionUpdates && sectionUpdates.length === sortedShots.length) {
+          for (let i = 0; i < sortedShots.length; i++) {
+            const newPrompt = sectionUpdates[i]!;
+            if (newPrompt !== sortedShots[i]!.prompt) {
+              await tx.shot.update({
+                where: { id: sortedShots[i]!.id },
+                data: { prompt: newPrompt },
+              });
+            }
+          }
+        }
+      });
 
       await logOperation(
         ctx,
@@ -818,7 +890,11 @@ export const storyboardRouter = router({
         { ...group, projectId: group.episode.projectId },
         null,
       );
-      return { ok: true, shotCount: group.shots.length };
+      return {
+        ok: true,
+        shotCount: group.shots.length,
+        promptSynced: sectionUpdates !== null,
+      };
     }),
 
   updateGroup: protectedProcedure
@@ -1419,7 +1495,7 @@ export const storyboardRouter = router({
     // 第 20 轮 audit / ADR-27:发布是 episode-level 不可逆动作,Mastra agent 必须 human-in-loop
     .meta({
       agentTool: {
-        description: '发布整集分镜:status DRAFT/IN_PROGRESS → IN_PROGRESS + publishedVersion+1 + shot/group → PUBLISHED;触发下游 W6 剪辑订阅',
+        description: '发布整集分镜:status DRAFT/IN_PROGRESS → IN_PROGRESS + publishedVersion+1 + shot/group → PUBLISHED;触发下游订阅方',
         sideEffects: [
           'db.update:Episode',
           'db.updateMany:Shot',
@@ -1438,7 +1514,7 @@ export const storyboardRouter = router({
       // 发布语义(shot/group 的 status):
       //   - DRAFT → 升级为 PUBLISHED + 戳 publishedAt
       //   - PUBLISHED → 保持 PUBLISHED,publishedAt 戳更新(等于重新触发下游消费者)
-      //   - QUEUED/GENERATING/GENERATED/ADOPTED/IN_EDIT/FINAL/FAILED/BUDGET_BLOCKED → 不动
+      //   - QUEUED/GENERATING/GENERATED/ADOPTED/FINAL/FAILED/BUDGET_BLOCKED → 不动
       //     (已在制作流水中或终态,避免覆盖丢进度)
       const REPUBLISHABLE: Array<'DRAFT' | 'PUBLISHED'> = ['DRAFT', 'PUBLISHED'];
 
@@ -1518,7 +1594,7 @@ export const storyboardRouter = router({
 
       await logOperation(ctx, 'storyboard.publish', 'episode', ep.id, ep, updated);
 
-      // 第 19 轮 audit P0:真 publish 给订阅方(events.ts 定义但 router 之前漏调,W6 剪辑 / Phase 2 Auto-Salvage 订阅方都收不到)
+      // 第 19 轮 audit P0:真 publish 给订阅方(events.ts 定义但 router 之前漏调,下游 / Phase 2 Auto-Salvage 订阅方都收不到)
       const shotIds = await ctx.prisma.shot.findMany({
         where: { episodeId: ep.id, deletedAt: null },
         select: { id: true },

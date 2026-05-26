@@ -460,7 +460,7 @@ function AddMemberDialog({
                 projectId,
                 userId: selectedUserId,
                 role,
-                modules: ['director', 'art', 'aigc', 'edit', 'library', 'analytics'],
+                modules: ['director', 'art', 'aigc', 'library', 'analytics'],
               })
             }
             disabled={!selectedUserId || addMember.isPending}

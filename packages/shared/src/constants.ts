@@ -20,12 +20,11 @@ export type ShotPriorityCode = (typeof SHOT_PRIORITIES)[number];
 export const DEFAULT_SHOT_DURATION_S = 5;
 export const DEFAULT_MAX_DURATION_S = 10;
 
-// 工作台模块清单（用于权限分配）
+// 工作台模块清单(用于权限分配)
 export const WORKBENCH_MODULES = [
   'director', // 导演
   'art', // 美术
   'aigc', // AIGC
-  'edit', // 剪辑
   'library', // 素材库
   'analytics', // 数据监控
 ] as const;

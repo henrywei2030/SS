@@ -47,7 +47,6 @@
   --color-mod-director: 217 91% 60%;
   --color-mod-art: 280 65% 60%;
   --color-mod-aigc: 180 60% 50%;
-  --color-mod-edit: 142 64% 47%;
   --color-mod-library: 38 80% 55%;
   --color-mod-analytics: 0 65% 55%;
 
@@ -151,7 +150,7 @@ body {
   background-color: hsl(var(--bg));
   color: hsl(var(--fg));
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -162,27 +161,28 @@ body {
 /* ============================================================================
  * 后台管理 — 字号适度放大（提升可读性）
  * 在 admin layout 根加 .admin-pane 类即生效
+ * 2026-05-25 全局 +2px:基线 13→15,admin 14→16,各 text-[Xpx] 覆盖同步 +2
  * ============================================================================ */
 .admin-pane {
-  font-size: 14px;
+  font-size: 16px;
 }
-.admin-pane h1 { font-size: 22px; }
-.admin-pane h2 { font-size: 18px; }
-.admin-pane table { font-size: 13.5px; }
-.admin-pane .text-\[10px\] { font-size: 11px !important; }
-.admin-pane .text-\[11px\] { font-size: 12px !important; }
-.admin-pane .text-\[12px\] { font-size: 13px !important; }
-.admin-pane .text-\[12\.5px\] { font-size: 13.5px !important; }
-.admin-pane .text-\[13px\] { font-size: 14px !important; }
-.admin-pane .text-\[15px\] { font-size: 16px !important; }
+.admin-pane h1 { font-size: 24px; }
+.admin-pane h2 { font-size: 20px; }
+.admin-pane table { font-size: 15.5px; }
+.admin-pane .text-\[10px\] { font-size: 13px !important; }
+.admin-pane .text-\[11px\] { font-size: 14px !important; }
+.admin-pane .text-\[12px\] { font-size: 15px !important; }
+.admin-pane .text-\[12\.5px\] { font-size: 15.5px !important; }
+.admin-pane .text-\[13px\] { font-size: 16px !important; }
+.admin-pane .text-\[15px\] { font-size: 18px !important; }
 /* 输入框与按钮在 admin 区域略增高 */
 .admin-pane input,
 .admin-pane select {
   height: 36px;
-  font-size: 14px;
+  font-size: 16px;
 }
 .admin-pane button {
-  font-size: 13.5px;
+  font-size: 15.5px;
 }
 
 /* ============================================================================

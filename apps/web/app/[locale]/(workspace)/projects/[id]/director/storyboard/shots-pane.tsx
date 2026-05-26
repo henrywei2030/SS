@@ -17,7 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-import { ShotEditDialog, GroupEditDialog } from './edit-dialog';
+import { ShotEditDialog } from './edit-dialog';
 
 interface Props {
   episodeId: string;
@@ -63,13 +63,11 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
 
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [editingShot, setEditingShot] = React.useState<Shot | null>(null);
-  const [editingGroup, setEditingGroup] = React.useState<Group | null>(null);
 
   // 切集时清空选中
   React.useEffect(() => {
     setSelected(new Set());
     setEditingShot(null);
-    setEditingGroup(null);
   }, [episodeId]);
 
   const groups = ((data && 'groups' in data ? data.groups : undefined) ?? []) as Group[];
@@ -81,6 +79,22 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
     for (const g of groups) all.push(...g.shots);
     all.push(...ungrouped);
     return [...all].sort((a, b) => a.positionIdx - b.positionIdx);
+  }, [groups, ungrouped]);
+
+  // 用户反馈:拆分组后子镜应回到原位置,不能堆底部
+  // groups 和 ungrouped 混排,组的"代表位置"取 group.shots[0].positionIdx
+  // (即组内首个 shot 的位置 — 这样组始终落在组内首镜的本该位置)
+  type MixedRow = { kind: 'group'; data: Group; pos: number } | { kind: 'shot'; data: Shot; pos: number };
+  const mixedRows = React.useMemo<MixedRow[]>(() => {
+    const rows: MixedRow[] = [];
+    for (const g of groups) {
+      const firstPos = g.shots[0]?.positionIdx ?? Number.MAX_SAFE_INTEGER;
+      rows.push({ kind: 'group', data: g, pos: firstPos });
+    }
+    for (const s of ungrouped) {
+      rows.push({ kind: 'shot', data: s, pos: s.positionIdx });
+    }
+    return rows.sort((a, b) => a.pos - b.pos);
   }, [groups, ungrouped]);
 
   const toggleSelected = (id: string): void => {
@@ -95,6 +109,9 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
   const invalidate = (): void => {
     void utils.storyboard.listShots.invalidate({ episodeId, grouped: true });
     void utils.storyboard.listEpisodes.invalidate();
+    // 用户反馈 r3:分镜改动需同步到 AIGC — AIGC 直接 query 活表,只需让其 react-query cache 失效
+    void utils.aigc.listGroups.invalidate({ episodeId });
+    void utils.aigc.getGroupDetail.invalidate();
   };
 
   // -------- mutations --------
@@ -127,7 +144,21 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
       toast.error('至少选 2 个镜头才能合并');
       return;
     }
-    mergeShots.mutate({ shotIds });
+    // 去重(防止 shot 被同时算两次,如锚点 shot 同时也是组内 shot)
+    mergeShots.mutate({ shotIds: Array.from(new Set(shotIds)) });
+  };
+
+  // 用户反馈:散镜 3 向上合并组 1-2 应该追加进组(变 1-3),而不是新建 2-3 让镜 1 落单
+  // 把 shot 展开为其所在组的所有 shotIds(无组时仅返回自身),并入合并
+  // r7 audit P2-B2:groupId 指向已删除组时静默 fallback 会丢数据,改为 warn 提示
+  const expandToGroupShotIds = (shot: Shot): string[] => {
+    if (!shot.groupId) return [shot.id];
+    const g = groups.find((x) => x.id === shot.groupId);
+    if (!g) {
+      console.warn(`[shots-pane] shot ${shot.id} groupId=${shot.groupId} 指向不存在的组,可能数据不一致`);
+      return [shot.id];
+    }
+    return g.shots.map((s) => s.id);
   };
 
   const mergeUpFromSelection = (): void => {
@@ -142,7 +173,8 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
       return;
     }
     const prev = flatShots[idx - 1]!;
-    doMergeShots([prev.id, anchorId]);
+    const anchor = flatShots[idx]!;
+    doMergeShots([...expandToGroupShotIds(prev), ...expandToGroupShotIds(anchor)]);
   };
 
   const mergeDownFromSelection = (): void => {
@@ -157,7 +189,8 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
       return;
     }
     const next = flatShots[idx + 1]!;
-    doMergeShots([anchorId, next.id]);
+    const anchor = flatShots[idx]!;
+    doMergeShots([...expandToGroupShotIds(anchor), ...expandToGroupShotIds(next)]);
   };
 
   // Phase 1.5.3 精炼 9:每行 ↑↓ 按钮直接合并(不需勾选)
@@ -167,7 +200,9 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
       toast.error('已是首镜,无法向上合并');
       return;
     }
-    doMergeShots([flatShots[idx - 1]!.id, shotId]);
+    const prev = flatShots[idx - 1]!;
+    const curr = flatShots[idx]!;
+    doMergeShots([...expandToGroupShotIds(prev), ...expandToGroupShotIds(curr)]);
   };
   const mergeDownForShot = (shotId: string): void => {
     const idx = flatShots.findIndex((s) => s.id === shotId);
@@ -175,7 +210,9 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
       toast.error('已是末镜,无法向下合并');
       return;
     }
-    doMergeShots([shotId, flatShots[idx + 1]!.id]);
+    const next = flatShots[idx + 1]!;
+    const curr = flatShots[idx]!;
+    doMergeShots([...expandToGroupShotIds(curr), ...expandToGroupShotIds(next)]);
   };
   const canMergeUpForShot = (shotId: string): boolean => {
     const idx = flatShots.findIndex((s) => s.id === shotId);
@@ -298,64 +335,60 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
         </div>
       )}
 
-      {/* 分镜表 — 字号由 storyboard-workspace 注入的 --storyboard-fs 控制 */}
+      {/* 分镜表 — 字号由 storyboard-workspace 注入的 --storyboard-fs 控制
+       *  主体 td 不写 fontSize 类直接继承 table;辅助元素用 em 相对联动 */}
       <div className="flex-1 overflow-auto">
         <table
           className="w-full"
-          style={{ fontSize: 'var(--storyboard-fs, 13px)' }}
+          style={{ fontSize: 'var(--storyboard-fs, 15px)' }}
         >
-          <thead className="sticky top-0 border-b border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] text-xs text-[hsl(var(--color-muted-foreground))]">
+          <thead className="sticky top-0 border-b border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] text-[length:0.85em] text-[hsl(var(--color-muted-foreground))]">
             <tr>
               <th className="w-8 px-2 py-2"></th>
-              <th className="w-20 px-3 py-2 text-left font-medium">镜号</th>
-              <th className="w-28 px-3 py-2 text-left font-medium">拍摄角度景别</th>
-              <th className="px-3 py-2 text-left font-medium">剧本内容</th>
-              <th className="px-3 py-2 text-left font-medium">提示词(含台词/OS)</th>
-              <th className="w-24 px-3 py-2 text-right font-medium">操作</th>
+              <th className="w-16 border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 text-left font-medium">镜号</th>
+              {/* 拍摄景别:足够单行显示 "特写 平视 0° · 运镜:固定 · 光线:低调" */}
+              <th className="w-[15rem] border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 text-left font-medium">拍摄角度景别</th>
+              {/* 剧本内容:用户要求紧凑,固定较窄宽度 */}
+              <th className="w-[18rem] border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 text-left font-medium">剧本内容</th>
+              {/* 提示词:不设宽度,吃所有剩余空间 — 用户要求最宽 */}
+              <th className="border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 text-left font-medium">提示词(含台词/OS)</th>
+              <th className="w-20 border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 text-right font-medium">操作</th>
             </tr>
           </thead>
           <tbody>
-            {groups.map((g) => (
-              <GroupRows
-                key={g.id}
-                group={g}
-                selected={selected}
-                onToggleSelect={toggleSelected}
-                onSplit={() => splitGroup.mutate({ groupId: g.id })}
-                onEditGroup={() => setEditingGroup(g)}
-                onEditShot={(s) => setEditingShot(s)}
-                onMergeUp={mergeUpForShot}
-                onMergeDown={mergeDownForShot}
-                canMergeUp={canMergeUpForShot}
-                canMergeDown={canMergeDownForShot}
-                disabled={mutating}
-              />
-            ))}
-            {ungrouped.length > 0 && groups.length > 0 && (
-              <tr>
-                <td
-                  colSpan={6}
-                  className="border-t border-[hsl(var(--color-border))] bg-[hsl(var(--color-secondary)/0.3)] px-3 py-1.5 text-[11px] text-[hsl(var(--color-muted-foreground))]"
-                >
-                  未分组({ungrouped.length})
-                </td>
-              </tr>
+            {/* 用户反馈:拆分组后子镜应按 positionIdx 顺序排回组之间(不再底部聚集)
+             *  groups 用 group.shots[0].positionIdx 作代表位 + ungrouped 用 shot.positionIdx
+             *  排序混合渲染,组和散镜按真实位置插队展示 */}
+            {mixedRows.map((row) =>
+              row.kind === 'group' ? (
+                <GroupRow
+                  key={`g-${row.data.id}`}
+                  group={row.data}
+                  onSplit={() => splitGroup.mutate({ groupId: row.data.id })}
+                  onSaved={invalidate}
+                  disabled={mutating}
+                />
+              ) : (
+                <ShotRow
+                  key={`s-${row.data.id}`}
+                  shot={row.data}
+                  selected={selected.has(row.data.id)}
+                  onToggleSelect={() => toggleSelected(row.data.id)}
+                  onEdit={() => setEditingShot(row.data)}
+                  onMergeUp={() => mergeUpForShot(row.data.id)}
+                  onMergeDown={() => mergeDownForShot(row.data.id)}
+                  canMergeUp={canMergeUpForShot(row.data.id)}
+                  canMergeDown={canMergeDownForShot(row.data.id)}
+                  onDelete={() => {
+                    if (confirm(`确定删除分镜 ${row.data.number}?`)) {
+                      deleteShot.mutate({ shotId: row.data.id });
+                    }
+                  }}
+                  disabled={mutating}
+                  indent={false}
+                />
+              ),
             )}
-            {ungrouped.map((s) => (
-              <ShotRow
-                key={s.id}
-                shot={s}
-                selected={selected.has(s.id)}
-                onToggleSelect={() => toggleSelected(s.id)}
-                onEdit={() => setEditingShot(s)}
-                onMergeUp={() => mergeUpForShot(s.id)}
-                onMergeDown={() => mergeDownForShot(s.id)}
-                canMergeUp={canMergeUpForShot(s.id)}
-                canMergeDown={canMergeDownForShot(s.id)}
-                disabled={mutating}
-                indent={false}
-              />
-            ))}
           </tbody>
         </table>
       </div>
@@ -370,115 +403,206 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
           }}
         />
       )}
-      {editingGroup && (
-        <GroupEditDialog
-          group={editingGroup}
-          onClose={() => setEditingGroup(null)}
-          onSaved={() => {
-            setEditingGroup(null);
-            invalidate();
-          }}
-        />
-      )}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// 组 + 组内单镜
+// 合并组单行 — 不再展开子镜,组级 prompt 完整显示 + inline 编辑
+// 子镜数据仍在 DB,拆分后回到 ungrouped 区可独立编辑
 // ---------------------------------------------------------------------------
 
-function GroupRows({
+function GroupRow({
   group,
-  selected,
-  onToggleSelect,
   onSplit,
-  onEditGroup,
-  onEditShot,
-  onMergeUp,
-  onMergeDown,
-  canMergeUp,
-  canMergeDown,
+  onSaved,
   disabled,
 }: {
   group: Group;
-  selected: Set<string>;
-  onToggleSelect: (id: string) => void;
   onSplit: () => void;
-  onEditGroup: () => void;
-  onEditShot: (shot: Shot) => void;
-  onMergeUp: (shotId: string) => void;
-  onMergeDown: (shotId: string) => void;
-  canMergeUp: (shotId: string) => boolean;
-  canMergeDown: (shotId: string) => boolean;
+  onSaved: () => void;
   disabled: boolean;
 }): React.ReactElement {
   return (
-    <>
-      {/* 组头行 */}
-      <tr className="border-t-2 border-[hsl(var(--color-border))] bg-[hsl(var(--color-secondary)/0.2)]">
-        <td className="px-2 py-2" />
-        <td className="px-3 py-2">
-          <div className="flex flex-col gap-0.5">
-            <span className="font-mono text-sm font-semibold">{group.number}</span>
-            <span className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
-              {group.durationS.toFixed(1)}s · {group.shots.length} 镜
-            </span>
-            <StatusBadge status={group.status} />
-          </div>
-        </td>
-        <td className="px-3 py-2 text-[10px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]" colSpan={2}>
-          组
-        </td>
-        <td className="max-w-[400px] px-3 py-2 text-xs leading-relaxed">
-          <div className="line-clamp-3 whitespace-pre-wrap text-[hsl(var(--color-muted-foreground))]">
-            {group.prompt}
-          </div>
-        </td>
-        <td className="px-3 py-2 text-right">
-          <div className="flex justify-end gap-1">
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={onEditGroup}
-              disabled={disabled}
-              className="size-7 p-0"
-              title="编辑组级提示词 / 组号"
-            >
-              <Pencil className="size-3.5" />
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={onSplit}
-              disabled={disabled}
-              className="gap-1"
-              title="拆分本组,组内分镜回到独立状态"
-            >
-              <Split className="size-3.5" />
-              拆分
-            </Button>
-          </div>
-        </td>
-      </tr>
-
-      {/* 组内子镜 */}
-      {group.shots.map((s) => (
-        <ShotRow
-          key={s.id}
-          shot={s}
-          selected={selected.has(s.id)}
-          onToggleSelect={() => onToggleSelect(s.id)}
-          onEdit={() => onEditShot(s)}
-          onMergeUp={() => onMergeUp(s.id)}
-          onMergeDown={() => onMergeDown(s.id)}
-          canMergeUp={canMergeUp(s.id)}
-          canMergeDown={canMergeDown(s.id)}
+    <tr className="border-t-2 border-[hsl(var(--color-border))] bg-[hsl(var(--color-secondary)/0.2)]">
+      <td className="px-2 py-2 align-top" />
+      <td className="border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 align-top">
+        <div className="flex flex-col gap-0.5">
+          <span className="font-mono text-[length:1.05em] font-semibold">{group.number}</span>
+          <span className="text-[length:0.7em] text-[hsl(var(--color-muted-foreground))]">
+            {group.durationS.toFixed(1)}s · {group.shots.length} 镜合并
+          </span>
+          <StatusBadge status={group.status} />
+        </div>
+      </td>
+      <td className="border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 align-top">
+        <div className="flex flex-col gap-1 text-[hsl(var(--color-muted-foreground))]">
+          {group.shots.map((s, i) => (
+            <div key={s.id} className="whitespace-nowrap leading-relaxed">
+              <span className="mr-1 font-mono text-[length:0.7em]">[{i + 1}]</span>
+              <span>{s.framing ?? ''}</span>
+              {s.angle && <span className="ml-1">{s.angle}</span>}
+              {s.movement && <span className="ml-1">· 运镜:{s.movement}</span>}
+              {s.lighting && <span className="ml-1">· 光线:{s.lighting}</span>}
+            </div>
+          ))}
+        </div>
+      </td>
+      <td className="border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 align-top">
+        <div className="flex flex-col gap-1 text-[hsl(var(--color-muted-foreground))]">
+          {group.shots.map((s, i) => (
+            <div key={s.id} className="whitespace-pre-wrap leading-relaxed">
+              <span className="mr-1 font-mono text-[length:0.7em]">[{i + 1}]</span>
+              {s.content}
+            </div>
+          ))}
+        </div>
+      </td>
+      <td className="border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 align-top">
+        <GroupPromptEditor
+          groupId={group.id}
+          initialPrompt={group.prompt}
           disabled={disabled}
-          indent
+          onSaved={onSaved}
         />
-      ))}
-    </>
+      </td>
+      <td className="border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 text-right align-top">
+        <div className="flex justify-end gap-1">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onSplit}
+            disabled={disabled}
+            className="gap-1"
+            title="拆分本组,组内分镜回到独立状态(数据保留)"
+          >
+            <Split className="size-3.5" />
+            拆分
+          </Button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 组级提示词 inline 编辑器
+// 默认显示 textarea(自适应高度) · hover/focus 显边框 · 有改动时显保存/取消按钮
+// 保存调 storyboard.updateGroup(无 diffNote,inline 场景不收集修改原因)
+// ---------------------------------------------------------------------------
+
+// normalize 合并组 prompt:
+//   1. 多换行收紧为单换行(去段间空行)
+//   2. [i/N] 标题行 + 下一行非另一段标题 → 合并为同行空格分隔
+//      用户反馈 r3:`[1/6] 特写 平视 0°` 不应另起一行,跟 prompt 内容单空格连接
+const normalizePrompt = (s: string): string =>
+  s
+    .replace(/\n{2,}/g, '\n')
+    .replace(/^(\[\d+\/\d+\][^\n]+)\n(?=[^\[])/gm, '$1 ');
+
+function GroupPromptEditor({
+  groupId,
+  initialPrompt,
+  disabled,
+  onSaved,
+}: {
+  groupId: string;
+  initialPrompt: string;
+  disabled: boolean;
+  onSaved: () => void;
+}): React.ReactElement {
+  const [value, setValue] = React.useState(() => normalizePrompt(initialPrompt));
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+  // 上游 prompt 变化(refetch 后)同步本地 state · 同时 normalize 空行
+  React.useEffect(() => {
+    setValue(normalizePrompt(initialPrompt));
+  }, [initialPrompt]);
+
+  // 自适应高度:每次内容变化重算
+  const autoResize = React.useCallback((): void => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, []);
+
+  React.useEffect(() => {
+    autoResize();
+  }, [value, autoResize]);
+
+  const update = trpc.storyboard.updateGroup.useMutation({
+    onSuccess: () => {
+      toast.success('已保存 · 改动已记录到 PromptEdit 训练集');
+      onSaved();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const dirty = value !== normalizePrompt(initialPrompt);
+
+  const handleSave = (): void => {
+    if (!dirty) return;
+    update.mutate({
+      groupId,
+      patch: { prompt: value },
+    });
+  };
+  const handleCancel = (): void => {
+    // r7 audit:用 normalized 值恢复,与 dirty 判断的基准一致
+    // 否则取消后 dirty 立刻误判为 true(因 initialPrompt 含未 normalize 的双换行)
+    setValue(normalizePrompt(initialPrompt));
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        disabled={disabled || update.isPending}
+        rows={1}
+        className={cn(
+          'w-full resize-none rounded border bg-transparent px-2 py-1.5 leading-relaxed whitespace-pre-wrap',
+          'font-sans text-[hsl(var(--color-muted-foreground))]',
+          'border-transparent hover:border-[hsl(var(--color-border))] focus:border-[hsl(var(--color-accent))] focus:bg-[hsl(var(--color-background))] focus:text-[hsl(var(--color-foreground))] focus:outline-none',
+          dirty && 'border-[hsl(var(--color-accent))] bg-[hsl(var(--color-background))] text-[hsl(var(--color-foreground))]',
+        )}
+        style={{ fontSize: 'inherit' }}
+        placeholder="组级提示词 · 直接编辑此文本"
+        aria-label="组级提示词"
+      />
+      {/* 保存按钮永远显示 — 用户反馈 dirty 状态太隐蔽看不到入口
+       *  · 无改动时:仅显示字数 + "保存" 灰按钮 disabled
+       *  · 有改动:显示 "未保存" + 取消 + 保存(高亮 accent) */}
+      <div className="flex items-center justify-end gap-1.5 text-[length:0.7em]">
+        <span className={cn('mr-auto', dirty ? 'text-[hsl(var(--color-accent))]' : 'text-[hsl(var(--color-muted-foreground))]')}>
+          {value.length} 字{dirty && ' · 未保存'}
+        </span>
+        {dirty && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={handleCancel}
+            disabled={update.isPending}
+            className="h-6 gap-1 px-2"
+          >
+            <X className="size-3" />
+            取消
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant={dirty ? 'default' : 'outline'}
+          onClick={handleSave}
+          disabled={!dirty || update.isPending}
+          className="h-6 gap-1 px-2"
+        >
+          {update.isPending ? <Loader2 className="size-3 animate-spin" /> : null}
+          保存
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -495,6 +619,7 @@ function ShotRow({
   onMergeDown,
   canMergeUp,
   canMergeDown,
+  onDelete,
   disabled,
   indent,
 }: {
@@ -506,6 +631,7 @@ function ShotRow({
   onMergeDown?: () => void;
   canMergeUp?: boolean;
   canMergeDown?: boolean;
+  onDelete?: () => void;
   disabled: boolean;
   indent: boolean;
 }): React.ReactElement {
@@ -525,45 +651,38 @@ function ShotRow({
           className="size-4 cursor-pointer accent-[hsl(var(--color-accent))]"
         />
       </td>
-      <td className={cn('px-3 py-2 font-mono text-xs', indent && 'pl-6')}>
+      <td className={cn('border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 font-mono', indent && 'pl-4')}>
         <div className="flex flex-col gap-0.5">
           <span>{shot.number}</span>
-          <span className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
+          <span className="text-[length:0.7em] text-[hsl(var(--color-muted-foreground))]">
             {shot.durationS.toFixed(1)}s
           </span>
           {shot.priority && (
             <Badge
               variant={shot.priority === 'S' ? 'destructive' : 'secondary'}
-              className="w-fit px-1 text-[9px]"
+              className="w-fit px-1 text-[length:0.62em]"
             >
               {shot.priority}
             </Badge>
           )}
         </div>
       </td>
-      <td className="px-3 py-2 text-xs">
-        <div className="flex flex-col gap-0.5">
-          <div>
-            <span className="font-medium">{shot.framing}</span>{' '}
-            <span className="text-[hsl(var(--color-muted-foreground))]">{shot.angle}</span>
-          </div>
-          {/* W7 followup:movement / lighting 仅在有值时显示,避免空行干扰 */}
-          {(shot.movement || shot.lighting) && (
-            <div className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
-              {shot.movement && <span>运镜:{shot.movement}</span>}
-              {shot.movement && shot.lighting && <span> · </span>}
-              {shot.lighting && <span>光线:{shot.lighting}</span>}
-            </div>
-          )}
+      <td className="border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2">
+        {/* 用户反馈:拍摄景别在一行显示完毕(framing+angle+movement+lighting 同行,无加粗) */}
+        <div className="whitespace-nowrap leading-relaxed text-[hsl(var(--color-muted-foreground))]">
+          <span>{shot.framing}</span>
+          {shot.angle && <span className="ml-1">{shot.angle}</span>}
+          {shot.movement && <span className="ml-1">· 运镜:{shot.movement}</span>}
+          {shot.lighting && <span className="ml-1">· 光线:{shot.lighting}</span>}
         </div>
       </td>
-      <td className="px-3 py-2 text-xs leading-relaxed">{shot.content}</td>
-      <td className="max-w-[400px] px-3 py-2 text-xs leading-relaxed">
+      <td className="border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 leading-relaxed">{shot.content}</td>
+      <td className="max-w-[400px] border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 leading-relaxed">
         <div className="line-clamp-4 whitespace-pre-wrap text-[hsl(var(--color-muted-foreground))]">
           {shot.prompt}
         </div>
       </td>
-      <td className="px-3 py-2 text-right">
+      <td className="border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 text-right">
         <div className="flex items-center justify-end gap-0.5">
           {onMergeUp && (
             <Button
@@ -599,6 +718,18 @@ function ShotRow({
           >
             <Pencil className="size-3.5" />
           </Button>
+          {onDelete && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onDelete}
+              disabled={disabled}
+              className="size-7 p-0 text-[hsl(var(--color-destructive))] hover:bg-[hsl(var(--color-destructive)/0.1)] hover:text-[hsl(var(--color-destructive))]"
+              title="删除本分镜"
+            >
+              <Trash2 className="size-3.5" />
+            </Button>
+          )}
         </div>
       </td>
     </tr>
@@ -609,7 +740,7 @@ function StatusBadge({ status }: { status: string }): React.ReactElement {
   const variant: 'secondary' | 'success' | 'default' =
     status === 'PUBLISHED' ? 'success' : status === 'DRAFT' ? 'secondary' : 'default';
   return (
-    <Badge variant={variant} className="w-fit text-[9px]">
+    <Badge variant={variant} className="w-fit text-[length:0.62em]">
       {status}
     </Badge>
   );

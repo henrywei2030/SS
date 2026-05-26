@@ -11,7 +11,6 @@ export const workbenchModuleSchema = z.enum([
   'director',
   'art',
   'aigc',
-  'edit',
   'library',
   'analytics',
 ]);

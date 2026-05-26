@@ -6,7 +6,6 @@ import {
   ClapperboardIcon,
   Palette,
   Sparkles,
-  Scissors,
   ChevronRight,
   Users,
   BarChart3,
@@ -106,14 +105,6 @@ export function ProjectOverview({ projectId }: { projectId: string }): React.Rea
               title={t('modules.workbench.aigc')}
               subtitle="分镜编辑 · 视频生成 · 批量制作"
               colorVar="--color-mod-aigc"
-            />
-            <WorkbenchRow
-              href={`/${params.locale}/projects/${projectId}/edit`}
-              icon={Scissors}
-              title={t('modules.workbench.edit')}
-              subtitle="素材整理 · 时间线 · 导出交付"
-              colorVar="--color-mod-edit"
-              comingSoon
             />
             <WorkbenchRow
               href={`/${params.locale}/projects/${projectId}/insights`}

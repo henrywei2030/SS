@@ -5,7 +5,7 @@
  *   1. publish 'running' 到 Redis channel(SSE 推前端状态变化)
  *   2. 调 getVideoProvider(providerId).generate(req, ctx) — skipLedger:true
  *   3. 成功:写 MediaItem(VIDEO)+ 升 attempt SUCCESS + costLedgerEntry(同事务)
- *           + publish EVENTS.GENERATION_COMPLETED(EventBus,下游 W6 剪辑模块用)
+ *           + publish EVENTS.GENERATION_COMPLETED(EventBus,下游订阅方用)
  *           + publish 'success' 到 Redis channel(SSE 推前端)
  *   4. 失败:升 attempt FAILED + costLedgerEntry(success:false)
  *           + publish 'failed' 到 Redis channel
@@ -372,7 +372,7 @@ export async function processVideoGenJob(
     },
   });
 
-  // EventBus(下游 W6 剪辑 / Phase 2 Auto-Salvage 订阅)
+  // EventBus(下游订阅方 / Phase 2 Auto-Salvage 订阅)
   await getEventBus()
     .publish(
       EVENTS.GENERATION_COMPLETED,

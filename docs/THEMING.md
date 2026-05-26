@@ -96,7 +96,6 @@ if (VALID_THEMES.includes(stored)) {
   --color-mod-director: 217 91% 60%;   /* 蓝 */
   --color-mod-art: 280 65% 60%;        /* 紫 */
   --color-mod-aigc: 180 60% 50%;       /* 青 */
-  --color-mod-edit: 142 64% 47%;       /* 绿 */
   --color-mod-library: 38 80% 55%;     /* 琥珀 */
   --color-mod-analytics: 0 65% 55%;    /* 红 */
 }

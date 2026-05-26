@@ -211,6 +211,10 @@ export const aigcRouter = router({
     .query(async ({ ctx, input }) => {
       const ep = await loadEpisodeOrThrow(ctx, input.episodeId, { skipLockCheck: true });
 
+      // 用户反馈 r5:按组内**首镜 positionIdx** 排序,而不是 ShotGroup.positionIdx(创建顺序)
+      // 让组 1-6 真的排在 7-11 之前,12-14 之后(按剧本顺序展示)
+      // r7 audit P1-A3:原实现用 include shots.take:1 每组发一次子查询(N+1)
+      //   改成 1 次 findMany 取所有 shots(只 select groupId + positionIdx),内存里 groupBy 取首镜
       const groups = await ctx.prisma.shotGroup.findMany({
         where: { episodeId: ep.id, deletedAt: null },
         orderBy: { positionIdx: 'asc' },
@@ -222,6 +226,26 @@ export const aigcRouter = router({
             },
           },
         },
+      });
+
+      // 单次拉取本集所有 shots 的 (groupId, positionIdx),内存里 groupBy 算每组首镜
+      const allShotPositions = await ctx.prisma.shot.findMany({
+        where: { episodeId: ep.id, deletedAt: null, groupId: { not: null } },
+        select: { groupId: true, positionIdx: true },
+        orderBy: { positionIdx: 'asc' },
+      });
+      const firstShotPosByGroup = new Map<string, number>();
+      for (const s of allShotPositions) {
+        if (s.groupId && !firstShotPosByGroup.has(s.groupId)) {
+          firstShotPosByGroup.set(s.groupId, s.positionIdx);
+        }
+      }
+
+      // 按首镜 positionIdx 升序排;空组(无 shots)排到底部
+      groups.sort((a, b) => {
+        const aPos = firstShotPosByGroup.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+        const bPos = firstShotPosByGroup.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+        return aPos - bPos;
       });
 
       // W5 完善 L1:按 group 聚合 SUCCESS 视频 attempt 数(左列表显示"已抽卡 N")

@@ -5,6 +5,83 @@
 
 ---
 
+## 2026-05-27(周三,win-laptop · 二十四次收工)— UI 大改造 r2~r7 6 波反馈连续修 + 删剪辑模块 + IN_EDIT 删枚举 + audit 5 bug 修
+
+**完成 — 跨 24 文件 ~30 处改动 + 1 新 migration · web+api+adapters+shared typecheck 全 pass**
+
+### r2/r3/r4:分镜表精修系列(用户连续 4 波反馈)
+- 🐛 **字号加减按钮失效真 P0**:shots-pane 表格 12+ 处硬编码 `text-xs`/`text-[Xpx]` 覆盖 table 上 `var(--storyboard-fs)` → em 化(主体 td 去 text-xs / 副要素 `text-[length:0.7em]` 等)+ script-pane 加内联 var
+- 🐛 **二次生成镜号重复真 bug**:`replaceExisting: false` 默认追加 → 改 `true` 自动覆盖(后端事务级联软删 shots+groups+scenes+bindings)
+- 🐛 **合并语义错**:散镜 3 向上合并组 1-2 不应变 2-3 而是 1-3 → 新 `expandToGroupShotIds(shot)` 散镜在组里时展开为整组 shotIds 一起合并
+- ✅ **合并组简化**:子镜不再渲染(数据保留拆分恢复)/ 组 prompt 完整 inline textarea 编辑(永远显保存按钮 + dirty 时高亮)/ 移除铅笔编辑(改全 inline)
+- ✅ **拆分按 positionIdx 排回原位**:前端 mixedRows 混排 groups+ungrouped(组的代表位 = `shots[0].positionIdx`)→ 拆分组 1-6 后散镜 1~6 真回到组 7-11 之前
+- ✅ **prompt 同行**:`[i/N] 标题 + prompt` 单空格分隔(后端 mergeShots `.join('\n')` 段间单换行)+ 前端 normalizePrompt 收紧旧空行 + splitGroup 按 `[i/N]` 解析回写 shot.prompt
+- ✅ **列分割线 + 紧凑列距 + 单行 framing 不加粗**:6 列 `border-l border-[hsl(var(--color-border)/0.4)]` + `px-3 → px-2` + 拍摄景别 `whitespace-nowrap` + framing 去 `font-medium`
+- ✅ **列宽重新分配**:镜号 16 / 拍摄景别 15rem / 剧本 18rem / 提示词吃剩余 / 操作 20(用户要求剧本紧凑提示词最宽)
+- ✅ **散镜末尾删除按钮**:ShotRow 加 onDelete prop + Trash2 红色 destructive + 原生 confirm 防误删
+- ✅ **invalidate AIGC cache 跨模块**:shots-pane / top-bar publishEpisode onSuccess 后 invalidate aigc.listGroups / getGroupDetail
+- ✅ **loadConfig 错误信息精确化**:区分 4 种失败(not configured / inactive / relay 停用 / no apiKey)+ 引导对应 admin 页面
+
+### r5:顶栏菜单重构 + 彻底删剪辑模块
+- ✅ **HoverNav 纯 React 无闪烁**:替代 Radix DropdownMenu(Portal 导致间隙闪退)· trigger + content 包同一 div 内 hover 范围连贯 · 150ms close delay 配合
+- ✅ **7 模块按钮平铺直显**:导演/美术/AIGC/素材库/数据/团队 + 管理(admin only 12 子项分 4 组)· 无项目时按钮 disabled + tooltip "请先选择项目"
+- ✅ **彻底删剪辑**:top-nav 剪辑按钮 + project-overview WorkbenchRow + i18n `editSuite.*` 全块 + `workbench.edit` + globals `--color-mod-edit` + project.ts MODULE_ENUM + shared/constants WORKBENCH_MODULES + schemas/team workbenchModuleSchema + events.ts `EDIT_TIMELINE_UPDATED`/`EDIT_REEL_EXPORTED` 常量 + PayloadMap + team-manager modules 数组 + workers/processor + storyboard 注释 + docs/THEMING
+
+### r6/r7:AIGC 工坊参考分镜重构
+- ✅ **listGroups 排序按首镜 positionIdx**:组 1-6 在最上(此前按创建顺序)
+- ✅ **左栏 280→220px** + 内部 padding 紧凑(sticky header px-4 py-3 → px-3 py-2)
+- ✅ **顶栏 toolbar**:左侧统计(共 N 段 · 镜头 X · 时长 Ys)+ 右侧 A- N A+ 字号控制(沿用 `--storyboard-fs` + localStorage 同 key `storyboard.fontSize` → 跨页跨工作台联动)
+- ✅ **GroupDetail 主体横向 4 列**:`xl:grid-cols-[16rem_18rem_1fr_22rem]`(资产 / 剧本 / 提示词 / 视频预览)· 每 section 卡片化 + 内部 `max-h-[60vh] overflow-y-auto` 防文本撑爆 · 小屏单列 fallback
+- ✅ **字号 em 化**:section 内文本用 `text-[length:0.85em]` 等相对 em,跟字号控制器联动
+
+### 10 维度并行 audit + 5 真 bug 修(用户要求"检查 10 遍并优化")
+- 🔍 启动 4 并行 Explore agent:`IN_EDIT removal impact` / `frontend UI bugs` / `backend bugs` / `consistency cross modules`
+- 🐛 **P1 ×3 真修**:
+  - project.ts:363 `modules.default([])` → 新成员入库无任何模块权限 → 改 `.default(['director','art','aigc','library','analytics'])`
+  - shots-pane GroupPromptEditor.handleCancel `setValue(initialPrompt)` 没 normalize → dirty 立刻误判 true(取消后还显"未保存") → 改 `setValue(normalizePrompt(initialPrompt))`
+  - aigc.listGroups `include shots take:1` N+1 query → 改单次 `findMany` 取所有 shots `(groupId, positionIdx)` 内存 groupBy 取首镜
+- 🐛 **P2 ×2 真修**:
+  - top-nav HoverNav items props 变化(项目跳转)不重置 open → stale dropdown → 加 `useEffect(() => setOpen(false), [items])`
+  - shots-pane expandToGroupShotIds groupId 指向已删除组时静默 fallback → 改 `console.warn` 提示数据不一致
+
+### IN_EDIT 枚举值彻底删除(用户要求"剪辑相关字段从代码中删除")
+- 🔍 audit 确认安全删除条件:无 SET / 仅 1 处 read / 无现存数据 / 无 seed
+- ✅ **schema.prisma** 删 ShotStatus 的 IN_EDIT 枚举值
+- ✅ **新 migration `20260527000000_drop_in_edit_shot_status`**:防御性 DO $ block 先 assert `WHERE status='IN_EDIT' COUNT=0` 然后 ALTER TYPE RENAME → CREATE 新 ENUM 无 IN_EDIT → ALTER TABLE shots/shot_groups USING text 转换 → DROP 旧 ENUM
+- ✅ **project.ts:156** 进度统计 `['ADOPTED','IN_EDIT','FINAL']` → `['ADOPTED','FINAL']`
+- ✅ **storyboard.ts:1517** 注释剔除 IN_EDIT
+- ✅ **i18n zh-CN/en/enums.json** 删 IN_EDIT 翻译条目
+
+### 其他小修
+- ✅ **顶栏 disabled 按钮 + tooltip**:无项目时项目级按钮显灰 + cursor-not-allowed
+- ✅ **.gitignore 加 .claude**:Claude Code 工具本地配置不入 git
+
+**进行中**
+- 🚧 (无在途 · 等用户跑 `pnpm db:migrate:deploy` 应用 IN_EDIT 删除 migration)
+
+**问题 / 待决策**
+- ❓ **migration 需手动 deploy**:`20260527000000_drop_in_edit_shot_status` 是 ALTER TYPE 破坏性操作,需用户 `pnpm db:migrate:deploy` + `pnpm --filter @ss/db exec prisma generate` 让 client 类型同步
+- ❓ **window.confirm 留尾**(r22.1 二十三收工已标):删除按钮 / 直连 4 字段还在用 `window.confirm` · 留 Phase 2 换自定义 Dialog
+- ❓ **AIGC 横向 4 列在小屏 fallback 单列**:xl(1280px+)才横展,中小屏单列堆叠 — 若用户希望中屏也横展可调 lg/md 断点
+
+**下次接着做**
+- 📌 **跑 migration** + **测试 AIGC 横向布局**(浏览器实测 1920px 屏)
+- 📌 **W8 实战**:配 binding + 真接中转站 token + 1 集 7 镜头跑通
+- 📌 或 Phase 2:ADR-26 Mastra 编排 + Auto-Salvage 失败重抽 + 自定义 Dialog 替 window.confirm
+
+**质量**
+- ~30 处改动跨 **24 文件** + 1 新 migration(防御性 ALTER TYPE)
+- web typecheck pass / api typecheck pass / adapters typecheck pass / shared typecheck pass
+- 4 并行 agent audit 5 真 bug 修(无 P0)
+- 剪辑模块代码层 100% 清除(grep 业务代码 0 残留 · 仅历史注释 2 处带"已删除"标注)
+
+**累计**
+- **24 次收工 / Phase 1.5.3 完整工作流 + UI 重构 / 剪辑模块完整移除 + IN_EDIT 删除**
+- 30 ADR / 22 migration(新增 IN_EDIT 删除)/ ~135 audit 项 / 85 单测 / smoke 19/19 / typecheck 全过
+- 11 workspace 包 / 2 跨平台脚本(start.mjs + relay-batch-test.mjs)
+
+---
+
 ## 2026-05-25(周一,win-laptop · 二十三次收工)— Phase 1.5.3 Scripts/Storyboard 完整工作流 + 8 bug 大修 · 2 个 commit
 
 **完成 — 17 项功能 + 8 bug + 1 migration · 1579 行净增 · LLM 实测 14 镜 + 2 组生成**

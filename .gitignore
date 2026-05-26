@@ -63,6 +63,9 @@ tmp
 .eslintcache
 .prettiercache
 
+# Claude Code 工具本地配置
+.claude
+
 # Lock files (keep pnpm only)
 package-lock.json
 yarn.lock

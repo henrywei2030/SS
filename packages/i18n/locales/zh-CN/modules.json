@@ -3,7 +3,6 @@
     "director": "导演",
     "art": "美术",
     "aigc": "AIGC",
-    "edit": "剪辑",
     "library": "素材库",
     "analytics": "数据监控",
     "team": "团队"
@@ -89,13 +88,6 @@
     "cost": "成本",
     "gachaRatio": "抽卡率",
     "estimatedCost": "预估成本：¥{amount}"
-  },
-  "editSuite": {
-    "title": "剪辑工作台",
-    "comingSoon": "即将上线",
-    "materialManage": "素材整理",
-    "timeline": "时间线",
-    "exportDeliver": "导出交付"
   },
   "mediaVault": {
     "title": "素材库",

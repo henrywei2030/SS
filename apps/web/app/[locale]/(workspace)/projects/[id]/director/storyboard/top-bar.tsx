@@ -425,10 +425,14 @@ function ShotsActions({
   const publish = trpc.storyboard.publishEpisode.useMutation({
     onSuccess: (res) => {
       const aigcReady = res.groupCount > 0;
+      // 用户反馈 r3:确认发布后 AIGC 模块要看到最新分镜 + prompt
+      // AIGC 直接 query 活表,只需让 react-query cache 失效
+      void utils.aigc.listGroups.invalidate({ episodeId: res.episodeId });
+      void utils.aigc.getGroupDetail.invalidate();
       toast.success(
         aigcReady
           ? `已发布 v${res.version} · ${res.shotCount} 镜 / ${res.groupCount} 组 · 已同步到 AIGC`
-          : `已发布 v${res.version}（${res.shotCount} 镜 / ${res.groupCount} 组 · 无分镜可同步到 AIGC）`,
+          : `已发布 v${res.version}(${res.shotCount} 镜 / ${res.groupCount} 组 · 无分镜可同步到 AIGC)`,
         aigcReady
           ? {
               duration: 6000,
@@ -510,7 +514,7 @@ function ShotsActions({
         currentLabel: `第 ${ep.episodeNumber} 集${ep.title ? ` · ${ep.title}` : ''}`,
       }));
       try {
-        await generate.mutateAsync({ episodeId: ep.episodeId, replaceExisting: false });
+        await generate.mutateAsync({ episodeId: ep.episodeId, replaceExisting: true });
         setBatchProgress((p) => ({ ...p, succeeded: p.succeeded + 1 }));
       } catch (e) {
         setBatchProgress((p) => ({
@@ -535,7 +539,7 @@ function ShotsActions({
       <Button
         size="sm"
         variant="default"
-        onClick={() => episodeId && generate.mutate({ episodeId, replaceExisting: false })}
+        onClick={() => episodeId && generate.mutate({ episodeId, replaceExisting: true })}
         disabled={disabled || generate.isPending || batchRunning}
         className="gap-1.5"
         title={episodeNumber ? `为第 ${episodeNumber} 集生成分镜` : '请先选集'}

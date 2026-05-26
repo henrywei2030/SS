@@ -114,7 +114,7 @@ model ProjectMember {
   projectId String
   userId    String
   role      MemberRole
-  modules   String[] // ['director','art','aigc','edit','library','analytics']
+  modules   String[] // ['director','art','aigc','library','analytics']
   joinedAt  DateTime   @default(now())
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -412,8 +412,7 @@ enum ShotStatus {
   GENERATING
   GENERATED // 至少一个 candidate
   ADOPTED // 已采纳
-  IN_EDIT // 进入剪辑
-  FINAL
+  FINAL // 最终成片(剪辑模块已移除,此前的 IN_EDIT 状态已删除)
   FAILED
   BUDGET_BLOCKED
 }

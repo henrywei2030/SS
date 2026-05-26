@@ -3,7 +3,6 @@
     "director": "Director",
     "art": "Art",
     "aigc": "AIGC",
-    "edit": "Editing",
     "library": "Library",
     "analytics": "Analytics",
     "team": "Team"
@@ -89,13 +88,6 @@
     "cost": "Cost",
     "gachaRatio": "Gacha ratio",
     "estimatedCost": "Estimated cost: ¥{amount}"
-  },
-  "editSuite": {
-    "title": "Edit Suite",
-    "comingSoon": "Coming soon",
-    "materialManage": "Material",
-    "timeline": "Timeline",
-    "exportDeliver": "Export & deliver"
   },
   "mediaVault": {
     "title": "Media Vault",

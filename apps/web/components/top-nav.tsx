@@ -8,7 +8,6 @@ import {
   ClapperboardIcon,
   Palette,
   Sparkles,
-  Scissors,
   Library,
   BarChart3,
   Bell,
@@ -34,23 +33,6 @@ import { ThemeToggle } from '@/components/theme-toggle';
 import { LogoMark } from '@/components/brand/logo';
 import { cn } from '@/lib/utils';
 
-interface NavItem {
-  key: 'director' | 'art' | 'aigc' | 'edit' | 'library' | 'analytics' | 'team';
-  href: (locale: string, projectId: string) => string;
-  icon: React.ComponentType<{ className?: string }>;
-}
-
-const NAV_ITEMS: NavItem[] = [
-  { key: 'director', href: (l, p) => `/${l}/projects/${p}/director`, icon: ClapperboardIcon },
-  { key: 'art', href: (l, p) => `/${l}/projects/${p}/art`, icon: Palette },
-  { key: 'aigc', href: (l, p) => `/${l}/projects/${p}/aigc`, icon: Sparkles },
-  { key: 'edit', href: (l, p) => `/${l}/projects/${p}/edit`, icon: Scissors },
-  { key: 'library', href: (l, p) => `/${l}/library`, icon: Library },
-  { key: 'analytics', href: (l, p) => `/${l}/projects/${p}/analytics`, icon: BarChart3 },
-  // W6 波 2 反馈 F1+F5:加 team nav 入口,让用户能找到成员管理 + 集数分配
-  { key: 'team', href: (l, p) => `/${l}/projects/${p}/team`, icon: Users },
-];
-
 export function TopNav({
   user,
   currentProject,
@@ -59,12 +41,13 @@ export function TopNav({
   currentProject?: { id: string; name: string };
 }): React.ReactElement {
   const t = useTranslations();
-  const params = useParams<{ locale: string }>();
-  const pathname = usePathname();
+  const params = useParams<{ locale: string; id?: string }>();
   const router = useRouter();
 
   const locale = params.locale;
-  const projectId = currentProject?.id;
+  // 用户反馈 r5:顶栏按钮在项目详情页仍显示 disabled(因 workspace layout 没传 currentProject prop)
+  // 兜底从 URL params 取 id,确保项目级路由下按钮可用
+  const projectId = currentProject?.id ?? params.id;
 
   async function onLogout(): Promise<void> {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -106,35 +89,91 @@ export function TopNav({
           <span className="text-[13px] text-[hsl(var(--color-muted-foreground))]">Projects</span>
         )}
 
-        {projectId && (
-          <nav className="ml-3 hidden items-center gap-0.5 md:flex">
-            {NAV_ITEMS.map((item) => {
-              const href = item.href(locale, projectId);
-              const active = pathname.includes(`/${item.key}`);
-              const Icon = item.icon;
-              return (
-                <Link
-                  key={item.key}
-                  href={href}
-                  className={cn(
-                    'flex h-7 items-center gap-1.5 rounded px-2 text-[12px] transition-colors',
-                    active
-                      ? 'bg-[hsl(var(--color-secondary))] text-[hsl(var(--color-foreground))]'
-                      : 'text-[hsl(var(--color-muted-foreground))] hover:bg-[hsl(var(--color-secondary))] hover:text-[hsl(var(--color-foreground))]',
-                  )}
-                >
-                  <Icon className="size-3" />
-                  {t(`modules.workbench.${item.key}`)}
-                </Link>
-              );
-            })}
-          </nav>
+        {/* 项目模块菜单 — 用户反馈 r3:不要"工作台"聚合,直接显示模块名 + hover 出子菜单
+         *  无项目时按钮可见但 disabled(提示先选项目);进项目后直达 */}
+        <span className="mx-1 h-4 w-px bg-[hsl(var(--color-border))]" />
+        <HoverNav
+          label="导演"
+          icon={ClapperboardIcon}
+          mainHref={projectId ? `/${locale}/projects/${projectId}/director` : undefined}
+          items={
+            projectId
+              ? [
+                  { href: `/${locale}/projects/${projectId}/director`, label: '导演台首页' },
+                  { href: `/${locale}/projects/${projectId}/director/analysis`, label: '剧本分析' },
+                  { href: `/${locale}/projects/${projectId}/director/scripts`, label: '剧本管理' },
+                  { href: `/${locale}/projects/${projectId}/director/storyboard`, label: '分镜工坊' },
+                ]
+              : []
+          }
+        />
+        <HoverNav
+          label="美术"
+          icon={Palette}
+          mainHref={projectId ? `/${locale}/projects/${projectId}/art` : undefined}
+          items={
+            projectId
+              ? [
+                  { href: `/${locale}/projects/${projectId}/art`, label: '美术工坊' },
+                  { href: `/${locale}/projects/${projectId}/art/audit`, label: '资产审核' },
+                ]
+              : []
+          }
+        />
+        <HoverNav
+          label="AIGC"
+          icon={Sparkles}
+          mainHref={projectId ? `/${locale}/projects/${projectId}/aigc` : undefined}
+        />
+        <HoverNav label="素材库" icon={Library} mainHref={`/${locale}/library`} />
+        <HoverNav
+          label="数据"
+          icon={BarChart3}
+          mainHref={projectId ? `/${locale}/projects/${projectId}/insights` : `/${locale}/insights`}
+          items={
+            projectId
+              ? [
+                  { href: `/${locale}/projects/${projectId}/insights`, label: '项目数据' },
+                  { href: `/${locale}/insights`, label: '平台洞察' },
+                ]
+              : undefined
+          }
+        />
+        <HoverNav
+          label="团队"
+          icon={Users}
+          mainHref={projectId ? `/${locale}/projects/${projectId}/team` : undefined}
+        />
+        {user.isAdmin && (
+          <HoverNav
+            label="管理"
+            icon={Shield}
+            mainHref={`/${locale}/admin`}
+            items={[
+              { href: `/${locale}/admin`, label: '后台首页', group: 'Overview' },
+              { href: `/${locale}/admin/api-usage`, label: 'API 用量', group: 'Overview' },
+              { href: `/${locale}/admin/providers`, label: 'AI Provider', group: 'AI & Content' },
+              { href: `/${locale}/admin/bindings`, label: '模型绑定', group: 'AI & Content' },
+              { href: `/${locale}/admin/prompts`, label: '提示词模板', group: 'AI & Content' },
+              { href: `/${locale}/admin/styles`, label: '风格库', group: 'AI & Content' },
+              { href: `/${locale}/admin/presets`, label: '预设模板', group: 'AI & Content' },
+              { href: `/${locale}/admin/users`, label: '成员管理', group: 'Team' },
+              { href: `/${locale}/admin/audit`, label: '操作日志', group: 'Team' },
+              { href: `/${locale}/admin/reports`, label: '工作报告', group: 'Team' },
+              { href: `/${locale}/admin/db-explorer`, label: 'DB Explorer', group: 'System' },
+              { href: `/${locale}/admin/settings`, label: '系统设置', group: 'System' },
+              { href: `/${locale}/admin/health`, label: '健康检查', group: 'System' },
+            ]}
+          />
         )}
+
+        {/* 旧的项目内 NAV_ITEMS 已被上方 HoverNav 取代(模块按钮平铺直显) */}
 
         <div className="flex-1" />
 
         <button
           type="button"
+          aria-label="搜索(暂未实装)"
           className="hidden h-7 items-center gap-2 rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-2 text-[12px] text-[hsl(var(--color-muted-foreground))] hover:border-[hsl(0_0%_22%)] md:flex"
         >
           <Search className="size-3" />
@@ -185,5 +224,152 @@ export function TopNav({
         </DropdownMenu>
       </div>
     </header>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// HoverNav — 顶栏模块按钮 · hover 出子菜单
+// 用户反馈 r3:鼠标指到时才出子菜单 + 不要闪烁
+//
+// 设计:
+//   - trigger 和子菜单包在同一个 onMouseEnter/Leave 范围内(同一 div) → 在间隙移动不会触发 close
+//   - 无 hover 子菜单的按钮(items 为空)走纯 Link,无 dropdown 行为
+//   - close delay 100ms 用于跨可能微小空隙,但 trigger 和 content 物理相邻(top-full,无 margin)
+//   - trigger button 不再用 background hover 状态变化(避免按钮闪烁)— 只用文字色变化
+// ---------------------------------------------------------------------------
+
+interface HoverNavItem {
+  href: string;
+  label: string;
+  /** 可选 · 同组项在子菜单内连续展示 + 顶部小 label */
+  group?: string;
+}
+
+function HoverNav({
+  label,
+  icon: TriggerIcon,
+  mainHref,
+  items,
+}: {
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  /** 按钮本身的链接 · 无 mainHref 时按钮 disabled(无项目时) */
+  mainHref?: string;
+  /** 子菜单项 · 不传或空数组 → 不显示 hover dropdown,仅作为单链接按钮 */
+  items?: HoverNavItem[];
+}): React.ReactElement {
+  const pathname = usePathname();
+  const [open, setOpen] = React.useState(false);
+  const closeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasMenu = (items?.length ?? 0) > 0;
+  const disabled = !mainHref;
+
+  const active = mainHref && pathname.startsWith(mainHref);
+
+  const cancelClose = (): void => {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  };
+  const scheduleClose = (): void => {
+    cancelClose();
+    closeTimer.current = setTimeout(() => setOpen(false), 100);
+  };
+
+  React.useEffect(() => () => cancelClose(), []);
+
+  // r7 audit P2-B3:items 变化(如 projectId 切换)时关闭已打开的菜单,防 stale open
+  React.useEffect(() => {
+    setOpen(false);
+  }, [items]);
+
+  // 按 group 分组(undefined group 归"_default"组,无标题)
+  const grouped = React.useMemo(() => {
+    if (!items) return [];
+    const map = new Map<string, HoverNavItem[]>();
+    for (const it of items) {
+      const key = it.group ?? '_default';
+      const list = map.get(key);
+      if (list) list.push(it);
+      else map.set(key, [it]);
+    }
+    return Array.from(map.entries());
+  }, [items]);
+
+  const buttonClass = cn(
+    'flex h-7 items-center gap-1 rounded px-2 text-[12px] transition-colors',
+    active
+      ? 'bg-[hsl(var(--color-secondary))] text-[hsl(var(--color-foreground))]'
+      : 'text-[hsl(var(--color-muted-foreground))] hover:text-[hsl(var(--color-foreground))]',
+    disabled && 'cursor-not-allowed opacity-50 hover:text-[hsl(var(--color-muted-foreground))]',
+  );
+
+  // 无子菜单 → 纯 Link 按钮(无 hover 状态变化)
+  if (!hasMenu) {
+    if (disabled) {
+      return (
+        <span className={buttonClass} title="请先选择项目">
+          <TriggerIcon className="size-3" />
+          <span>{label}</span>
+        </span>
+      );
+    }
+    return (
+      <Link href={mainHref!} className={buttonClass}>
+        <TriggerIcon className="size-3" />
+        <span>{label}</span>
+      </Link>
+    );
+  }
+
+  // 有子菜单 → trigger + 绝对定位的 content 包在同一 div 内
+  return (
+    <div
+      className="relative"
+      onMouseEnter={() => {
+        cancelClose();
+        if (!disabled) setOpen(true);
+      }}
+      onMouseLeave={scheduleClose}
+    >
+      {disabled ? (
+        <span className={buttonClass} title="请先选择项目">
+          <TriggerIcon className="size-3" />
+          <span>{label}</span>
+          <ChevronDown className="size-3" />
+        </span>
+      ) : (
+        <Link href={mainHref!} className={buttonClass}>
+          <TriggerIcon className="size-3" />
+          <span>{label}</span>
+          <ChevronDown className={cn('size-3 transition-transform', open && 'rotate-180')} />
+        </Link>
+      )}
+      {open && !disabled && (
+        <div className="absolute left-0 top-full z-50 min-w-[12rem] rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-popover))] py-1 shadow-md">
+          {grouped.map(([groupName, list], gi) => (
+            <React.Fragment key={groupName}>
+              {gi > 0 && <div className="my-1 h-px bg-[hsl(var(--color-border))]" />}
+              {groupName !== '_default' && (
+                <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
+                  {groupName}
+                </div>
+              )}
+              {list.map((it) => (
+                <Link
+                  key={it.href}
+                  href={it.href}
+                  className="block px-3 py-1.5 text-[12px] text-[hsl(var(--color-muted-foreground))] hover:bg-[hsl(var(--color-secondary))] hover:text-[hsl(var(--color-foreground))]"
+                  onClick={() => setOpen(false)}
+                >
+                  {it.label}
+                </Link>
+              ))}
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
