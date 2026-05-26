@@ -1,3 +1,9 @@
+/* r10 fix:Turbopack 严格遵守 CSS @import-rules-must-precede 标准
+ *   所有 @import 必须排在文件最前(@charset / @layer 之外的规则之前)
+ *   原来 @import url('fonts.googleapis...') 在 @import 'tailwindcss' 之后,
+ *   而 tailwindcss 展开后含 @layer base 等规则 → Turbopack 拒绝后续 @import
+ *   解决:Google fonts @import 提前到第一行,所有 @import 集中在文件顶 */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import 'tailwindcss';
 
 /* =============================================================================
@@ -9,8 +15,6 @@
  *   - 后台字号系统：默认 13px，admin 区域 14px
  *   - 所有 Logo / wordmark 在两种模式下都适配
  * ============================================================================= */
-
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 /* ============================================================================
  * @theme — Tailwind v4 设计 token（字体 / 圆角 / accent / 模块色）
