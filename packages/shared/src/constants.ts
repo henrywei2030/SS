@@ -77,16 +77,6 @@ export const TRAINABLE_TEXT_FIELDS = [
 ] as const;
 export type TrainableTextField = (typeof TRAINABLE_TEXT_FIELDS)[number];
 
-// 事件总线 topics
-export const EVENT_TOPICS = {
-  STORYBOARD_PUBLISHED: 'storyboard.published',
-  ASSET_CONFIRMED: 'asset.confirmed',
-  ASSET_RETIRED: 'asset.retired',
-  GENERATION_QUEUED: 'generation.queued',
-  GENERATION_STARTED: 'generation.started',
-  GENERATION_COMPLETED: 'generation.completed',
-  GENERATION_FAILED: 'generation.failed',
-  COST_THRESHOLD_80: 'cost.threshold.80',
-  COST_THRESHOLD_100: 'cost.threshold.100',
-  COMPLIANCE_FLAGGED: 'compliance.flagged',
-} as const;
+// r11 audit:EVENT_TOPICS 全仓 0 引用 · 已被 packages/shared/src/events.ts 的 EVENTS 取代
+//   (EVENTS 含 40+ topic + 类型化 PayloadMap · 这里的简化版从未被业务用过)
+//   删除以避免新代码误用 stale 常量

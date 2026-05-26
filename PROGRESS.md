@@ -9,6 +9,28 @@
 
 **完成 — 跨 24 文件 ~30 处改动 + 1 新 migration · web+api+adapters+shared typecheck 全 pass**
 
+### 收工后补丁:r11 跨模块协作 audit 3 遍 + Turbopack 调研 + dev 加速踩坑(2026-05-27 深夜++)
+
+**Turbopack 调研路线(踩坑后总结)**
+- ✅ 尝试启用 `next dev --turbopack` 解决 dev 慢痛点
+- ❌ 撞 CSS @import 排序 build error · 修复 1:挪 @import 到第一行(@tailwindcss 展开后 2900+ 行 @layer 在前 → 仍报错)
+- ✅ 修复 2(根治):字体迁移 `next/font/google` self-host(Inter + Noto Sans SC + JetBrains Mono)· globals.css 删 @import url + `--font-sans/mono` 改用 next/font var
+- ❌ 撞 monorepo 168 处 `.js` import + extensionAlias 不兼容 → ./local.js Module not found
+- ✅ 回退 webpack(commit 77224cb)· dev 速度回到 30-60s 但能用 · **字体迁移保留**(无副作用 + 国内可用)
+- 📝 Turbopack 启用留 follow-up sprint:批量去 .js 后缀 + 验证 tsc 模块解析
+
+**r11 跨模块协作 + 死代码 + 冗余 3 并行 agent 各 3 遍审视**
+- 🐛 **真 P1 #1 修**:`aigc.ts:1198` 错误消息泄漏 — `throw new TRPCError({ message: err.message })` 改 `sanitizeErrorMsg(err)` 脱敏(防 Provider URL/token/stack 泄漏)+ 补 import
+- 🗑️ **真死代码删 #1**:`packages/shared/src/constants.ts` `EVENT_TOPICS` 常量 — 全仓 grep 0 引用(已被 `packages/shared/src/events.ts EVENTS` 40+ topic + PayloadMap 取代)· 删 12 行
+- ✅ **跳过的 agent 报告(过度抽象 / 边际收益)**:
+  - `handleMutationError()` 抽取 — 每处 catch 业务上下文不同(attemptId/operationName/before-after),抽完反而复杂
+  - `createTrainingRecord()` — 2 处不到 3+ 门槛
+  - 共用 zod schemas — `z.string().cuid()` one-liner 抽取边际收益小
+  - `createSettingsMap()` — 3 处用 但每处字段不同
+  - `_resetLocalCacheForTest` — 保留(未来 cache.test.ts 可能用)
+  - `GroupEditDialog` — 留作高级编辑入口(audit r4 决策)
+- 📊 typecheck:api/shared/web 全 pass · 25/25 vitest pass
+
 ### 收工后补丁:r10 全栈 audit 3 遍 + 投产就绪 3 真修(2026-05-27 深夜+)
 
 **4 并行 explore agent 各 3 遍审视 · 新维度覆盖**(生产就绪 / 失败恢复 / 类型安全 / 前端 UX)

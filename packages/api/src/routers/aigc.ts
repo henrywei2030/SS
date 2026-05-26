@@ -23,6 +23,8 @@ import {
   type VideoReference,
 } from '@ss/core/storyboard';
 import { EVENTS } from '@ss/shared/events';
+// r11 audit:错误消息脱敏(防 Provider URL/token/stack 泄漏到前端)
+import { sanitizeErrorMsg } from '@ss/shared';
 import { addVideoGenJob } from '@ss/queue/video-gen';
 import { signStreamToken } from '@ss/queue/sse-token';
 
@@ -1195,7 +1197,9 @@ export const aigcRouter = router({
             },
           });
         });
-        throw new TRPCError({ code, message: err.message });
+        // r11 audit:err.message 可能含 Provider URL / token / stack trace,
+        //   走 sanitizeErrorMsg 脱敏(已 import 自 @ss/shared L20)防泄漏
+        throw new TRPCError({ code, message: sanitizeErrorMsg(err) });
       };
 
       // W1-W5 audit P2 followup(P2-5):接通 system.gacha.max_attempts(原 dead config)
