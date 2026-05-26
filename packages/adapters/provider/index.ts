@@ -87,6 +87,8 @@ async function loadConfig(providerId: string): Promise<ResolvedConfig> {
   let apiKey = '';
   let apiUrl: string;
   let cacheKeyExtra = '';
+  // r8 audit P1:decrypt 失败语义化 — 区分"密钥损坏"vs"未配置"两种 0 apiKey 状态
+  let decryptFailed = false;
 
   // Phase 1.5.1:relayProviderId 非空 → 从 RelayProvider 拉 apiKey/apiUrl
   if (row.relayProviderId && row.relayProvider) {
@@ -99,6 +101,7 @@ async function loadConfig(providerId: string): Promise<ResolvedConfig> {
       try {
         apiKey = decryptSecret(row.relayProvider.apiKeyEnc);
       } catch (e) {
+        decryptFailed = true;
         console.error(
           `[providers] decrypt relayProvider key failed for ${row.relayProvider.name}:`,
           e,
@@ -113,6 +116,7 @@ async function loadConfig(providerId: string): Promise<ResolvedConfig> {
       try {
         apiKey = decryptSecret(row.apiKeyEnc);
       } catch (e) {
+        decryptFailed = true;
         console.error(`[providers] decrypt failed for ${providerId}:`, e);
       }
     }
@@ -127,10 +131,17 @@ async function loadConfig(providerId: string): Promise<ResolvedConfig> {
   }
 
   if (!apiKey) {
+    // r8 audit P1:decrypt 失败明确告知,跟"未配置"两种状态分开
+    if (decryptFailed) {
+      throw new Error(
+        `Provider ${providerId} 的 API Key 解密失败 — 可能 APP_MASTER_KEY 已改 / 数据库迁移丢密钥 / 密文损坏。` +
+        `去 /admin/providers 重新配置 Token`,
+      );
+    }
     const hint = row.relayProviderId
       ? `去 /admin/providers 顶部"${row.relayProvider?.displayName ?? '中转站'}"卡片配 Token`
       : `去 /admin/providers 设置 ${providerId} 的独立 API Key (或配 env ${row.apiKeyRef ?? 'N/A'})`;
-    throw new Error(`Provider ${providerId} has no API key. ${hint}`);
+    throw new Error(`Provider ${providerId} 未配置 API Key. ${hint}`);
   }
 
   return {

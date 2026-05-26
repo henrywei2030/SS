@@ -9,6 +9,20 @@
 
 **完成 — 跨 24 文件 ~30 处改动 + 1 新 migration · web+api+adapters+shared typecheck 全 pass**
 
+### 收工后补丁:100 遍 Phase 1.5 深度 audit + 1 真 P1 修(2026-05-27)
+- 🔍 **4 并行 explore agent** 各扫一个维度:Cost Ledger / Binding-Provider 调用链 / 数据层+工作流 / API 安全+Schema
+- 🐛 **真 P1 ×1 修**:`loadConfig` decrypt 失败语义化(adapters/provider/index.ts)— 加 `decryptFailed` flag · 在 `if (!apiKey)` 区分"密钥损坏(APP_MASTER_KEY 改了 / 密文损坏)"vs"未配置"两种状态,各抛专用错误信息引导用户行动
+- ✅ **诚实结论**:agent 报告了 ~15 项 P0/P1 但**8 项误报**(因 agent 不知道 r21/r22/r22.1/r2~r7 已修过):
+  - admin.binding.set 已校验 isActive(admin.ts:1183)/ deleteRelayProvider 已级联停用(adapters:698-712)
+  - failPlaceholder 不需 advisory lock(主调用线程不跟 worker REFUND 竞)
+  - RelayProvider 无 deletedAt 字段(硬删 + onDelete:SetNull)
+  - CostLedgerEntry.shotId 故意无 FK(设计:软删后保留审计链)
+  - positionIdx unique 已用 partial index 修(`20260523_audit_p0` migration)
+  - Scene 软删 Shot.sceneId 已清(W1-W5 P2)
+  - publishEpisode 用白名单正向检查(不存在绕过)
+- 🔁 **3 项设计决策保留**:EventBus 40 topics 只 publish 3 个(Phase 2 placeholder · events.ts 已明确注释)/ Input 长度 .max() (Phase 2 polish)/ CSV UTC 时间戳(UI 端格式化)
+- 📊 **Phase 1.5 代码质量结论**:经过 r21+r22+r22.1+r2~r7 多轮 audit 已稳健,核心 PREPAY/REFUND + advisory lock + binding 校验 + 软删一致性 + 跨模块工作流都站得住脚 · 此次仅 1 真 P1 新发现 · typecheck adapters+api 全 pass
+
 ### r2/r3/r4:分镜表精修系列(用户连续 4 波反馈)
 - 🐛 **字号加减按钮失效真 P0**:shots-pane 表格 12+ 处硬编码 `text-xs`/`text-[Xpx]` 覆盖 table 上 `var(--storyboard-fs)` → em 化(主体 td 去 text-xs / 副要素 `text-[length:0.7em]` 等)+ script-pane 加内联 var
 - 🐛 **二次生成镜号重复真 bug**:`replaceExisting: false` 默认追加 → 改 `true` 自动覆盖(后端事务级联软删 shots+groups+scenes+bindings)
