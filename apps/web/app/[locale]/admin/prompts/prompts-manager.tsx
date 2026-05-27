@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 
 import { trpc } from '@/lib/trpc/client';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { ErrorBanner } from '@/components/ui/error-banner';
 
 const CATEGORY_LABELS: Record<string, string> = {
   ASSET_BREAKDOWN: '资产拆解',
@@ -48,16 +49,11 @@ export function PromptsManager(): React.ReactElement {
       </header>
 
       {isError && (
-        <div className="mb-4 rounded-md border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-300">
-          <div className="font-semibold">模板列表加载失败</div>
-          <div className="mt-1 opacity-80">{error?.message}</div>
-          <button
-            onClick={() => refetch()}
-            className="mt-2 rounded border border-red-500/50 px-2 py-1 text-xs hover:bg-red-500/20"
-          >
-            重试
-          </button>
-        </div>
+        <ErrorBanner
+          title="模板列表加载失败"
+          errorMsg={error?.message}
+          onRetry={() => refetch()}
+        />
       )}
 
       <div className="grid grid-cols-[280px_1fr] gap-4">

@@ -1,9 +1,10 @@
 'use client';
 import * as React from 'react';
-import { toast } from 'sonner';
 
 import { trpc } from '@/lib/trpc/client';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { ErrorBanner } from '@/components/ui/error-banner';
+import { adminMutationHandlers } from '@/lib/admin-mutation';
 
 const KIND_LABELS: Record<string, string> = {
   AI_REAL: 'AI 真人',
@@ -26,32 +27,37 @@ export function StylesManager(): React.ReactElement {
   }, [styles, selectedId]);
 
   // W1-W7 audit:invalidate 已经触发 refetch,不要再手动 refetch(原版双触发浪费一次 RTT)
-  const update = trpc.admin.style.update.useMutation({
-    onSuccess: () => {
-      toast.success('已保存');
-      void utils.admin.style.list.invalidate();
-    },
-    onError: (e) => toast.error(`保存失败:${e.message}`),
-  });
+  // 三十二收工 R4 小颗粒:toast + invalidate 模板抽到 adminMutationHandlers
+  const update = trpc.admin.style.update.useMutation(
+    adminMutationHandlers({
+      successMsg: '已保存',
+      errorPrefix: '保存失败',
+      invalidate: [() => utils.admin.style.list.invalidate()],
+    }),
+  );
 
-  const del = trpc.admin.style.delete.useMutation({
-    onSuccess: (data) => {
-      toast.success('已删除');
-      if (selectedId === data.id) setSelectedId(null);
-      void utils.admin.style.list.invalidate();
-    },
-    onError: (e) => toast.error(`删除失败:${e.message}`),
-  });
+  const del = trpc.admin.style.delete.useMutation(
+    adminMutationHandlers({
+      successMsg: '已删除',
+      errorPrefix: '删除失败',
+      invalidate: [() => utils.admin.style.list.invalidate()],
+      onSuccess: (data) => {
+        if (selectedId === data.id) setSelectedId(null);
+      },
+    }),
+  );
 
-  const create = trpc.admin.style.create.useMutation({
-    onSuccess: (data) => {
-      toast.success(`已新建:${data.name}`);
-      setCreateOpen(false);
-      setSelectedId(data.id);
-      void utils.admin.style.list.invalidate();
-    },
-    onError: (e) => toast.error(`新建失败:${e.message}`),
-  });
+  const create = trpc.admin.style.create.useMutation(
+    adminMutationHandlers({
+      successMsg: (data) => `已新建:${data.name}`,
+      errorPrefix: '新建失败',
+      invalidate: [() => utils.admin.style.list.invalidate()],
+      onSuccess: (data) => {
+        setCreateOpen(false);
+        setSelectedId(data.id);
+      },
+    }),
+  );
 
   const sel = styles?.find((s) => s.id === selectedId) ?? null;
 
@@ -73,16 +79,11 @@ export function StylesManager(): React.ReactElement {
       </header>
 
       {isError && (
-        <div className="mb-4 rounded-md border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-300">
-          <div className="font-semibold">风格列表加载失败</div>
-          <div className="mt-1 opacity-80">{error?.message}</div>
-          <button
-            onClick={() => refetch()}
-            className="mt-2 rounded border border-red-500/50 px-2 py-1 text-xs hover:bg-red-500/20"
-          >
-            重试
-          </button>
-        </div>
+        <ErrorBanner
+          title="风格列表加载失败"
+          errorMsg={error?.message}
+          onRetry={() => refetch()}
+        />
       )}
 
       <div className="grid grid-cols-[280px_1fr] gap-4">

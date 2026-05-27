@@ -5,6 +5,7 @@ import { Search, Shield, ShieldOff, UserCheck, UserX, Clock } from 'lucide-react
 
 import { trpc } from '@/lib/trpc/client';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { ErrorBanner } from '@/components/ui/error-banner';
 
 type UserStatus = 'ACTIVE' | 'SUSPENDED' | 'PENDING';
 
@@ -152,10 +153,7 @@ export function UsersTable(): React.ReactElement {
       </div>
 
       {isError && (
-        <div className="mb-4 rounded-md border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-300">
-          <div className="font-semibold">用户列表加载失败</div>
-          <div className="mt-1 opacity-80">{error?.message}</div>
-        </div>
+        <ErrorBanner title="用户列表加载失败" errorMsg={error?.message} />
       )}
 
       {isLoading && (

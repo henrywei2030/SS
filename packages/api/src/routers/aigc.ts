@@ -25,7 +25,8 @@ import {
 import { EVENTS } from '@ss/shared/events';
 
 // 三十一收工 S3:SystemSetting 单 key 读 helper
-import { loadSystemSetting } from '../utils/system-bindings.js';
+// 三十二收工 S3 followup:加 batch 版
+import { loadSystemSetting, loadSystemSettings } from '../utils/system-bindings.js';
 // r11 audit:错误消息脱敏(防 Provider URL/token/stack 泄漏到前端)
 import { sanitizeErrorMsg, normalizePrompt } from '@ss/shared';
 import { ASPECT_RATIOS, type AspectRatio } from '@ss/shared/constants';
@@ -51,21 +52,15 @@ async function getVideoBindings(ctx: Context): Promise<{
   dailyBudgetCny: number;
   requireComplianceForVideo: boolean;
 }> {
-  const settings = await ctx.prisma.systemSetting.findMany({
-    where: {
-      key: {
-        in: [
-          'binding.shot.video.providerId',
-          'shot.video.maxDurationS',
-          'shot.video.defaultAspectRatio',
-          'shot.video.dailyBudgetCny',
-          'asset.compliance.requireForVideo',
-        ],
-      },
-    },
-  });
-  const map = new Map(settings.map((s) => [s.key, s.value]));
-  const rawAr = map.get('shot.video.defaultAspectRatio') ?? '9:16';
+  // 三十二收工 S3 followup:helper batch
+  const settings = await loadSystemSettings(ctx.prisma, [
+    'binding.shot.video.providerId',
+    'shot.video.maxDurationS',
+    'shot.video.defaultAspectRatio',
+    'shot.video.dailyBudgetCny',
+    'asset.compliance.requireForVideo',
+  ]);
+  const rawAr = settings['shot.video.defaultAspectRatio'] ?? '9:16';
   // 2026-05-27:扩到 6 比例后用 ASPECT_RATIOS 真相源校验,白名单外的默认 9:16
   const ar: AspectRatio = (ASPECT_RATIOS as readonly string[]).includes(rawAr)
     ? (rawAr as AspectRatio)
@@ -79,12 +74,12 @@ async function getVideoBindings(ctx: Context): Promise<{
   };
   return {
     // 二十收工后用户反馈:不 hardcode 默认 provider,空时调用方判断(generateVideo 有 input.providerOverride 优先)
-    providerId: map.get('binding.shot.video.providerId') ?? '',
-    maxDurationS: parseNum(map.get('shot.video.maxDurationS'), 15),
+    providerId: settings['binding.shot.video.providerId'] ?? '',
+    maxDurationS: parseNum(settings['shot.video.maxDurationS'], 15),
     defaultAspectRatio: ar,
-    dailyBudgetCny: parseNum(map.get('shot.video.dailyBudgetCny'), 500),
+    dailyBudgetCny: parseNum(settings['shot.video.dailyBudgetCny'], 500),
     requireComplianceForVideo:
-      (map.get('asset.compliance.requireForVideo') ?? 'false') === 'true',
+      (settings['asset.compliance.requireForVideo'] ?? 'false') === 'true',
   };
 }
 

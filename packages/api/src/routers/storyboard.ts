@@ -23,6 +23,8 @@ import { sanitizeErrorMsg, normalizePrompt } from '@ss/shared';
 import { router, protectedProcedure, rateLimit } from '../trpc.js';
 import type { Context } from '../context.js';
 import { logOperation } from '../middleware/audit.js';
+// 三十二收工 S3 followup:batch SystemSetting 读 helper
+import { loadSystemSettings } from '../utils/system-bindings.js';
 import {
   acquireEpisodeLock,
   isEpisodeLockedNow,
@@ -140,20 +142,17 @@ async function getStoryboardBindings(ctx: Context): Promise<{
     'cache:bindings:storyboard',
     60,
     async () => {
-      const rows = await ctx.prisma.systemSetting.findMany({
-        where: {
-          key: {
-            in: [
-              'binding.storyboard.generation.modelId',
-              'storyboard.maxDurationS',
-              'storyboard.defaultShotDurationS',
-              'storyboard.autoMergeOnGenerate',
-            ],
-          },
-        },
-      });
+      // 三十二收工 S3 followup:helper batch
+      const settings = await loadSystemSettings(ctx.prisma, [
+        'binding.storyboard.generation.modelId',
+        'storyboard.maxDurationS',
+        'storyboard.defaultShotDurationS',
+        'storyboard.autoMergeOnGenerate',
+      ]);
       const out: Record<string, string> = {};
-      for (const r of rows) out[r.key] = r.value;
+      for (const [k, v] of Object.entries(settings)) {
+        if (v !== undefined) out[k] = v;
+      }
       return out;
     },
   );
@@ -1288,12 +1287,13 @@ export const storyboardRouter = router({
 
       // 5b. W7 followup:加载 4 大预设 — admin.preset.list 同源
       // (从 SystemSetting preset.<kind> 读;没配时 PRESET_DEFAULTS 兜底)
-      const presetRows = await ctx.prisma.systemSetting.findMany({
-        where: {
-          key: { in: ['preset.framing', 'preset.angle', 'preset.movement', 'preset.lighting'] },
-        },
-      });
-      const presetMap = new Map(presetRows.map((s) => [s.key, s.value]));
+      // 三十二收工 S3 followup:helper batch
+      const presetMap = await loadSystemSettings(ctx.prisma, [
+        'preset.framing',
+        'preset.angle',
+        'preset.movement',
+        'preset.lighting',
+      ]);
       const parsePresetValue = (raw: string | undefined): string[] | undefined => {
         if (!raw) return undefined;
         try {
@@ -1307,10 +1307,10 @@ export const storyboardRouter = router({
         return undefined;
       };
       const presets = {
-        framing: parsePresetValue(presetMap.get('preset.framing')),
-        angle: parsePresetValue(presetMap.get('preset.angle')),
-        movement: parsePresetValue(presetMap.get('preset.movement')),
-        lighting: parsePresetValue(presetMap.get('preset.lighting')),
+        framing: parsePresetValue(presetMap['preset.framing']),
+        angle: parsePresetValue(presetMap['preset.angle']),
+        movement: parsePresetValue(presetMap['preset.movement']),
+        lighting: parsePresetValue(presetMap['preset.lighting']),
       };
 
       // 6. 逐场调 LLM

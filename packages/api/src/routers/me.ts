@@ -9,6 +9,8 @@ import {
   PRESET_KIND_LABELS,
   loadPresetValues,
 } from './admin/preset.js';
+// 三十二收工 S3 followup:batch SystemSetting 读 helper
+import { loadSystemSettings } from '../utils/system-bindings.js';
 
 export const meRouter = router({
   /** 当前会话 */
@@ -78,29 +80,22 @@ export const meRouter = router({
    * 前端 layout / 项目页拿这个填 logo title + 抽卡上限提示 + 预算颜色档位。
    */
   systemBranding: protectedProcedure.query(async ({ ctx }) => {
-    const rows = await ctx.prisma.systemSetting.findMany({
-      where: {
-        key: {
-          in: [
-            'system.locale.default',
-            'system.brand.name_cn',
-            'system.brand.name_en',
-            'system.brand.tagline_cn',
-            'system.gacha.max_attempts',
-            'system.budget.warn_pct',
-          ],
-        },
-      },
-      select: { key: true, value: true },
-    });
-    const map = new Map(rows.map((r) => [r.key, r.value]));
+    // 三十二收工 S3 followup:helper batch
+    const settings = await loadSystemSettings(ctx.prisma, [
+      'system.locale.default',
+      'system.brand.name_cn',
+      'system.brand.name_en',
+      'system.brand.tagline_cn',
+      'system.gacha.max_attempts',
+      'system.budget.warn_pct',
+    ]);
     return {
-      defaultLocale: map.get('system.locale.default') ?? 'zh-CN',
-      brandNameCn: map.get('system.brand.name_cn') ?? '星垣工坊',
-      brandNameEn: map.get('system.brand.name_en') ?? 'StarsAlign Studio',
-      brandTaglineCn: map.get('system.brand.tagline_cn') ?? '',
-      gachaMaxAttempts: Number(map.get('system.gacha.max_attempts') ?? '5'),
-      budgetWarnPct: Number(map.get('system.budget.warn_pct') ?? '80'),
+      defaultLocale: settings['system.locale.default'] ?? 'zh-CN',
+      brandNameCn: settings['system.brand.name_cn'] ?? '星垣工坊',
+      brandNameEn: settings['system.brand.name_en'] ?? 'StarsAlign Studio',
+      brandTaglineCn: settings['system.brand.tagline_cn'] ?? '',
+      gachaMaxAttempts: Number(settings['system.gacha.max_attempts'] ?? '5'),
+      budgetWarnPct: Number(settings['system.budget.warn_pct'] ?? '80'),
     };
   }),
 });

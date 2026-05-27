@@ -28,6 +28,8 @@ import { sanitizeErrorMsg, EVENTS } from '@ss/shared';
 import { router, protectedProcedure } from '../trpc.js';
 import type { Context } from '../context.js';
 import { logOperation } from '../middleware/audit.js';
+// 三十二收工 S3 followup:batch SystemSetting 读 helper
+import { loadSystemSettings } from '../utils/system-bindings.js';
 
 // ---------------------------------------------------------------------------
 // 通用
@@ -604,24 +606,20 @@ export const assetRouter = router({
         include: { style: true },
       });
 
-      // 读绑定 model + maxCharacters
-      const settings = await ctx.prisma.systemSetting.findMany({
-        where: {
-          key: {
-            in: ['binding.asset.breakdown.modelId', 'asset.breakdown.maxCharacters'],
-          },
-        },
-      });
-      const map = new Map(settings.map((s) => [s.key, s.value]));
+      // 读绑定 model + maxCharacters(三十二收工 S3 followup:helper batch)
+      const settings = await loadSystemSettings(ctx.prisma, [
+        'binding.asset.breakdown.modelId',
+        'asset.breakdown.maxCharacters',
+      ]);
       // 二十收工后用户反馈:不 hardcode 默认 provider,binding 空时显式拒绝
-      const modelId = map.get('binding.asset.breakdown.modelId') ?? '';
+      const modelId = settings['binding.asset.breakdown.modelId'] ?? '';
       if (!modelId) {
         throw new TRPCError({
           code: 'PRECONDITION_FAILED',
           message: '资产拆解未配置 LLM Provider — 请去 /admin/bindings 选择 binding.asset.breakdown.modelId',
         });
       }
-      const maxCharacters = Number(map.get('asset.breakdown.maxCharacters') ?? '20');
+      const maxCharacters = Number(settings['asset.breakdown.maxCharacters'] ?? '20');
 
       // W1-W5 audit P0(B1):写 GenerationAttempt(action=TEXT),Phase 1 资产拆解扣费回溯链路
       const attemptStartedAt = new Date();
@@ -814,21 +812,17 @@ export const assetRouter = router({
         include: { style: true },
       });
 
-      // 读 binding
-      const settings = await ctx.prisma.systemSetting.findMany({
-        where: {
-          key: {
-            in: ['binding.asset.image.providerId', 'binding.asset.panorama.providerId'],
-          },
-        },
-      });
-      const settingMap = new Map(settings.map((s) => [s.key, s.value]));
+      // 读 binding(三十二收工 S3 followup:helper batch)
+      const imgSettings = await loadSystemSettings(ctx.prisma, [
+        'binding.asset.image.providerId',
+        'binding.asset.panorama.providerId',
+      ]);
       // 二十收工后用户反馈:不 hardcode 默认 provider,binding 空时显式拒绝(input.modelId 优先,测试调试用)
       const providerId =
         input.modelId ??
         (input.slot === 'panorama'
-          ? settingMap.get('binding.asset.panorama.providerId') ?? ''
-          : settingMap.get('binding.asset.image.providerId') ?? '');
+          ? imgSettings['binding.asset.panorama.providerId'] ?? ''
+          : imgSettings['binding.asset.image.providerId'] ?? '');
       if (!providerId) {
         const bindingKey = input.slot === 'panorama'
           ? 'binding.asset.panorama.providerId'
