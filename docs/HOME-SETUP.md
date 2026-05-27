@@ -118,6 +118,9 @@ node scripts/init-env.mjs
 1. 从 `.env.example` 复制一份 `.env.local`(若不存在)
 2. 用 Node 的 `crypto.randomBytes` 生成 `JWT_SECRET` + `APP_MASTER_KEY`(各 64 字符 hex)
 3. 已有有效值的密钥**不会覆盖**(幂等)
+4. **给 `apps/web/.env.local` 和 `apps/workers/video-gen/.env.local` 各自建相对 symlink → root `.env.local`**(Next.js / worker 各自从其 cwd 加载 .env.local,不会上溯 monorepo root)
+   - macOS / Linux: 创建 symlink
+   - Windows: 没 symlink 权限时退回 copy(改 root .env.local 后请重跑 `pnpm setup:env` 同步)
 
 验证（应输出各 64 字符）：
 ```bash

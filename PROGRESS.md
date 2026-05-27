@@ -5,6 +5,94 @@
 
 ---
 
+## 2026-05-27(周三,mac-studio · 二十七次收工)— 三遍 audit 修 7 项 onboarding 漏洞 + Prisma DATABASE_URL fail-fast + 默认密码警示
+
+**完成 — 跨 10 文件 · typecheck 16/16 · tests 95/95 · setup:env / preflight 真打验证**
+
+### 触发场景(写下来供后人理解)
+
+二十六收工后用户重启 dev 登录失败 — toast 显示 `Missing required env: JWT_SECRET` → 修了 apps/web/.env.local symlink → 又显示 `SASL: SCRAM-SERVER-FIRST-MESSAGE: client password must be a string` → 诊断出 next dev 没真重启 + Prisma 单例 cache 在 globalThis 没清。用户手动 Ctrl+C 重启后登录通,要求"三遍 audit + 全部修复 + 收工"。
+
+三遍 audit 围绕**"mac-studio 这台新设备暴露的 onboarding / Prisma 7 边角 / 运行时"**三个角度系统性扫,共发现 9 个真问题:7 个修(P0 ×3 + P1 ×1 + P2 ×3),2 个标 follow-up(C6 lastLoginAt + admin 后台 banner)。
+
+### P0(3 项 · 防新设备重蹈覆辙)
+
+**[A2 + P0-2] `scripts/init-env.mjs` 自动建子目录 .env.local symlink**
+- 新增 `SUBDIR_TARGETS = ['apps/web/.env.local', 'apps/workers/video-gen/.env.local']`
+- 各自建**相对** symlink(`path.relative(dirname(fullPath), envLocal)`)→ root `.env.local`,**仓库根目录变了不会断**
+- 已是 symlink → 跳过(幂等)/ 已是普通文件 → 警告但不覆盖(防误删用户内容)
+- macOS / Linux 用 `symlinkSync`;Windows EPERM 退回 `copyFileSync`(改 root 后需重跑 setup:env 同步)
+- 真打验证:`pnpm setup:env` 输出"`= apps/web/.env.local: 已是 symlink,跳过`"
+
+**[A3 + P0-3] `scripts/preflight.mjs` 补 3 项检查**
+- `apps/web/.env.local` 存在(symlink ok)
+- `apps/workers/video-gen/.env.local` 存在
+- `packages/db/src/generated/prisma/client.ts` 存在(Prisma 7 后 generated 不入 git,新设备必须跑 db:generate 才能 typecheck)
+- 真打验证:`pnpm preflight` 输出"`Ready (1 warning)`" — 1 warning 是当前 git 工作树有未提交变更(预期)
+
+**[B6 + P0-1] `turbo.json` 加 `@ss/db#generate` 依赖**
+- 新增 named task `@ss/db#generate`:`outputs: ['src/generated/**'], cache: false`
+- `build` / `typecheck` / `test` 都 `dependsOn: ['^build', '@ss/db#generate']`
+- `dev` 也 `dependsOn: ['@ss/db#generate']`
+- **新设备直接 `pnpm typecheck` 不再因 generated 缺失挂** — turbo 自动先跑 generate
+- 副作用:turbo cache 全 invalidate 一轮(预期)
+
+### P1(1 项 · 防 SCRAM 深错)
+
+**[B2 + P1-4] `packages/db/src/client.ts` DATABASE_URL fail-fast**
+- 原 `connectionString: process.env.DATABASE_URL ?? ''` → silent fallback 空字符串 → pg 内部 SCRAM "client password must be a string" 深错
+- 改 `createPrisma()` 内 `const dbUrl = process.env.DATABASE_URL; if (!dbUrl) throw new Error('[prisma] DATABASE_URL 未设置 ...')`
+- 错误信息直接列 4 步排查清单:apps/web/.env.local symlink / worker cwd / setup:env / preflight
+- 注意 throw 放 `createPrisma()` 而非 module top-level — 避免 typecheck 等不 instantiate prisma 的场景误抛
+
+### P2(3 项 · 顺手做的硬度提升)
+
+**[B4 + P2-7] `apps/workers/video-gen/src/index.ts` 加显式 `import 'dotenv/config'`**
+- 之前 worker 依赖 cwd 有 .env.local symlink + Node 隐式继承(脆弱)
+- 现在显式 dotenv 先加载(进程启动第一行 import),哪怕没 symlink 也能 work(只要 cwd 有 .env / .env.local)
+- 装 dotenv 到 worker deps(原本走 transitive,显式更稳)
+
+**[A4 + P2-6] docs/HOME-SETUP.md + docs/SETUP-WINDOWS.md 补 symlink 说明**
+- HOME-SETUP 第 3 步"脚本自动完成"列表加第 4 项:**给子目录建 symlink**(macOS/Linux symlink,Windows 退回 copy)
+- SETUP-WINDOWS 同步加,但**特别警示**:Windows copy 模式下改 root 后必须重跑 setup:env 同步子目录
+
+**[A7 + P2-8] `scripts/set-admin-password.ts` 命中公开默认密码时输出 ANSI 红色警示**
+- 新增 `PUBLIC_DEFAULT_PASSWORDS = Set(['admin123!@#', 'admin123', 'password', '12345678'])`
+- 命中时 console.log 输出 `\x1b[1;31m⚠️  警告...\x1b[0m` 红色粗体 + 黄色操作指引(`/admin/users → 编辑 → 修改密码`)
+- 二十六收工时我用 admin123!@# 重置 admin 密码(.env.example 公开值),这条警示是给自己 + 未来的我看的
+
+### 留 follow-up(本次没修,需要复现/UI 改动)
+
+- **[C6] 登录不刷新 `lastLoginAt`** — 代码逻辑正确(`packages/adapters/auth/local.ts:57-60` 确实有 `prisma.user.update`),但 DB 里 admin 的 lastLoginAt 还停在 2026-05-22 16:15。可能是浏览器旧 JWT cookie 还有效绕过了 login API,或者用户重启 dev 前坏 prisma 单例吞了 update。需要用户**真 logout 后 login** 复现验证
+- **admin 后台 banner**:用户首次登入时若密码命中公开默认值,显示横幅强提示改密。需要前端改动,留下次
+
+### 验证 matrix
+
+- `pnpm setup:env`:幂等通过("已是 symlink, 跳过")
+- `pnpm preflight`:**All green** 8 项 + 1 warning(git 有未提交变更,预期)
+- `pnpm typecheck`:**16/16**(原 15,加了 `@ss/db#generate` task 算 16)
+- `pnpm test`:**95/95**(adapters 10 + api 25 + core 60)
+
+### 工程化决策
+
+- **symlink 用相对路径**(`path.relative`)而不是绝对路径 → 仓库根迁移不会断
+- **fail-fast 放 `createPrisma()` 而非 module top-level** → typecheck 等非 instantiate 场景不误抛
+- **turbo cache 全 invalidate** 可接受(只损失一次构建时间,换长期 onboarding 不踩坑)
+
+**问题/待决策**
+- ❓ C6 lastLoginAt 真因待复现 — 让用户 logout/login 一次再查 DB
+- ❓ admin 默认密码警示能否升级到登入后 UI banner(P2-8 当前只在 CLI 输出)
+
+**下次接着做**
+- 📌 W6 polish 剩余:15+ 处硬编码颜色 → CSS vars(需逐处视觉测试)
+- 📌 W6 polish 剩余:`<button>` 缺 `type="button"`(form context 精细识别)
+- 📌 复现 C6 lastLoginAt bug 后决定修 / 标 won't fix
+- 📌 Phase 2 W8 团队实战:5 人冷启动 + 真接 Seedance 测 1 集 7 镜头
+- 📌 admin /api-usage 加视频明细 CSV 导出
+- 📌 worker boot stale sweep 加退 PREPAY(资金漏小)
+
+---
+
 ## 2026-05-27(周三,mac-studio · 二十六次收工)— Prisma 6.19.3 → 7.8.0 升级 + W6 polish N+1 真凶修复 + login typo
 
 **完成 — 跨 16 文件 · typecheck 15/15 · tests 95/95 · 真打 DB 链路验证 ✓**

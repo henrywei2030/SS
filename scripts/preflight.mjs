@@ -63,6 +63,26 @@ check('.env.local 存在', () => {
   return 'present';
 });
 
+// Next.js / worker 各自从 cwd 加载 .env.local,monorepo root 文件它们看不到
+// init-env.mjs 已自动建 symlink,这里检查防漏建
+check('apps/web/.env.local', () => {
+  if (!existsSync(resolve(rootDir, 'apps/web/.env.local')))
+    throw new Error('缺失 — 请跑 pnpm setup:env 自动建 symlink → root .env.local');
+  return 'symlink ok';
+});
+
+check('apps/workers/video-gen/.env.local', () => {
+  if (!existsSync(resolve(rootDir, 'apps/workers/video-gen/.env.local')))
+    throw new Error('缺失 — 请跑 pnpm setup:env 自动建 symlink → root .env.local');
+  return 'symlink ok';
+});
+
+check('Prisma client 已生成', () => {
+  if (!existsSync(resolve(rootDir, 'packages/db/src/generated/prisma/client.ts')))
+    throw new Error('缺失 — 请跑 pnpm db:generate(7 升级后 generated 在 src/generated/,不入 git)');
+  return 'generated';
+});
+
 check('node_modules 已装', () => {
   if (!existsSync(resolve(rootDir, 'node_modules')))
     throw new Error('缺失 — 请跑 pnpm install');

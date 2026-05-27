@@ -6,7 +6,11 @@
  *   - autorun:false + waitUntilReady 确保连接就绪后才拉 job
  *   - SIGTERM/SIGINT 顺序:health 先停 → worker.close → redis → prisma
  *   - 25s 硬 timeout 兜底防 K8s SIGKILL(grace 30s 留 5s 余量)
+ *
+ * Prisma 7 升级:显式 dotenv 加载 cwd 的 .env.local(setup:env 已建 symlink → root)。
+ * 防 prisma 单例创建时 DATABASE_URL 未注入 → 触发 fail-fast 抛错。
  */
+import 'dotenv/config';
 import { prisma } from '@ss/db';
 import { getPrimaryRedis } from '@ss/queue/redis';
 

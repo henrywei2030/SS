@@ -1,6 +1,6 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-05-27(**二十六收工 · Prisma 6 → 7 升级 + W6 polish N+1 修复**)
+> 最后更新:2026-05-27(**二十七收工 · 三遍 audit 修 7 项 onboarding 漏洞 + Prisma fail-fast + 默认密码警示**)
 > 仓库:https://github.com/henrywei2030/SS
 > **🚀 一键启动**:`pnpm start`(详见 [README.md](README.md#快速启动) / [CLAUDE.md](CLAUDE.md#设备登记))
 > **📖 实战前必读**:[docs/W1-W7-followup.md](docs/W1-W7-followup.md)(P0 已完成,留 Phase 1.5/2/3 续做项)
@@ -10,6 +10,7 @@
 
 ## 🚧 进行中
 
+- [x] **三遍 audit 修 7 项 onboarding 漏洞 + Prisma fail-fast + 默认密码警示**(二十七收工 · mac-studio · 2026-05-27)— 用户重启 dev 登录通后做的三遍系统性 audit。**P0**:turbo.json 加 `@ss/db#generate` 依赖到 build/dev/typecheck/test(新设备 typecheck 不再因 generated 缺失挂)/ init-env.mjs 自动建 `apps/web` + `apps/workers/video-gen` 的 .env.local 相对 symlink(Windows 退回 copy)/ preflight.mjs 补 3 项检查(两个子目录 .env.local + Prisma client generated)。**P1**:client.ts DATABASE_URL fail-fast(替原 `?? ''` silent fallback,防 SCRAM 深错)。**P2**:worker index.ts 加显式 `import 'dotenv/config'`+ 装 dotenv dep;HOME-SETUP / SETUP-WINDOWS docs 补 symlink 说明;set-admin-password.ts 命中 .env.example 公开默认密码(admin123!@# 等)时输出 ANSI 红色警告 + 提示立改。 typecheck 16/16 + tests 95/95 + preflight 全绿
 - [x] **Prisma 6.19.3 → 7.8.0 升级**(二十六收工 · mac-studio)— Driver Adapter (PrismaPg) + prisma.config.ts + prisma-client generator + dotenv 显式 / `Prisma.Decimal.Value` namespace 兼容 / db-migrate-dev-guard 加显式 generate / enums 改 `export *` 一键 re-export / typecheck 15/15 + tests 95/95 + 真打 DB query 验证 — 2026-05-27
 - [x] **W6 polish — listBindings N+1 + login --color-success typo**(二十六收工)— 后端加 `listBindingsByAssetIds` batch procedure(按 projectId 一次查全部 AssetCard 的 binding,按 assetId group 返回)+ art-workspace 父级一次查 + AssetCard 接 prop 去 self-query / login page `--success` → `--color-success` 规范化 — 2026-05-27
 - [x] **W5.0 数据底座** — SystemSetting 4 条 + compileShotVideoPrompt 拼接公式 + GenerationAttempt.providerJobId — 2026-05-22(六收工)

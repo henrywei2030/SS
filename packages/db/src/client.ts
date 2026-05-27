@@ -18,16 +18,22 @@ declare global {
   var __ssPrismaSignalsRegistered: boolean | undefined;
 }
 
-const createPrisma = (): PrismaClient =>
-  new PrismaClient({
-    adapter: new PrismaPg({
-      connectionString: process.env.DATABASE_URL ?? '',
-    }),
-    log:
-      process.env.NODE_ENV === 'development'
-        ? ['warn', 'error']
-        : ['error'],
+const createPrisma = (): PrismaClient => {
+  const dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl) {
+    throw new Error(
+      '[prisma] DATABASE_URL 未设置。' +
+        ' 排查:1) apps/web/.env.local 是否 symlink → root .env.local;' +
+        ' 2) worker 是否在子项目 cwd 启动(继承 root env);' +
+        ' 3) 跑 pnpm setup:env 自动建子目录 symlink;' +
+        ' 4) 跑 pnpm preflight 自检。',
+    );
+  }
+  return new PrismaClient({
+    adapter: new PrismaPg({ connectionString: dbUrl }),
+    log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
   });
+};
 
 export const prisma: PrismaClient = globalThis.__ssPrisma ?? createPrisma();
 

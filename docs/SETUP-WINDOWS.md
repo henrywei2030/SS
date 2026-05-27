@@ -120,6 +120,8 @@ node scripts/init-env.mjs
 1. 从 `.env.example` 复制一份 `.env.local`(若不存在)
 2. 用 Node 自带的 `crypto.randomBytes` 生成 `JWT_SECRET` 和 `APP_MASTER_KEY`(各 64 字符 hex)
 3. 已有有效值的密钥**不会覆盖**(安全幂等)
+4. **给 `apps/web/.env.local` 和 `apps/workers/video-gen/.env.local` 各建 .env.local**(Windows 默认无 symlink 权限 → 自动退回 copy)
+   - ⚠️ **Windows 注意**:用的是 copy 而非 symlink,改 root `.env.local` 后请**重跑** `pnpm setup:env` 同步到子目录(或开 dev 模式获取 symlink 权限)
 
 验证:
 ```powershell
