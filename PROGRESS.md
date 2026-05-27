@@ -5,6 +5,123 @@
 
 ---
 
+## 2026-05-28(周四,mac-studio · 三十次收工)— 深度架构 audit + 8 项 S1-S8 小修一气完 + 4 大重写候选记 follow-up
+
+**完成 — 跨 10 文件(8 modified + 2 new) · +189 / -112 · typecheck 16/16 · tests 95/95**
+
+### 触发场景
+
+用户要求"完整检查 10 遍,深度看代码层面优化结构 + 是否要重写模块"。这是结构层 audit(不是死代码,死代码 r15 + r16 已扫过)。
+
+### 3 Explore agent 并行扫 + 我自扫 → 15 项发现
+
+- **Agent A 架构**:长文件 / 长函数 / 重复代码 / 包边界 / 抽象层级
+- **Agent B 性能**:N+1 / re-render / bundle / polling / DB index / 主线程阻塞
+- **Agent C 类型+安全**:any/unknown 滥用 / 错误吞 / SSRF/XSS / 资源泄漏 / TODO 注释
+- **我自扫**:git log 改动累积频次(找改最多的文件 = 累积最多 patch = 重写候选)
+
+整合分级:**4 大重写候选(R1-R4) + 8 项小修(S1-S8)**。用户拍 **"小修 + 重写记 follow-up"**。
+
+### 8 项小修一气完成
+
+**S1: `<InflightProgressPanel>` 子组件抽** — `apps/web/.../aigc-workspace.tsx`(原 1949 行单组件)
+- 原 1s setInterval `setNowTick(Date.now())` → 整个 1949 行组件每秒 re-render
+- 抽 `<InflightProgressPanel>`(放文件末尾,接 `startedAt / expectedMs / providerDisplayName / progress`)
+- timer + elapsedMs + estimatedPercent + displayPercent + JSX 全部内聚到子组件
+- 父组件删除 `[nowTick, setNowTick]` state + `useEffect setInterval` + `elapsedMs / estimatedPercent` derived → 父级不再每秒 re-render
+- 副作用:进度条/elapsed 文字现在在独立小组件内更新,video preview 帧率不再受 timer 影响
+
+**S2: recharts tree-shake** — `apps/web/next.config.ts`
+- `optimizePackageImports` 加 `'recharts'`(~300KB 全量包,story-compass.tsx 用)
+- Next.js 15+ 自动转 named import 优化
+
+**S3: `loadSystemSettings` helper** — 新建 `packages/api/src/utils/system-bindings.ts`
+- 散在 10+ 处(admin/aigc/script/storyboard/insights)的 `prisma.systemSetting.findUnique` 改 batch IN 查询
+- `loadSystemSettings(prisma, keys[])` 一次 query 返 `{ key → value }` map(N=10 时省 9 次往返)
+- `loadSystemSetting(prisma, key)` 单 key 版
+- helper 抽好待后续重构 admin.ts / aigc.ts 时批量替换(本次未替换调用点,避免一次性改动太大;留给 R3 拆 admin.ts 时一起做)
+
+**S4: `as any` 收敛(3 处)** — admin.ts:2289+2314 + db-explorer-view.tsx:24
+- 后端抽 `getWhitelistedModel(prisma, table)` helper:返 `{ count, findMany }` minimal interface,`as unknown as Record` 单点收敛(白名单已校验,反射安全)
+- `listTables` 改 `Promise.allSettled`(单表 count 错不拖整批,S7 一并做)
+- `queryTable` 用 helper(自动删旧 if (!model) 守卫)
+- 前端 `selectedTable: string | null` → `DbTable | null`,用 `inferRouterInputs<AppRouter>['admin']['dbExplorer']['queryTable']['table']` 推断
+- `selectedTable as any` → `selectedTable!`(non-null assertion,跟 enabled gate 一致)
+
+**S5: S3 healthcheck SSRF 防御** — admin.ts:1378
+- `checkMinio` 顶部加 `validateApiUrl(endpoint)` 校验
+- dev 默认放行 localhost(NODE_ENV 判断),prod 拒 metadata / 内网 IP
+- 极低风险但应防预(误配 S3_ENDPOINT 指向内网 metadata 时直接拒)
+
+**S6: SSE Redis unsubscribe 可观测** — `apps/web/app/api/sse/aigc/[attemptId]/route.ts:94`
+- 原 `.catch(() => {})` silent swallow → `.catch((e) => console.warn('[sse-aigc] ... failed:', e))`
+- Redis 连接异常时可观测,防资源泄漏
+
+**S7: `Promise.all` → `allSettled`** — admin presetRouter line 982 + dbExplorerRouter listTables(S4 顺手做)
+- preset.list:每个 kind 加载独立,单个失败用 PRESET_DEFAULTS fallback,前端仍可渲染
+- dbExplorer.listTables:单表 count 失败返 `error` 字段不拖整批
+
+**S8: type guards helper** — 新建 `packages/shared/src/type-guards.ts`
+- `asRecord(value)` / `asString(value)` / `asNumber(value)` — 替原 `as Record<string, unknown>` 后裸 access 的不安全模式
+- 重写 `packages/adapters/provider/seedance.ts:parseQueryResponse`(8 处 inline `as Record` cast 全消失,新代码更短更安全)
+- `packages/core/asset/breakdown.ts` 跟进改 root parse
+- 导出加到 `packages/shared/src/index.ts`,跨包可用
+
+### 4 大重写候选 — 留 follow-up(需独立会话 + design 拍板)
+
+| # | 模块 | 行数 | 改动累积 | 真问题 | 工作量 |
+|---|---|---|---|---|---|
+| **R1** | `aigc-workspace.tsx` | 1949 | 3335 行 patch + 7 commits(单文件最高累积) | 13 useState + 19 dialog 态 + 状态分散 | >3h(需 design) |
+| **R2** | `aigc.ts generateVideo` | 626 单 mutation | 3041 行 patch + 12 commits | lock+stale+prepay+budget+compile+queue+SSE 全耦合,无法单测 | >3h(需 design) |
+| **R3** | `admin.ts` 16 sub-router | 2403 | 2543 行 patch + 21 commits(最高 commit 频次) | 单文件塞 16 子 router,编辑冲突频繁 | 1-3h |
+| **R4** | `<AdminTable>` 通用组件 | 4 表共 2478 行 | - | providers/users/styles/prompts 重复 CRUD 骨架 | 1-3h |
+
+### 中等信号保留(不动)
+
+- `extractRequestId` / `formatRequestIdSuffix`(同文件内 export 设计选择,不强制内联)
+- adapters/provider/ 跟 queue/ 职责边界模糊 — 收益不大,留下次
+- @deprecated schema 字段 — 等 W8 真使用确认无依赖再 drop
+
+### 误报排除
+
+- `packages/db/src/generated/` 几千行 — Prisma 生成,非业务 smell ✓
+- aigc-workspace 1949 行虽大但已大量用 useCallback/useMemo,re-render 压力可控 ✓
+- 包间 import 关系干净:`@ss/db` 只 import 标准库 + adapter-pg,`@ss/adapters` 只 import `@ss/db` + `@ss/shared` ✓
+- 无原始 SQL($queryRaw 完全没用),无 timingUnsafe compare,CSRF/rate-limit/bcrypt 都 OK ✓
+- 服务端无 for-await prisma 循环 N+1 ✓
+- Prisma 7 PrismaPg connection pool 默认 OK ✓
+
+### 跳过(我不能做)
+
+- **W8 团队实战**:需 5 真人 + 真 API key + 1 集 7 镜头实战
+- **`gh auth refresh -s user`**:交互命令(浏览器 device flow),Bash 工具非交互
+
+### 验证
+
+- typecheck:**16/16** 全过
+- tests:**95/95** 全过
+- 真改动跨 10 文件 +189/-112
+
+### 工程化决策
+
+- **抽 helper 但不强制全替换调用点**(S3 system-bindings + S4 getWhitelistedModel + S8 type-guards):helper 抽好,留给 R1-R4 重写时一次性使用,避免改动散在 30+ 处难 review
+- **小修保守原则**:`extractRequestId` 等 export-but-internal 设计不强删,scripts/ 一次性脚本不强删(R 系列重写时一起决策)
+
+**问题/待决策**
+- ❓ R1-R4 启动时机:R1+R2 是大重写,需要 design 文档先写;R3+R4 是中等重构,可单独 PR 启动
+- ❓ S3 helper 调用点替换是否独立 PR(10+ 处分散,batch 替换可降 prisma 读 cost,但 PR 大)
+
+**下次接着做**
+- 📌 复现 C6 后决定修 / won't fix(用户 logout/login 验证)
+- 📌 W8 团队实战(需召集 5 人)
+- 📌 R3 admin.ts 拆文件(最低风险的中等重构,适合下次启动)
+- 📌 R4 `<AdminTable>` 通用组件(收益面大,4 个表统一)
+- 📌 S3 helper 全替换 10+ 处 systemSetting findUnique(batch 优化)
+- 📌 (可选)真删 `fix-seedance-provider-config.mjs`(README 已标可删)
+- 📌 (可选)R1+R2 重写需先写 design 文档
+
+---
+
 ## 2026-05-27(周三,mac-studio · 二十九次收工)— "下次接着做" 5 项一气清:C6 澄清 + W6 polish 收尾 + worker 退 PREPAY + admin 视频 CSV + scripts README
 
 **完成 — 跨 5 文件(+1 新 README) · +248 / -14 · typecheck 16/16 · tests 95/95**

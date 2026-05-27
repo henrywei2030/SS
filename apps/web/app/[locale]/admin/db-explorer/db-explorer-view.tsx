@@ -2,11 +2,16 @@
 import * as React from 'react';
 import { Database, RefreshCw, Copy } from 'lucide-react';
 import { toast } from 'sonner';
+import type { inferRouterInputs } from '@trpc/server';
 
+import type { AppRouter } from '@ss/api';
 import { trpc } from '@/lib/trpc/client';
 
+// 二十九收工 S4:从 trpc inferred 类型拿白名单 enum,替原 `as any`
+type DbTable = inferRouterInputs<AppRouter>['admin']['dbExplorer']['queryTable']['table'];
+
 export function DbExplorerView(): React.ReactElement {
-  const [selectedTable, setSelectedTable] = React.useState<string | null>(null);
+  const [selectedTable, setSelectedTable] = React.useState<DbTable | null>(null);
   const [page, setPage] = React.useState(1);
   const pageSize = 50;
 
@@ -19,9 +24,8 @@ export function DbExplorerView(): React.ReactElement {
     isError: rowsError,
     error: rowsErr,
   } = trpc.admin.dbExplorer.queryTable.useQuery(
-    // 类型断言:selectedTable 校验后才 query
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    { table: selectedTable as any, page, pageSize },
+    // enabled gate 保证 selectedTable 非 null 才发请求
+    { table: selectedTable!, page, pageSize },
     { enabled: !!selectedTable },
   );
 

@@ -10,7 +10,7 @@
  */
 import { Agent, request } from 'undici';
 
-import { ProviderError } from '@ss/shared';
+import { ProviderError, asRecord, asString, asNumber } from '@ss/shared';
 
 // 2026-05-27 audit r15 P0:Seedance 专属 undici Agent
 // 用户反馈根因:worker POST moyu /v1/video/generations 默认 connect timeout 10s 不够 →
@@ -123,36 +123,30 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
    * 用户用 moyu relay → 2.0 协议(data.data.content.video_url + 大写 status)
    */
   private parseQueryResponse(raw: unknown): NormalizedQuery {
-    const root = raw as Record<string, unknown>;
+    const root = asRecord(raw);
+    if (!root) return { kind: 'pending', rawResponse: raw };
+
+    // 二十九收工 S8:`as Record` heavy 重写,用 asRecord/asString/asNumber type guard
     // 优先尝试 Seedance 2.0 (moyu relay) 嵌套结构
-    const lvl1 = root.data as Record<string, unknown> | undefined;
-    const lvl1Status =
-      lvl1 && typeof lvl1.status === 'string' ? (lvl1.status as string) : null;
+    const lvl1 = asRecord(root.data);
+    const lvl1Status = lvl1 ? asString(lvl1.status) : null;
     if (lvl1 && lvl1Status) {
       const upper = lvl1Status.toUpperCase();
-      const inner = (lvl1.data as Record<string, unknown>) ?? {};
-      const content = inner.content as Record<string, unknown> | undefined;
-      const innerErr = inner.error as Record<string, unknown> | undefined;
+      const inner = asRecord(lvl1.data) ?? {};
+      const content = asRecord(inner.content);
+      const innerErr = asRecord(inner.error);
       if (upper === 'SUCCESS') {
-        const videoUrl =
-          typeof content?.video_url === 'string' ? content.video_url : undefined;
         return {
           kind: 'success',
-          videoUrl,
-          durationS:
-            typeof inner.duration === 'number' ? inner.duration : undefined,
-          fps:
-            typeof inner.framespersecond === 'number'
-              ? inner.framespersecond
-              : undefined,
+          videoUrl: asString(content?.video_url) ?? undefined,
+          durationS: asNumber(inner.duration) ?? undefined,
+          fps: asNumber(inner.framespersecond) ?? undefined,
           rawResponse: raw,
         };
       }
       if (upper === 'FAILURE' || upper === 'CANCELLED') {
-        const failReason =
-          typeof lvl1.fail_reason === 'string' ? lvl1.fail_reason : '';
-        const innerMsg =
-          typeof innerErr?.message === 'string' ? innerErr.message : '';
+        const failReason = asString(lvl1.fail_reason) ?? '';
+        const innerMsg = asString(innerErr?.message) ?? '';
         return {
           kind: 'failed',
           errorMsg: innerMsg || failReason || `Task ${upper}`,
@@ -163,30 +157,27 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
       return { kind: 'pending', rawResponse: raw };
     }
     // Seedance 1.x ARK 格式:平铺 status + content
-    if (typeof root.status === 'string') {
-      const s = (root.status as string).toLowerCase();
+    const rootStatus = asString(root.status);
+    if (rootStatus) {
+      const s = rootStatus.toLowerCase();
       if (s === 'succeeded' || s === 'success') {
-        const content = root.content as Record<string, unknown> | undefined;
+        const content = asRecord(root.content);
         return {
           kind: 'success',
-          videoUrl:
-            typeof content?.video_url === 'string' ? content.video_url : undefined,
-          thumbnailUrl:
-            typeof content?.cover_url === 'string' ? content.cover_url : undefined,
-          durationS:
-            typeof content?.duration === 'number' ? content.duration : undefined,
-          width: typeof content?.width === 'number' ? content.width : undefined,
-          height: typeof content?.height === 'number' ? content.height : undefined,
-          fps: typeof content?.fps === 'number' ? content.fps : undefined,
+          videoUrl: asString(content?.video_url) ?? undefined,
+          thumbnailUrl: asString(content?.cover_url) ?? undefined,
+          durationS: asNumber(content?.duration) ?? undefined,
+          width: asNumber(content?.width) ?? undefined,
+          height: asNumber(content?.height) ?? undefined,
+          fps: asNumber(content?.fps) ?? undefined,
           rawResponse: raw,
         };
       }
       if (s === 'failed' || s === 'cancelled' || s === 'failure') {
-        const err = root.error as Record<string, unknown> | undefined;
+        const err = asRecord(root.error);
         return {
           kind: 'failed',
-          errorMsg:
-            typeof err?.message === 'string' ? err.message : `Task ${s}`,
+          errorMsg: asString(err?.message) ?? `Task ${s}`,
           rawResponse: raw,
         };
       }

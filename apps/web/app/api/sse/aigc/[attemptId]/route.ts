@@ -91,8 +91,15 @@ export async function GET(
         } catch {
           // already closed
         }
-        void subscriber.unsubscribe(channel).catch(() => {});
-        void subscriber.quit().catch(() => {});
+        // 二十九收工 S6:silent swallow → console.warn,Redis 连接异常时可观测(防资源泄漏)
+        void subscriber
+          .unsubscribe(channel)
+          .catch((e) =>
+            console.warn(`[sse-aigc] unsubscribe ${channel} failed:`, e),
+          );
+        void subscriber
+          .quit()
+          .catch((e) => console.warn(`[sse-aigc] subscriber quit failed:`, e));
       };
 
       // 1. 终态兜底

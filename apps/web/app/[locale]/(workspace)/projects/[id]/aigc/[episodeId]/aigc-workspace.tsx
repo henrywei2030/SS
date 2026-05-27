@@ -5,7 +5,7 @@ import { Download, History, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { trpc } from '@/lib/trpc/client';
-import { useAigcProgress } from '@/lib/hooks/use-aigc-progress';
+import { useAigcProgress, type AigcProgressState } from '@/lib/hooks/use-aigc-progress';
 import { ASPECT_RATIOS, type AspectRatio } from '@ss/shared/constants';
 import { normalizePrompt } from '@ss/shared';
 
@@ -1217,22 +1217,12 @@ function VideoPreviewSection({
       ),
     [visibleTakes],
   );
-  const [nowTick, setNowTick] = React.useState(() => Date.now());
-  React.useEffect(() => {
-    if (!inflightTake) return;
-    const timer = setInterval(() => setNowTick(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [inflightTake]);
+  // 二十九收工 S1:1s timer 抽到 <InflightProgressPanel> 子组件,
+  // 父组件不再因 nowTick state 全量 re-render(原 1949 行组件每秒刷新)
   // expected duration:2.0 fast 3 分钟 / 2.0 std 6 分钟(从 capabilities.providerId 区分)
   const expectedMs = (capabilities?.providerId ?? '').includes('fast')
     ? 3 * 60_000
     : 6 * 60_000;
-  const elapsedMs = inflightTake
-    ? nowTick - new Date(inflightTake.createdAt).getTime()
-    : 0;
-  const estimatedPercent = inflightTake
-    ? Math.min(95, Math.round((elapsedMs / expectedMs) * 100))
-    : 0;
 
   // 默认选中最新 take(无论 status — FAILED/RUNNING 也显,让用户看错误 / 进度)
   // 用户删了当前 selectedTake 后自动重选 latest
@@ -1446,42 +1436,18 @@ function VideoPreviewSection({
       )}
 
       {/* 2026-05-27 用户反馈:动态进度条 — SSE percent 优先,fallback 时间估算
-       *  即使 SSE 没推 progress 也能基于 RUNNING take.createdAt 实时显示进度 */}
+       *  二十九收工 S1:整段抽到 <InflightProgressPanel> 子组件,
+       *  timer 在子组件内跑,父组件 1949 行不再每秒 re-render */}
       {(inflightTake ||
         progress.kind === 'connecting' ||
         progress.kind === 'running' ||
         progress.kind === 'progress') && (
-        <div className="mb-3 rounded-md border border-blue-500/30 bg-blue-500/5 p-3 text-xs text-blue-700 dark:text-blue-300">
-          <div className="flex items-center justify-between gap-2">
-            <span className="flex items-center gap-2">
-              <span className="inline-block size-2 animate-pulse rounded-full bg-blue-500" />
-              <span className="font-medium">
-                {progress.kind === 'connecting'
-                  ? '建立连接中...'
-                  : '视频生成中'}
-              </span>
-            </span>
-            {inflightTake && (
-              <span className="font-mono tabular-nums opacity-80">
-                {Math.round(elapsedMs / 1000)} s · {(progress.kind === 'progress' && progress.percent) ? progress.percent : estimatedPercent}%
-              </span>
-            )}
-          </div>
-          {inflightTake && (
-            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-blue-500/15">
-              <div
-                className="h-full rounded-full bg-blue-500 transition-all duration-1000 ease-linear"
-                style={{
-                  width: `${(progress.kind === 'progress' && progress.percent) ? progress.percent : estimatedPercent}%`,
-                }}
-              />
-            </div>
-          )}
-          <div className="mt-1.5 text-[10px] opacity-70">
-            {capabilities?.displayName ?? 'provider'} · 预计 {Math.round(expectedMs / 60_000)} 分钟 · 系统每 5 秒自动刷新状态
-            {progress.kind === 'progress' && progress.message && ` · ${progress.message}`}
-          </div>
-        </div>
+        <InflightProgressPanel
+          startedAt={inflightTake ? new Date(inflightTake.createdAt) : null}
+          expectedMs={expectedMs}
+          providerDisplayName={capabilities?.displayName ?? 'provider'}
+          progress={progress}
+        />
       )}
       {progress.kind === 'failed' && (
         <div className="mb-3 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-700 dark:text-red-300">
@@ -1943,6 +1909,73 @@ function BindAssetDialog({
           usageType 自动按 asset.type 推导(CHARACTER→APPEAR / SCENE→ENVIRONMENT / PROP→APPEAR)。
           需要别的(SPEAK/HOLD/SOUND_VOICE 等)请用 API 或下版本 UI。
         </footer>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// 二十九收工 S1:Inflight 进度面板 — timer 隔离子组件
+//
+// 原本父组件 AigcWorkspace(1900+ 行)直接持 nowTick state,
+// 每秒 setInterval → 整个组件 re-render → 拖慢 video preview / 子组件 memoization
+//
+// 抽到这里后,timer 在子组件内独立跑,父组件不动。
+// startedAt=null 时(SSE 已 connecting 但 attempt 还没出现)不跑 timer,只显文字
+// ============================================================================
+function InflightProgressPanel({
+  startedAt,
+  expectedMs,
+  providerDisplayName,
+  progress,
+}: {
+  startedAt: Date | null;
+  expectedMs: number;
+  providerDisplayName: string;
+  progress: AigcProgressState;
+}): React.ReactElement {
+  const [nowTick, setNowTick] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    if (!startedAt) return;
+    const timer = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [startedAt]);
+
+  const elapsedMs = startedAt ? nowTick - startedAt.getTime() : 0;
+  const estimatedPercent = startedAt
+    ? Math.min(95, Math.round((elapsedMs / expectedMs) * 100))
+    : 0;
+  const displayPercent =
+    progress.kind === 'progress' && progress.percent ? progress.percent : estimatedPercent;
+  const progressMessage =
+    progress.kind === 'progress' && progress.message ? progress.message : null;
+
+  return (
+    <div className="mb-3 rounded-md border border-blue-500/30 bg-blue-500/5 p-3 text-xs text-blue-700 dark:text-blue-300">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-2">
+          <span className="inline-block size-2 animate-pulse rounded-full bg-blue-500" />
+          <span className="font-medium">
+            {progress.kind === 'connecting' ? '建立连接中...' : '视频生成中'}
+          </span>
+        </span>
+        {startedAt && (
+          <span className="font-mono tabular-nums opacity-80">
+            {Math.round(elapsedMs / 1000)} s · {displayPercent}%
+          </span>
+        )}
+      </div>
+      {startedAt && (
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-blue-500/15">
+          <div
+            className="h-full rounded-full bg-blue-500 transition-all duration-1000 ease-linear"
+            style={{ width: `${displayPercent}%` }}
+          />
+        </div>
+      )}
+      <div className="mt-1.5 text-[10px] opacity-70">
+        {providerDisplayName} · 预计 {Math.round(expectedMs / 60_000)} 分钟 · 系统每 5 秒自动刷新状态
+        {progressMessage && ` · ${progressMessage}`}
       </div>
     </div>
   );

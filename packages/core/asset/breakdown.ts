@@ -13,6 +13,7 @@
  */
 import { getTextProvider } from '@ss/adapters/provider';
 import type { CallContext } from '@ss/adapters/provider';
+import { asRecord } from '@ss/shared';
 
 import { loadPromptTemplate } from '../shared/load-prompt.js';
 
@@ -193,8 +194,8 @@ export function extractAssets(
   maxCharacters: number,
 ): Pick<AssetBreakdownResult, 'characters' | 'scenes' | 'props'> {
   const empty = { characters: [], scenes: [], props: [] };
-  if (!json || typeof json !== 'object') return empty;
-  const root = json as Record<string, unknown>;
+  const root = asRecord(json);
+  if (!root) return empty;
 
   const characters = parseDraftArray(root.characters, true).slice(0, maxCharacters);
   const scenes = parseDraftArray(root.scenes, false);

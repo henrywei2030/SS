@@ -979,7 +979,8 @@ export async function loadPresetValues(
 
 const presetRouter = router({
   list: adminProcedure.query(async ({ ctx }) => {
-    return Promise.all(
+    // 二十九收工 S7:Promise.all → allSettled,单 kind 加载失败不拖整批
+    const settled = await Promise.allSettled(
       PRESET_KINDS.map(async (kind) => {
         const { values, isDefault } = await loadPresetValues(ctx.prisma, kind);
         return {
@@ -990,6 +991,17 @@ const presetRouter = router({
         };
       }),
     );
+    return settled.map((r, i) => {
+      if (r.status === 'fulfilled') return r.value;
+      const kind = PRESET_KINDS[i]!;
+      // 后端 fallback:用 PRESET_DEFAULTS,前端仍可渲染
+      return {
+        kind,
+        label: PRESET_KIND_LABELS[kind],
+        values: PRESET_DEFAULTS[kind],
+        isDefault: true,
+      };
+    });
   }),
 
   set: adminProcedure
@@ -1378,6 +1390,12 @@ const healthRouter = router({
       const endpoint = process.env.S3_ENDPOINT;
       if (!endpoint) {
         return { ok: false, latencyMs: 0, error: 'S3_ENDPOINT not set' };
+      }
+      // 二十九收工 S5:SSRF 防御 — 即便 admin 触发,S3_ENDPOINT 误配指向 metadata IP 也会被拒
+      // dev 默认放行 localhost(NODE_ENV !== 'production' 时)
+      const urlErr = validateApiUrl(endpoint);
+      if (urlErr) {
+        return { ok: false, latencyMs: 0, error: `S3_ENDPOINT 不安全:${urlErr}` };
       }
       try {
         const ctrl = new AbortController();
@@ -2279,25 +2297,52 @@ const TABLE_WHITELIST = [
 ] as const;
 type WhitelistTable = (typeof TABLE_WHITELIST)[number];
 
+// 二十九收工 S4:把 `as any` 动态反射收敛到此处 + 用 minimal interface 替代,
+// 白名单已校验 → 反射安全;类型上用 unknown→Record 比 any 严格(IDE 还能补全 count/findMany)
+type WhitelistedPrismaModel = {
+  count(): Promise<number>;
+  findMany(args?: {
+    take?: number;
+    skip?: number;
+    orderBy?: Record<string, 'asc' | 'desc'>;
+  }): Promise<unknown[]>;
+};
+
+function getWhitelistedModel(
+  prisma: typeof import('@ss/db')['prisma'],
+  table: WhitelistTable,
+): WhitelistedPrismaModel {
+  const model = (prisma as unknown as Record<string, unknown>)[table] as
+    | WhitelistedPrismaModel
+    | undefined;
+  if (!model || typeof model.findMany !== 'function') {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: `表 ${table} 在 Prisma 中不存在(白名单陈旧,db-explorer 配置同步问题)`,
+    });
+  }
+  return model;
+}
+
 const dbExplorerRouter = router({
   /** 列出所有可浏览的表 + 行数 */
   listTables: adminProcedure.query(async ({ ctx }) => {
-    const results = await Promise.all(
+    // 二十九收工 S7:Promise.all → allSettled 防级联失败(单表 count 错不该拖垮整批)
+    const results = await Promise.allSettled(
       TABLE_WHITELIST.map(async (table) => {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const count: number = await (ctx.prisma as any)[table].count();
-          return { table, count, error: null };
-        } catch (e) {
-          return {
-            table,
-            count: 0,
-            error: e instanceof Error ? e.message : String(e),
-          };
-        }
+        const count = await getWhitelistedModel(ctx.prisma, table).count();
+        return { table, count, error: null as string | null };
       }),
     );
-    return results;
+    return results.map((r, i) => {
+      if (r.status === 'fulfilled') return r.value;
+      const table = TABLE_WHITELIST[i]!;
+      return {
+        table,
+        count: 0,
+        error: r.reason instanceof Error ? r.reason.message : String(r.reason),
+      };
+    });
   }),
 
   /** 查询某表的分页数据(动态反射 Prisma model,白名单防注入) */
@@ -2310,14 +2355,7 @@ const dbExplorerRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const model = (ctx.prisma as any)[input.table];
-      if (!model || typeof model.findMany !== 'function') {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: `表 ${input.table} 在 Prisma 中不存在(白名单陈旧)`,
-        });
-      }
+      const model = getWhitelistedModel(ctx.prisma, input.table);
       try {
         const [rows, total] = await Promise.all([
           model.findMany({
