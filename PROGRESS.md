@@ -5,6 +5,88 @@
 
 ---
 
+## 2026-05-27(周三,mac-studio · 二十九次收工)— "下次接着做" 5 项一气清:C6 澄清 + W6 polish 收尾 + worker 退 PREPAY + admin 视频 CSV + scripts README
+
+**完成 — 跨 5 文件(+1 新 README) · +248 / -14 · typecheck 16/16 · tests 95/95**
+
+### 触发场景
+
+二十八收工后 TODO follow-up 列了 5 项:W6 polish 剩余 / C6 复现 / W8 实战 + admin CSV + worker stale / gh user scope / scripts README。用户授权"全部完成后汇报"。**W8 团队实战 + gh auth refresh** 两项跳过(前者需真人 + 真 API key,后者交互命令)。其余 5 类全做。
+
+### 1️⃣ C6 lastLoginAt 复现 — **非 bug,已澄清**
+
+curl 真打 trpc auth.login API(`admin@starsalign.local` + `admin123!@#`),前后查 DB:
+- **before**: `lastLoginAt = 2026-05-22 16:15:55.776`(W1 那次)
+- **call**: HTTP 200,返回真 JWT token(`eyJhbGc...exp:1780500387`)
+- **after**: `lastLoginAt = 2026-05-27 15:26:27.173`(刷新成功,2ms 延迟)
+
+**结论**:auth.local:57-60 的 `prisma.user.update` 完全 work,Prisma 7 Driver Adapter 也 OK。之前用户在浏览器"登录成功"但 lastLoginAt 没更新,是因为 **JWT_SECRET 未变,浏览器旧 JWT cookie 还有效,直接进 dashboard 没经 auth.login**。这是浏览器行为不是 bug。
+
+### 2️⃣ W6 polish — button type **won't fix** + 颜色 polish 真 3 处改
+
+**button type 调查**:全项目 122 处 `<button>` 缺 `type=`。grep `<form>` 内的真 form context 只有 2 个文件(login-form + create-project-dialog),它们的 `<Button>` **都已经正确带 type**(submit / button)。其余 122 处全在 form 外(纯按钮 / dialog action / icon),不会触发 submit,改了反而 noise。**标 won't fix**。
+
+**颜色统一**(3 处真语义指示器):
+- `apps/web/.../art/asset-card.tsx` `MaturityChips`:`bg-emerald-500/20 text-emerald-300` → `bg-[hsl(var(--color-success)/0.2)] text-[hsl(var(--color-success))]`;rose-500 → `--color-warning`
+- `asset-card.tsx` `ComplianceBadge`:同上,emerald → success / amber → warning
+- `apps/web/.../api-usage-view.tsx` `statusBadgeClass`:SUCCESS → success / FAILED → destructive / RUNNING → warning,Tailwind v4 arbitrary value 配合 `--color-*` 跟主题(浅色/深色)联动
+
+剩余装饰色(blue-500 进度条等)不改 — 没语义指示意义,跟主题独立,改了也是为了改而改。
+
+### 3️⃣ worker stale sweep 加退 PREPAY — **真资金漏洞修**
+
+**问题**:`apps/workers/video-gen/src/index.ts:30-58` 原本只 `prisma.generationAttempt.updateMany` 把 stale RUNNING 标 FAILED,**没退已扣的 PREPAY** → 用户被多收钱。
+
+**修复**:
+- 改 `findMany` 拿 stale attempts(含 `createdBy / projectId / episodeId / providerId`)
+- 逐个 `$transaction`:`update` 标 FAILED + 查 REFUND 是否已存在(idempotent)+ 查 PREPAY 金额 + 写负数 REFUND ledger
+- 完全复用 `packages/api/src/routers/aigc.ts:1175-1209` 的同款逻辑(`refundReason: 'worker_restart_stale_sweep'`,区分 aigc 主动 sweep 的 `stale_running_auto_recovered`)
+- per-attempt try/catch,单个失败不影响其他;日志 `recovered X stale RUNNING attempt(s) → marked FAILED, Y PREPAY refunded`
+
+### 4️⃣ admin /api-usage 视频明细 CSV 导出
+
+**后端**:`packages/api/src/routers/admin.ts` 加 `videoAttemptsExportCsv` procedure,跟现有 `exportCsv`(CostLedger)互补:
+- input:`days / statusFilter / maxRows`(默认 30 天 / 全状态 / 5000 行上限)
+- query:复用 `videoAttempts` 同款 `include shotGroup.episode.project + user`,加 `createdAt >= since` 时间过滤
+- 14 列:时间 / 项目 / 集 / 分镜组 / Provider / 模型 / 状态 / 耗时(ms) / 成本(CNY) / 画面比例 / 时长(s) / 错误信息(200 字截断) / providerJobId / 操作员
+- CSV escape RFC 4180 + UTF-8 BOM(Excel 中文友好) + OperationLog 审计
+- 返 `{ csv, rowCount, filename, truncated }`,filename 格式 `video-attempts-{days}d-{date}.csv`
+
+**前端**:`apps/web/.../api-usage/api-usage-view.tsx` `VideoAttemptsSection` 加:
+- `exportDays` state(7/30/90 天选)+ `exporting` state + `utils.useUtils()`
+- `handleExportVideoCsv`:`fetch` → Blob → click `<a download>` → revoke URL
+- toolbar 加导出 select + button(`<span>|</span>` 分隔现有 select)+ truncated 时 alert 提示
+
+### 5️⃣ scripts/README.md 写
+
+新建 `scripts/README.md`,11 个脚本分两类:
+- **🟢 长期常驻**(6 个):init-env / preflight / start / db-migrate-dev-guard / db-reset-guard / set-admin-password — 各注 调用方 + 用途 + "不可删"标记
+- **🟡 一次性 / 按需运维**(5 个):fix-seedance-provider-config(目的已达成,可删) / relay-batch-test / relay-real-test / test-admin-provider-crud / w8-smoke(长期保留作回归)
+- **维护原则**:一次性脚本 3 个月无用 → 真删 / 每个新加脚本必须在 README 登记 / 关联 `packages/queue/README.md` 已存在
+
+### 验证
+
+- typecheck:**16/16** 全过
+- tests:**95/95** 全过
+- 真打 curl auth.login:HTTP 200 + JWT + DB lastLoginAt 真刷新
+
+### 主动跳过(不在我能力范围)
+
+- **W8 团队实战**:需要 5 人冷启动 + 真 API key + 真接 Seedance 跑 1 集 7 镜头。代码层 backend 已 ready,只能等真人启动
+- **gh auth refresh -s user**:交互命令(浏览器 device flow),Bash 工具非交互;用户自己跑(用 `gh api user/emails` 验证)
+
+**问题/待决策**
+- ❓ 颜色 polish 剩余 12+ 处装饰色(blue-500 进度条等):是否改 `--color-accent`?改了也只是统一,不解 bug;留 follow-up
+- ❓ scripts/`fix-seedance-provider-config.mjs`:目的已达成,README 标"可删",是否本次真删?保守留下次(catalog 重建模板可参考)
+
+**下次接着做**
+- 📌 Phase 2 W8 团队实战:5 人冷启动 + 真接 Seedance 测 1 集 7 镜头(已具备所有底层条件)
+- 📌 颜色 polish 装饰色 follow-up(12+ 处 blue-500 / blue-600,改 `--color-accent` 跟主题)
+- 📌 OperationLog 命名规范化(`asset.create` / `asset.binding.create` / `image.generate` 混风)
+- 📌 (可选)真删 `fix-seedance-provider-config.mjs`(README 已标可删)
+
+---
+
 ## 2026-05-27(周三,mac-studio · 二十八次收工)— 死代码 3 agent 并行 audit + 真删 10 项 + git author/credential 漏洞修
 
 **完成 — 跨 6 文件 · -314/+9 净清理 · typecheck 16/16 · tests 95/95 · 0 残留引用**

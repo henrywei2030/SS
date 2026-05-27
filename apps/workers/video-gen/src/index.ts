@@ -35,23 +35,85 @@ async function bootstrap(): Promise<void> {
   //       含 BullMQ exponential backoff 5/10/20/40/80s 还会更长)
   //     - 30min 是"绝对孤儿"阈值 — 任何视频生成 job 超过 30min 都该认定为崩溃
   //     - BullMQ 自身 lockDuration 5min 内会续锁,正常 job 不会被 stale 标 FAILED
+  //
+  // 二十九收工 P1 修(原本只标 FAILED 没退 PREPAY → 资金漏):
+  //   - 改 updateMany → findMany + 逐个事务标 FAILED + 写 REFUND ledger
+  //   - 复用 aigc.ts:1175-1209 的同款 idempotent 退款逻辑(查 REFUND 是否已存在防双写)
   try {
     const staleCutoff = new Date(Date.now() - 30 * 60_000);
-    const result = await prisma.generationAttempt.updateMany({
+    const staleAttempts = await prisma.generationAttempt.findMany({
       where: {
         status: 'RUNNING',
         action: 'VIDEO',
         startedAt: { lt: staleCutoff },
       },
-      data: {
-        status: 'FAILED',
-        errorMsg: 'worker_restart_recovered: process crashed while attempt was RUNNING',
-        finishedAt: new Date(),
+      select: {
+        id: true,
+        createdBy: true,
+        projectId: true,
+        episodeId: true,
+        providerId: true,
       },
     });
-    if (result.count > 0) {
+
+    let refundedCount = 0;
+    for (const stale of staleAttempts) {
+      try {
+        await prisma.$transaction(async (tx) => {
+          await tx.generationAttempt.update({
+            where: { id: stale.id },
+            data: {
+              status: 'FAILED',
+              errorMsg: 'worker_restart_recovered: process crashed while attempt was RUNNING',
+              finishedAt: new Date(),
+            },
+          });
+
+          const existingRefund = await tx.costLedgerEntry.findFirst({
+            where: { attemptId: stale.id, entryType: 'REFUND' },
+            select: { id: true },
+          });
+          if (existingRefund) return;
+
+          const prepay = await tx.costLedgerEntry.findFirst({
+            where: { attemptId: stale.id, entryType: 'PREPAY' },
+            select: { id: true, costCny: true },
+          });
+          if (!prepay || Number(prepay.costCny) <= 0) return;
+
+          await tx.costLedgerEntry.create({
+            data: {
+              userId: stale.createdBy,
+              projectId: stale.projectId,
+              episodeId: stale.episodeId,
+              attemptId: stale.id,
+              providerId: stale.providerId,
+              modelId: stale.providerId,
+              action: 'video.generate',
+              inputUnits: 0,
+              outputUnits: 0,
+              unitPriceCny: '0',
+              costCny: `-${prepay.costCny}`,
+              success: true,
+              entryType: 'REFUND',
+              refundReason: 'worker_restart_stale_sweep',
+              parentEntryId: prepay.id,
+              billingCycle: new Date().toISOString().slice(0, 7),
+            },
+          });
+          refundedCount++;
+        });
+      } catch (perAttemptErr) {
+        console.error(
+          `[${workerId}] stale sweep: attempt ${stale.id} refund failed (non-fatal):`,
+          perAttemptErr,
+        );
+      }
+    }
+
+    if (staleAttempts.length > 0) {
       console.warn(
-        `[${workerId}] recovered ${result.count} stale RUNNING attempt(s) → marked FAILED`,
+        `[${workerId}] recovered ${staleAttempts.length} stale RUNNING attempt(s) → marked FAILED, ${refundedCount} PREPAY refunded`,
       );
     }
   } catch (err) {

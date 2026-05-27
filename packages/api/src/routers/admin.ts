@@ -1801,6 +1801,121 @@ const apiUsageRouter = router({
         };
       });
     }),
+
+  /**
+   * 二十九收工:videoAttempts CSV 导出 — 复用 exportCsv 模式
+   *
+   * 跟 exportCsv(导 CostLedger)互补:这个导视频生成明细,含 prompt preview / aspectRatio / durationS,
+   * 用户拿来复盘"哪些 group 失败 / 哪个 model 抽卡率最高 / 单条多长时间"。
+   *
+   * 字段 14 列;maxRows 5000 上限防 OOM;BOM 兼容 Excel 中文。
+   */
+  videoAttemptsExportCsv: adminProcedure
+    .input(
+      z.object({
+        days: z.number().min(1).max(365).default(30),
+        statusFilter: z.enum(['ALL', 'SUCCESS', 'FAILED', 'RUNNING']).default('ALL'),
+        maxRows: z.number().min(100).max(10000).default(5000),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const since = new Date(Date.now() - input.days * 24 * 3600 * 1000);
+      const where: Record<string, unknown> = {
+        action: 'VIDEO',
+        createdAt: { gte: since },
+      };
+      if (input.statusFilter !== 'ALL') {
+        where.status = input.statusFilter;
+      }
+
+      const rows = await ctx.prisma.generationAttempt.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: input.maxRows,
+        include: {
+          shotGroup: {
+            select: {
+              number: true,
+              episode: {
+                select: {
+                  number: true,
+                  project: { select: { name: true } },
+                },
+              },
+            },
+          },
+          user: { select: { displayName: true, email: true } },
+        },
+      });
+
+      const esc = (v: string | null | undefined): string => {
+        const s = v ?? '';
+        if (s === '') return '';
+        if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+        return s;
+      };
+      const header = [
+        '时间',
+        '项目',
+        '集',
+        '分镜组',
+        'Provider',
+        '模型',
+        '状态',
+        '耗时(ms)',
+        '成本(CNY)',
+        '画面比例',
+        '时长(s)',
+        '错误信息',
+        'providerJobId',
+        '操作员',
+      ].join(',');
+      const lines = rows.map((a) => {
+        const aj = (a.inputJson ?? {}) as Record<string, unknown>;
+        const aspectRatio = typeof aj.aspectRatio === 'string' ? aj.aspectRatio : '';
+        const durationS = typeof aj.durationS === 'number' ? String(aj.durationS) : '';
+        const operator = a.user
+          ? `${a.user.displayName} <${a.user.email}>`
+          : '';
+        return [
+          esc(a.createdAt.toISOString()),
+          esc(a.shotGroup?.episode?.project?.name ?? null),
+          a.shotGroup?.episode?.number != null ? String(a.shotGroup.episode.number) : '',
+          a.shotGroup?.number != null ? String(a.shotGroup.number) : '',
+          esc(a.providerId),
+          esc(a.modelId),
+          esc(a.status),
+          a.durationMs != null ? String(a.durationMs) : '',
+          esc(a.costCny.toString()),
+          esc(aspectRatio),
+          durationS,
+          esc(a.errorMsg?.slice(0, 200) ?? null),
+          esc(a.providerJobId),
+          esc(operator),
+        ].join(',');
+      });
+      const csv = '﻿' + [header, ...lines].join('\r\n');
+
+      await logOperation(
+        ctx,
+        'admin.videoAttempts.exportCsv',
+        'generationAttempt',
+        `days=${input.days}`,
+        null,
+        {
+          days: input.days,
+          rowCount: rows.length,
+          statusFilter: input.statusFilter,
+        },
+      );
+
+      return {
+        csv,
+        rowCount: rows.length,
+        filename: `video-attempts-${input.days}d-${new Date().toISOString().slice(0, 10)}.csv`,
+        truncated: rows.length >= input.maxRows,
+      };
+    }),
 });
 
 // ---------------------------------------------------------------------------

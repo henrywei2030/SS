@@ -266,8 +266,10 @@ function MaturityChips({ asset }: { asset: AssetBrief }): React.ReactElement {
           key={i}
           className={cn(
             'rounded px-1 py-0.5 text-[9px] font-medium',
-            c.tone === 'success' && 'bg-emerald-500/20 text-emerald-300',
-            c.tone === 'warn' && 'bg-rose-500/20 text-rose-300',
+            c.tone === 'success' &&
+              'bg-[hsl(var(--color-success)/0.2)] text-[hsl(var(--color-success))]',
+            c.tone === 'warn' &&
+              'bg-[hsl(var(--color-warning)/0.2)] text-[hsl(var(--color-warning))]',
             c.tone === 'default' && 'bg-white/20 text-white',
           )}
         >
@@ -284,7 +286,7 @@ function ComplianceBadge({ status }: { status: string }): React.ReactElement | n
     return (
       <div
         title="合规已通过"
-        className="rounded-full bg-emerald-500/20 p-0.5 text-emerald-300"
+        className="rounded-full bg-[hsl(var(--color-success)/0.2)] p-0.5 text-[hsl(var(--color-success))]"
       >
         <Shield className="size-3" />
       </div>
@@ -293,7 +295,7 @@ function ComplianceBadge({ status }: { status: string }): React.ReactElement | n
   return (
     <div
       title={`合规: ${status}`}
-      className="rounded-full bg-amber-500/20 p-0.5 text-amber-300"
+      className="rounded-full bg-[hsl(var(--color-warning)/0.2)] p-0.5 text-[hsl(var(--color-warning))]"
     >
       <ShieldAlert className="size-3" />
     </div>

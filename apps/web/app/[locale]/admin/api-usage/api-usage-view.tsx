@@ -335,16 +335,51 @@ function VideoAttemptsSection(): React.ReactElement {
     'ALL' | 'SUCCESS' | 'FAILED' | 'RUNNING'
   >('ALL');
   const [limit, setLimit] = React.useState(50);
+  const [exportDays, setExportDays] = React.useState(30);
+  const [exporting, setExporting] = React.useState(false);
+  const utils = trpc.useUtils();
   const { data: rows, isLoading } = trpc.admin.apiUsage.videoAttempts.useQuery({
     limit,
     statusFilter,
   });
 
+  // 二十九收工:videoAttempts CSV 导出
+  const handleExportVideoCsv = async (): Promise<void> => {
+    setExporting(true);
+    try {
+      const result = await utils.admin.apiUsage.videoAttemptsExportCsv.fetch({
+        days: exportDays,
+        statusFilter,
+      });
+      const blob = new Blob([result.csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = result.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      if (result.truncated) {
+        alert(
+          `已导出 ${result.rowCount} 行(达上限 ${result.rowCount},需更多请缩短时间范围或细化状态筛选)`,
+        );
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      alert(`导出失败:${msg}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const statusBadgeClass = (s: string): string => {
-    if (s === 'SUCCESS') return 'bg-green-600/20 text-green-700 dark:text-green-400';
-    if (s === 'FAILED') return 'bg-red-600/20 text-red-700 dark:text-red-400';
+    if (s === 'SUCCESS')
+      return 'bg-[hsl(var(--color-success)/0.2)] text-[hsl(var(--color-success))]';
+    if (s === 'FAILED')
+      return 'bg-[hsl(var(--color-destructive)/0.2)] text-[hsl(var(--color-destructive))]';
     if (s === 'RUNNING' || s === 'QUEUED')
-      return 'bg-amber-500/20 text-amber-700 dark:text-amber-400';
+      return 'bg-[hsl(var(--color-warning)/0.2)] text-[hsl(var(--color-warning))]';
     return 'bg-[hsl(var(--color-muted))] text-[hsl(var(--color-muted-foreground))]';
   };
 
@@ -377,6 +412,26 @@ function VideoAttemptsSection(): React.ReactElement {
             <option value={100}>近 100 条</option>
             <option value={200}>近 200 条</option>
           </select>
+          <span className="text-[hsl(var(--color-muted-foreground))]">|</span>
+          <select
+            value={exportDays}
+            onChange={(e) => setExportDays(Number(e.target.value))}
+            className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-2 py-1"
+            title="导出时间范围"
+          >
+            <option value={7}>近 7 天</option>
+            <option value={30}>近 30 天</option>
+            <option value={90}>近 90 天</option>
+          </select>
+          <button
+            type="button"
+            onClick={handleExportVideoCsv}
+            disabled={exporting}
+            className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-3 py-1 hover:bg-[hsl(var(--color-muted))] disabled:opacity-50"
+            title="导出视频生成明细 CSV(14 字段含 prompt/aspect/duration)"
+          >
+            {exporting ? '导出中...' : '导出明细 CSV'}
+          </button>
         </div>
       </div>
       <div className="overflow-hidden rounded-md border border-[hsl(var(--color-border))]">
