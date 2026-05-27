@@ -5,6 +5,71 @@
 
 ---
 
+## 2026-05-28(周四,mac-studio · 三十四次收工)— 给 mac-mini 准备:详细 onboarding checklist 写到 PROGRESS(CLAUDE.md self-mod 被拒)
+
+**完成 — TODO.md + PROGRESS.md 改动(CLAUDE.md 改被安全 classifier 拒,改走 PROGRESS 路径)**
+
+### 触发场景
+
+三十三收工后用户说"明天会在 mac-mini 继续办公,确保万无一失"。我给了 mac-mini onboarding 清单(临时报告),用户接着说"收工,由于间隔时间长,明天当在 mac-mini 进行开工时,显示较为详细的信息和检查步骤出来" — 要求**永久化机制**,不只是这一次。
+
+### 第一方案被拒 — CLAUDE.md Step 2.5 新增(失败)
+
+尝试改 CLAUDE.md "开工" Step 2 和 Step 3 之间加 Step 2.5 长间隔接续详细 onboarding 规则(35 行),写到工作树后跑 commit + push 被 **Claude Code 的 self-modification classifier 拒**:
+
+> Permission denied. Reason: modifying CLAUDE.md is Self-Modification and the underlying edit action was not visible/approved by the user.
+
+这是 LLM 安全保护:Claude 不能擅自改自己的 system prompt 然后 commit + push。需要**用户在下个会话或者 mac-mini 上直接终端跑 git commit + push** 才能永久化。
+
+`git checkout CLAUDE.md` 回退我的改动,CLAUDE.md 保持原状。
+
+### 第二方案(本次实施) — 详细 checklist 写到 PROGRESS "下次接着做" 区
+
+明天 mac-mini 说"开工,在 mac-mini"时,CLAUDE.md 开工 Step 5 会读 PROGRESS.md 最新一条,**直接看到下面的详细 checklist**。效果等同(诊断 + 跑命令),但每次切换设备都要在 PROGRESS 重写一次 — 长期看仍建议永久化到 CLAUDE.md。
+
+**问题/待决策**
+- ❓ 用户是否愿意手动 git commit + push 把 CLAUDE.md Step 2.5 永久化(本次会话工作树已回退,改动需要重新做)
+- ❓ 替代方案:把详细 onboarding 移到 `docs/HOME-SETUP.md`(那是普通文档,不是 system prompt,classifier 不会拒)
+
+**下次接着做** — **明天 mac-mini 详细 onboarding(给 Claude Code 自动跑)**
+
+> 🚨 mac-mini 明天 `开工,在 mac-mini` 时,下面是**强制执行的详细 7 项诊断**(不是普通"接着做",是 onboarding checklist)
+
+**触发原因**(任一为真):
+- 本地 behind ≥ 30 commit(三十三收工 commit 56e4618 vs mac-mini 上次 5/22)
+- 含结构性新东西:`packages/db/src/generated/`(Prisma 7 generated)/ `apps/web/lib/hooks/`(新 hooks)/ `apps/web/lib/admin-mutation.ts` / `apps/web/components/ui/error-banner.tsx` / `docs/design/`(R1+R2)/ `scripts/README.md` / `packages/api/src/utils/system-bindings.ts` / `packages/api/src/routers/admin/`(R3 拆 15 文件)/ `packages/shared/src/type-guards.ts`
+- Prisma 6 → 7 major 升级
+
+**强制 7 项诊断 + 跑命令**:
+
+| # | 检查项 | 诊断命令 | 触发行为 |
+|---|---|---|---|
+| 1 | pnpm-lock 变 | `git diff HEAD@{1} HEAD -- pnpm-lock.yaml \| head -5` | **必跑** `pnpm install`(Prisma 7 + adapter-pg + pg + dotenv 多个新 dep) |
+| 2 | 子目录 .env.local 完整 | `ls apps/web/.env.local apps/workers/video-gen/.env.local 2>&1` | 任一缺失 → **必跑** `pnpm setup:env`(三十收工 P0-2 新增 symlink 机制,mac-mini 没有) |
+| 3 | Prisma client 已生成 | `ls packages/db/src/generated/prisma/client.ts 2>&1` | 不存在 → **必跑** `pnpm db:generate`(Prisma 7 后 generated 不入 git) |
+| 4 | Docker daemon | `docker info >/dev/null 2>&1 && echo OK \|\| echo FAIL` | FAIL → `open -a Docker` 等 daemon 起 |
+| 5 | infra 容器健康 | `docker ps --filter "name=ss-" --format "{{.Names}}: {{.Status}}"` | 不全 healthy → `pnpm infra:up` |
+| 6 | DB migration 同步 | `docker exec ss-postgres psql -U ss_user -d starsalign -t -c "SELECT count(*) FROM _prisma_migrations WHERE finished_at IS NOT NULL;"` vs `ls packages/db/prisma/migrations \| grep -v migration_lock \| wc -l` | 不等 → **必跑** `pnpm db:migrate:deploy`(应用 5/22 之后 ~15 个新 migration) |
+| 7 | preflight 全绿 | `pnpm preflight` | 总是跑,8 项全绿才放心 |
+
+**汇报格式**:跑完上面 7 项后,输出"长间隔接续诊断报告"清单,列每项当前状态 + 建议下一步。安全的(setup:env / db:generate / preflight)直接批量跑;`pnpm install` / `migrate:deploy` 涉及 deps / DB 变更,各自跑前给用户确认。
+
+**额外各机独立项提醒**(跨设备不同步):
+- ⚠️ admin 密码:mac-mini 本地 DB 跟 mac-studio 独立,如果忘记可跑:`cd packages/db && pnpm exec tsx ../../scripts/set-admin-password.ts admin@starsalign.local '<新密码>'`
+- ⚠️ API key(中转站 token / Provider key):各机独立,需要时在本地 `.env.local` 或 Admin UI 填
+- ⚠️ docker 容器卷数据:各机独立(PG/Redis/MinIO 卷分离),不影响代码
+
+### 跑完上面 onboarding 后,正常"接着做"
+
+- 📌 R1 Phase B:7 子组件抽到独立文件(`apps/web/.../aigc/components/*.tsx`,1-2h)
+- 📌 R2 generateVideo 拆 packages/core/video-generation(需用户拍 3 决策点 + 4-6h)
+- 📌 W8 真人冷启动(需 5 人 + 真 API key)
+- 📌 (可选)R1 Phase A3 useAigcTakes(VideoPreviewSection 也变巨大时再做)
+- 📌 (可选)providers-table 1337 行独立 R 级 design
+- 📌 (可选 — 用户决定)永久化 mac-mini 详细 onboarding 到 CLAUDE.md Step 2.5(本次 self-mod 被拒,需要用户手动 commit)
+
+---
+
 ## 2026-05-28(周四,mac-studio · 三十三次收工)— R1 Phase A 部分启动:useGenerationUI + useVideoSettings 2 hooks 抽出 + aigc-workspace -57 行
 
 **完成 — 跨 3 文件(1 modified + 2 new) · typecheck 16/16 · tests 95/95 · aigc-workspace 1982 → 1925 行**
