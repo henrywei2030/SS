@@ -8,7 +8,7 @@ import {
   PRESET_KINDS,
   PRESET_KIND_LABELS,
   loadPresetValues,
-} from './admin.js';
+} from './admin/preset.js';
 
 export const meRouter = router({
   /** 当前会话 */

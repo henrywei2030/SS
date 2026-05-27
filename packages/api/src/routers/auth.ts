@@ -9,6 +9,8 @@ import { getAuthAdapter } from '@ss/adapters/auth';
 import { router, publicProcedure, protectedProcedure, rateLimit } from '../trpc.js';
 // 第 19 轮 audit P1:changePassword 加 audit log(链路 10 verify 时发现缺漏)
 import { logOperation } from '../middleware/audit.js';
+// 三十一收工 S3:SystemSetting 单 key 读 helper
+import { loadSystemSetting } from '../utils/system-bindings.js';
 
 export const authRouter = router({
   // W7 audit R8 P0:auth.login 加 rate limit(防撞密码),per-IP 5 次 / 60s
@@ -52,10 +54,8 @@ export const authRouter = router({
     .mutation(async ({ ctx, input }) => {
       // 公开注册由 SystemSetting `auth.allowSignup` 控制(默认关)
       // 防任何人能注册账号 → 横向漏洞;本地部署可在 admin UI 显式开启
-      const setting = await ctx.prisma.systemSetting.findUnique({
-        where: { key: 'auth.allowSignup' },
-      });
-      const allowSignup = setting?.value === 'true';
+      const allowSignup =
+        (await loadSystemSetting(ctx.prisma, 'auth.allowSignup')) === 'true';
       if (!allowSignup) {
         throw new TRPCError({
           code: 'FORBIDDEN',

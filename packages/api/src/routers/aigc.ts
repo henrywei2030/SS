@@ -23,6 +23,9 @@ import {
   type VideoReference,
 } from '@ss/core/storyboard';
 import { EVENTS } from '@ss/shared/events';
+
+// 三十一收工 S3:SystemSetting 单 key 读 helper
+import { loadSystemSetting } from '../utils/system-bindings.js';
 // r11 audit:错误消息脱敏(防 Provider URL/token/stack 泄漏到前端)
 import { sanitizeErrorMsg, normalizePrompt } from '@ss/shared';
 import { ASPECT_RATIOS, type AspectRatio } from '@ss/shared/constants';
@@ -1310,11 +1313,9 @@ export const aigcRouter = router({
 
       // W1-W5 audit P2 followup(P2-5):接通 system.gacha.max_attempts(原 dead config)
       // 单 group 累计非 rejected attempt 数(含成功/失败)超 max_attempts 时拒,防失控烧钱
-      const gachaSetting = await ctx.prisma.systemSetting.findUnique({
-        where: { key: 'system.gacha.max_attempts' },
-        select: { value: true },
-      });
-      const gachaMax = Number(gachaSetting?.value ?? '0');
+      const gachaMax = Number(
+        (await loadSystemSetting(ctx.prisma, 'system.gacha.max_attempts')) ?? '0',
+      );
       if (gachaMax > 0) {
         const used = await ctx.prisma.generationAttempt.count({
           where: {

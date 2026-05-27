@@ -28,6 +28,8 @@ import { Prisma } from '@ss/db';
 
 import { router, protectedProcedure } from '../trpc.js';
 import { assertProjectAccess } from '../middleware/access.js';
+// 三十一收工 S3:SystemSetting 单 key 读 helper
+import { loadSystemSetting } from '../utils/system-bindings.js';
 
 // ---------------------------------------------------------------------------
 // 通用
@@ -79,16 +81,13 @@ export const insightsRouter = router({
       // W1-W5 audit P2 followup(P2-5):接通 system.budget.warn_pct(原 dead config)
       // 从 SystemSetting 拉预警阈值,跟项目 budgetCny 相乘后返给前端做颜色档位
       const [budgetWarnSetting, project] = await Promise.all([
-        ctx.prisma.systemSetting.findUnique({
-          where: { key: 'system.budget.warn_pct' },
-          select: { value: true },
-        }),
+        loadSystemSetting(ctx.prisma, 'system.budget.warn_pct'),
         ctx.prisma.project.findUnique({
           where: { id: input.projectId },
           select: { budgetCny: true },
         }),
       ]);
-      const budgetWarnPct = Number(budgetWarnSetting?.value ?? '80');
+      const budgetWarnPct = Number(budgetWarnSetting ?? '80');
       const projectBudgetCny = project?.budgetCny ? Number(project.budgetCny) : null;
 
       // 1. 成本数据 — r8 性能优化:从 Node 7000+ 行 Decimal 累加 → PostgreSQL SUM 聚合

@@ -5,6 +5,109 @@
 
 ---
 
+## 2026-05-28(周四,mac-studio · 三十一次收工)— R3 admin.ts 拆 15 文件 + S3 helper 全替换 7 处 + R4 重新评估不抽
+
+**完成 — 跨 21 文件(6 modified + 15 new sub-router) · admin.ts 2403 → 60 行 · typecheck 16/16 · tests 95/95**
+
+### R3 admin.ts 2403 行单文件 → 15 sub-router 模块化
+
+写一次性 Node 切分脚本 `scripts/r3-split-admin.mjs`(完成即删,git history 留追溯),核心难点:
+- **边界精确**:每个 sub-router 不仅含 `const xxxRouter = router({...})`,还包含**前置的 type def / helper / section comment**(BindingItem interface / bindingKindOf / ServiceHealth / UserWorkStats / TABLE_WHITELIST / WhitelistedPrismaModel / getWhitelistedModel / PRESET_KINDS / loadPresetValues 等)
+- **解法**:按 `^// admin\\.xxx —` section comment 精确切,start = 上一段 end + 1,end = 下一段 section comment 上一行
+- **3 轮调试**:
+  1. 第一次跑:header 用了 `'../trpc.js'` 但 sub-router 在 admin/ 子目录,相对路径要 `'../../trpc.js'` → 修脚本 path replacement
+  2. 第二次跑:被脚本第一次跑改过的 61 行 admin.ts 当 input → 切错 → restore + 重跑
+  3. 第三次跑:SECTIONS 边界过窄,type def 漏出 → 重算 6 段精确边界(system end 1148→1114 / binding start 1149→1115 / episode end 1350→1337 / health start 1351→1338 / user end 2136→2106 / reports start 2137→2107 / reports end 2326→2264 / db-explorer start 2327→2265)→ 一次 pass
+
+切分成果:
+
+| sub-router | 行数 | 备注 |
+|---|---|---|
+| api-usage | 422 | 最大(含 videoAttemptsExportCsv) |
+| provider | 490 | 第二大(provider CRUD + ApiKey + test) |
+| relay | 166 | 含 catalog router |
+| user | 168 | W6 |
+| reports | 158 | 含 UserWorkStats interface |
+| db-explorer | 123 | 含 TABLE_WHITELIST + getWhitelistedModel |
+| episode | 106 | 软锁逃生口 |
+| binding | 117 | 含 BindingItem interface + bindingKindOf |
+| preset | 119 | 含 PRESET_KINDS / loadPresetValues(me.ts 仍用) |
+| style | 113 | |
+| prompt | 121 | |
+| health | 93 | 含 ServiceHealth + S5 SSRF |
+| audit | 86 | OperationLog 浏览 |
+| system | 63 | SystemSetting CRUD |
+| dashboard | 35 | 最小(平台 KPI) |
+| **合计** | **2380** | **admin.ts 主 router 自身从 2403 → 60 行** |
+
+**主 admin.ts** 只剩 60 行:imports + 主 `adminRouter` merge,扩展新 admin 模块直接在 admin/ 加文件,改一处。
+
+**me.ts**:`import { PRESET_KINDS, PRESET_KIND_LABELS, loadPresetValues } from './admin.js'` → `from './admin/preset.js'`(更准确的 import path)。
+
+### S3 全项目 7 处 systemSetting findUnique → helper
+
+R3 拆完后立即做 S3 调用点替换(在拆好的小文件改更聚焦)。共替换:
+
+| 文件 | 行 | key | 改动 |
+|---|---|---|---|
+| script.ts:263/372/441 | docxParserBinding | `'binding.script.docx.parser'` | 3 处同 pattern,`replace_all` 一次替 |
+| script.ts:888 | binding | `'binding.script.analysis.modelId'` | 单独 Edit |
+| aigc.ts:1313 | gachaSetting | `'system.gacha.max_attempts'` | 单独 |
+| insights.ts:82 | budgetWarnSetting | `'system.budget.warn_pct'` | Promise.all 内替 |
+| auth.ts:55 | setting | `'auth.allowSignup'` | 单独 |
+
+每个文件 import `loadSystemSetting from '../utils/system-bindings.js'`(三十收工 S3 抽的 helper)。
+
+**中等信号保留**(本次不动):
+- `admin/{system,preset,binding}.ts` 内部 CRUD(系统设置自身的 CRUD,helper 不适用)
+- `asset.ts:608 / 818`、`storyboard.ts:143 / 1291`、`me.ts:81`、`admin/system.ts:57`、`aigc.ts:51`:已是 `findMany` batch 模式(用 `loadSystemSettings` 也是 batch,改动收益不大),留下次
+
+### R4 重新评估 — `<AdminTable>` 通用组件 won't fix
+
+实际看 4 个 admin 页面代码后发现 UI 模式**完全不同**:
+
+| 文件 | 行数 | UI 模式 | 真正能复用的 |
+|---|---|---|---|
+| users-table.tsx | 369 | 真表格(行/列/分页/搜索/状态筛选) | StatCard / SearchBar |
+| styles-manager.tsx | 376 | 左右两栏 master-detail(左 list 选中,右 detail edit) | mutation toast pattern |
+| prompts-manager.tsx | 396 | 左右两栏 master-detail(左 list group by category,右 detail + 历史) | mutation toast pattern |
+| providers-table.tsx | 1337 | 复杂多类型 provider 配置(自定义 UI,多种 modal) | 无明显共性 |
+
+**Agent A 的"重复 CRUD 骨架"判断过粗** — 强行抽 generic `<AdminTable>` 会:
+- 收益小(实际共性只在 mutation toast pattern + ConfirmDialog 已存在)
+- 维护成本高(generic 难写正确 + type 安全难保证 + 4 个表的 column 差异大)
+
+**结论:R4 标 won't fix**。真共性留 follow-up 小颗粒抽取:
+- `useAdminMutation(toastSuccess, toastError, invalidate)` hook
+- `<ErrorBanner errorMsg onRetry />` 共享组件
+
+### 验证
+
+- typecheck:**16/16** 全过(R3 切分 + S3 替换 + R4 不动,总改动 21 文件)
+- tests:**95/95** 全过
+- admin.ts:2403 → **60 行**(-97.5%)
+- 总改动:6 modified + 15 new
+
+### 工程化决策
+
+- **R3 用一次性 Node 脚本**:14 文件手工 Write 工作量大,脚本可控可重跑;失败 git restore 干净;脚本完成即删(commit message 留追溯)
+- **S3 只替换单 key findUnique 高信号位置**:findMany batch 已经合理,改了收益不大;preset 等内部 CRUD 跟 helper 语义不符,不动
+- **R4 基于实际代码评估覆盖 Agent A 的初步判断**:Agent 没看 UI 模式细节,我看了 4 文件确认共性弱 → won't fix 是负责的决策
+
+**问题/待决策**
+- ❓ S3 剩 8 处 findMany batch 是否值得替换(每处省 1-2 行,收益小)
+- ❓ R4 won't fix 后,follow-up 是否还要做 useAdminMutation + ErrorBanner 小颗粒抽取(独立 PR ~30min)
+
+**下次接着做**
+- 📌 复现 C6(用户 logout/login)
+- 📌 W8 团队实战(5 人 + 真 API key)
+- 📌 R1 aigc-workspace.tsx 1949 行拆 hooks + 子组件(需 design)
+- 📌 R2 aigc.ts generateVideo 626 行 mutation → packages/core/video-generation/(需 design)
+- 📌 (可选)S3 剩 8 处 findMany 优化
+- 📌 (可选)useAdminMutation + ErrorBanner 小公共组件
+
+---
+
 ## 2026-05-28(周四,mac-studio · 三十次收工)— 深度架构 audit + 8 项 S1-S8 小修一气完 + 4 大重写候选记 follow-up
 
 **完成 — 跨 10 文件(8 modified + 2 new) · +189 / -112 · typecheck 16/16 · tests 95/95**

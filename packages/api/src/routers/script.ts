@@ -20,6 +20,8 @@ import type { Context } from '../context.js';
 import { logOperation } from '../middleware/audit.js';
 import { isEpisodeLockedNow } from '../utils/episode-lock.js';
 import { extractScriptText } from '../utils/script-extract.js';
+// 三十一收工 S3:SystemSetting 单 key 读 helper
+import { loadSystemSetting } from '../utils/system-bindings.js';
 
 // ---------------------------------------------------------------------------
 // W1-W5 audit P0(C1):上传剧本前的软锁守卫
@@ -260,12 +262,9 @@ export const scriptRouter = router({
       let format: string;
       try {
         const buffer = Buffer.from(input.fileBase64, 'base64');
-        const docxParserBinding = await ctx.prisma.systemSetting.findUnique({
-          where: { key: 'binding.script.docx.parser' },
-          select: { value: true },
-        });
+        const docxParser = await loadSystemSetting(ctx.prisma, 'binding.script.docx.parser');
         const extracted = await extractScriptText(buffer, input.filename, {
-          docxParser: docxParserBinding?.value,
+          docxParser,
         });
         text = extracted.text;
         format = extracted.format;
@@ -369,12 +368,9 @@ export const scriptRouter = router({
       let format: string;
       try {
         const buffer = Buffer.from(input.fileBase64, 'base64');
-        const docxParserBinding = await ctx.prisma.systemSetting.findUnique({
-          where: { key: 'binding.script.docx.parser' },
-          select: { value: true },
-        });
+        const docxParser = await loadSystemSetting(ctx.prisma, 'binding.script.docx.parser');
         const extracted = await extractScriptText(buffer, input.filename, {
-          docxParser: docxParserBinding?.value,
+          docxParser,
         });
         text = extracted.text;
         format = extracted.format;
@@ -438,12 +434,9 @@ export const scriptRouter = router({
       let format: string;
       try {
         const buffer = Buffer.from(input.fileBase64, 'base64');
-        const docxParserBinding = await ctx.prisma.systemSetting.findUnique({
-          where: { key: 'binding.script.docx.parser' },
-          select: { value: true },
-        });
+        const docxParser = await loadSystemSetting(ctx.prisma, 'binding.script.docx.parser');
         const extracted = await extractScriptText(buffer, input.filename, {
-          docxParser: docxParserBinding?.value,
+          docxParser,
         });
         text = extracted.text;
         format = extracted.format;
@@ -885,11 +878,7 @@ export const scriptRouter = router({
       // 二十收工后用户反馈:不 hardcode 任何默认 provider,binding 空时显式拒绝
       let modelId = input.modelId;
       if (!modelId) {
-        const binding = await ctx.prisma.systemSetting.findUnique({
-          where: { key: 'binding.script.analysis.modelId' },
-          select: { value: true },
-        });
-        modelId = binding?.value ?? '';
+        modelId = (await loadSystemSetting(ctx.prisma, 'binding.script.analysis.modelId')) ?? '';
       }
       if (!modelId) {
         throw new TRPCError({
