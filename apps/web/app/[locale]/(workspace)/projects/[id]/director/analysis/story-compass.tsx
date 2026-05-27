@@ -32,17 +32,15 @@ const DIMENSIONS = [
   { key: 'urgencyScore', label: '急停保持' },
 ] as const;
 
+// 2026-05-27 audit r15 P0:去掉死 prop `locale`(useTranslations 已自带 next-intl context,prop 多余)
 export function StoryCompass({
   projectId,
-  locale,
   initialScriptId,
 }: {
   projectId: string;
-  locale: string;
   initialScriptId?: string;
 }): React.ReactElement {
   const t = useTranslations('modules.storyCompass');
-  void locale;
   const { data: scripts } = trpc.script.list.useQuery({ projectId });
   const [scriptId, setScriptId] = React.useState<string | undefined>(initialScriptId);
 
@@ -97,9 +95,7 @@ export function StoryCompass({
           ))}
         </select>
         <Button
-          onClick={() =>
-            scriptId && analyze.mutate({ scriptId, modelId: 'claude-sonnet-4-5' })
-          }
+          onClick={() => scriptId && analyze.mutate({ scriptId })}
           disabled={!scriptId || analyze.isPending}
           className="gap-1.5"
         >
@@ -112,9 +108,6 @@ export function StoryCompass({
         <Card className="border-[hsl(var(--color-destructive)/0.3)] bg-[hsl(var(--color-destructive)/0.05)]">
           <CardContent className="py-3 text-sm text-[hsl(var(--color-destructive))]">
             {analyze.error.message}
-            <p className="mt-1 text-xs text-[hsl(var(--color-muted-foreground))]">
-              提示：请先到 /admin/providers 配置 Claude API Key
-            </p>
           </CardContent>
         </Card>
       )}

@@ -11,7 +11,9 @@ export const APP_LOCALE_DEFAULT = 'zh-CN';
 export const SUPPORTED_LOCALES = ['zh-CN', 'en'] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 
-export const ASPECT_RATIOS = ['9:16', '16:9', '1:1'] as const;
+// 用户反馈 2026-05-27:扩到 6 个标准比例覆盖横屏/竖屏/方形/电影宽屏
+// 顺序按用户参考图 1:横屏在前,方形居中,竖屏在后
+export const ASPECT_RATIOS = ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'] as const;
 export type AspectRatio = (typeof ASPECT_RATIOS)[number];
 
 export const SHOT_PRIORITIES = ['S', 'A', 'B', 'C'] as const;

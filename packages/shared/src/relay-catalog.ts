@@ -31,8 +31,17 @@ export interface RelayCatalogModel {
   protocol?: 'openai-compat' | 'anthropic-native' | 'volcengine-native';
   endpointStyle?: 'ark' | 'relay'; // Seedance 用
   defaultSize?: string; // Image 用
-  maxDuration?: number; // Video 用
-  defaultDuration?: number; // Video 用
+  // Video 时长(秒)
+  maxDuration?: number;
+  minDuration?: number;
+  defaultDuration?: number;
+  // 2026-05-27 audit r13:Video 能力声明(对照 moyu docs 真实模型规格)
+  supportedResolutions?: Array<'480p' | '720p' | '1080p'>;
+  defaultResolution?: '480p' | '720p' | '1080p';
+  supportsAudio?: boolean;
+  supportsWebSearch?: boolean;
+  supportsRefVideo?: boolean;
+  supportsRefAudio?: boolean;
   // UI 精选标记
   isDefault: boolean;
 }

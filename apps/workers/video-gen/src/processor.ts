@@ -89,6 +89,7 @@ export async function processVideoGenJob(
     durationS,
     aspectRatio,
     refImageUrls,
+    refAudioUrls,
     groupNumber,
     // W5.5.1 扩展参数(透传给 provider.generate 的 extra)
     resolution,
@@ -153,6 +154,7 @@ export async function processVideoGenJob(
         durationS,
         aspectRatio,
         refImageUrls,
+        refAudioUrls,
         ...(Object.keys(extraParams).length > 0 ? { extra: extraParams } : {}),
       },
       {

@@ -18,7 +18,7 @@ import { parseScriptText } from '@ss/core/script';
 import { EVENTS } from '@ss/shared/events';
 import { getEventBus } from '@ss/adapters/eventbus';
 // 第 18 轮 audit P1:LLM 失败错误信息脱敏(防真接 Claude 后泄漏 API URL/token)
-import { sanitizeErrorMsg } from '@ss/shared';
+import { sanitizeErrorMsg, normalizePrompt } from '@ss/shared';
 
 import { router, protectedProcedure, rateLimit } from '../trpc.js';
 import type { Context } from '../context.js';
@@ -975,9 +975,15 @@ export const storyboardRouter = router({
         });
       }
 
+      // 2026-05-27 audit r12 P0-C1:prompt 字段 server 端 normalize,跟前端 GroupPromptEditor 显示对齐
+      // 训练集 PromptEdit before/after 用 normalize 版本(否则 LLM raw 跟用户 compact 改不对标)
+      const patchToWrite: Record<string, unknown> = { ...input.patch };
+      if (typeof patchToWrite.prompt === 'string') {
+        patchToWrite.prompt = normalizePrompt(patchToWrite.prompt);
+      }
       const after = await ctx.prisma.shotGroup.update({
         where: { id: input.groupId },
-        data: input.patch,
+        data: patchToWrite,
       });
 
       const currentScript = await ctx.prisma.script.findFirst({
@@ -985,14 +991,18 @@ export const storyboardRouter = router({
         select: { id: true },
       });
 
-      for (const [field, newVal] of Object.entries(input.patch)) {
+      for (const [field, newVal] of Object.entries(patchToWrite)) {
         if (newVal === undefined) continue;
-        const oldVal = (before as unknown as Record<string, unknown>)[field];
+        const rawOld = (before as unknown as Record<string, unknown>)[field];
+        const oldVal =
+          field === 'prompt' && typeof rawOld === 'string'
+            ? normalizePrompt(rawOld)
+            : (rawOld ?? '');
         await recordPromptEdit(ctx, {
           targetType: 'SHOT_GROUP',
           targetId: input.groupId,
           field,
-          before: oldVal ?? '',
+          before: oldVal,
           after: newVal,
           diffNote: input.diffNote,
           projectId: before.episode.projectId,

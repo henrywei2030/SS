@@ -459,13 +459,13 @@ describe('compileShotGroupVideoPrompt — 时长/比例', () => {
     expect(result.durationS).toBe(5);
   });
 
-  it('durationS=15 → clamp 上限 10', () => {
+  it('durationS=20 → clamp 上限 15(2026-05-27 业务调到 15s)', () => {
     const result = compileShotGroupVideoPrompt({
       text: '内容',
-      durationS: 15,
+      durationS: 20,
       references: [],
     });
-    expect(result.durationS).toBe(10);
+    expect(result.durationS).toBe(15);
   });
 
   it('durationS=7.456 → 保留 1 位小数 7.5', () => {

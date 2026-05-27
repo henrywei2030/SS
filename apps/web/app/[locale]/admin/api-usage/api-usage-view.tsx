@@ -317,8 +317,167 @@ export function ApiUsageView(): React.ReactElement {
               </table>
             </div>
           </section>
+
+          {/* 2026-05-27 用户反馈:视频生成明细复盘 — 每次操作完整记录 */}
+          <VideoAttemptsSection />
         </div>
       )}
     </div>
+  );
+}
+
+// ============================================================================
+// 视频生成明细复盘(2026-05-27 用户反馈)
+// 列:时间 / 项目 / Ep-Group / Provider / Status / 耗时 / 成本 / errorMsg / 操作员
+// ============================================================================
+function VideoAttemptsSection(): React.ReactElement {
+  const [statusFilter, setStatusFilter] = React.useState<
+    'ALL' | 'SUCCESS' | 'FAILED' | 'RUNNING'
+  >('ALL');
+  const [limit, setLimit] = React.useState(50);
+  const { data: rows, isLoading } = trpc.admin.apiUsage.videoAttempts.useQuery({
+    limit,
+    statusFilter,
+  });
+
+  const statusBadgeClass = (s: string): string => {
+    if (s === 'SUCCESS') return 'bg-green-600/20 text-green-700 dark:text-green-400';
+    if (s === 'FAILED') return 'bg-red-600/20 text-red-700 dark:text-red-400';
+    if (s === 'RUNNING' || s === 'QUEUED')
+      return 'bg-amber-500/20 text-amber-700 dark:text-amber-400';
+    return 'bg-[hsl(var(--color-muted))] text-[hsl(var(--color-muted-foreground))]';
+  };
+
+  return (
+    <section>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold">视频生成明细(复盘)</h2>
+        <div className="flex items-center gap-2 text-xs">
+          <select
+            value={statusFilter}
+            onChange={(e) =>
+              setStatusFilter(
+                e.target.value as 'ALL' | 'SUCCESS' | 'FAILED' | 'RUNNING',
+              )
+            }
+            className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-2 py-1"
+          >
+            <option value="ALL">全部状态</option>
+            <option value="SUCCESS">仅成功</option>
+            <option value="FAILED">仅失败</option>
+            <option value="RUNNING">仅进行中</option>
+          </select>
+          <select
+            value={limit}
+            onChange={(e) => setLimit(Number(e.target.value))}
+            className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-2 py-1"
+          >
+            <option value={20}>近 20 条</option>
+            <option value={50}>近 50 条</option>
+            <option value={100}>近 100 条</option>
+            <option value={200}>近 200 条</option>
+          </select>
+        </div>
+      </div>
+      <div className="overflow-hidden rounded-md border border-[hsl(var(--color-border))]">
+        <table className="w-full text-xs">
+          <thead className="bg-[hsl(var(--color-muted))]">
+            <tr>
+              <th className="px-2 py-2 text-left font-medium">时间</th>
+              <th className="px-2 py-2 text-left font-medium">项目 / Ep / 组</th>
+              <th className="px-2 py-2 text-left font-medium">Provider</th>
+              <th className="px-2 py-2 text-left font-medium">状态</th>
+              <th className="px-2 py-2 text-right font-medium">耗时</th>
+              <th className="px-2 py-2 text-right font-medium">成本</th>
+              <th className="px-2 py-2 text-left font-medium">错误 / 操作员</th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading && (
+              <tr>
+                <td
+                  colSpan={7}
+                  className="px-3 py-6 text-center text-[hsl(var(--color-muted-foreground))]"
+                >
+                  加载中...
+                </td>
+              </tr>
+            )}
+            {rows && rows.length === 0 && !isLoading && (
+              <tr>
+                <td
+                  colSpan={7}
+                  className="px-3 py-6 text-center text-[hsl(var(--color-muted-foreground))]"
+                >
+                  无数据
+                </td>
+              </tr>
+            )}
+            {rows?.map((r) => (
+              <tr
+                key={r.id}
+                className="border-t border-[hsl(var(--color-border))] align-top"
+              >
+                <td className="px-2 py-2 tabular-nums text-[10px]">
+                  <div>{new Date(r.createdAt).toLocaleString()}</div>
+                  <div className="text-[hsl(var(--color-muted-foreground))]">
+                    {r.id.slice(-8)}
+                  </div>
+                </td>
+                <td className="px-2 py-2 text-[10px]">
+                  <div className="font-medium">{r.projectName ?? '—'}</div>
+                  <div className="text-[hsl(var(--color-muted-foreground))]">
+                    Ep{r.episodeNumber ?? '?'} · 组 {r.groupNumber ?? '?'}
+                  </div>
+                  {r.aspectRatio && r.durationS && (
+                    <div className="text-[9px] text-[hsl(var(--color-muted-foreground))]">
+                      {r.aspectRatio} · {r.durationS}s
+                    </div>
+                  )}
+                </td>
+                <td className="px-2 py-2 font-mono text-[10px]">
+                  <div>{r.providerId}</div>
+                  {r.providerJobId && (
+                    <div className="text-[9px] text-[hsl(var(--color-muted-foreground))]">
+                      {r.providerJobId}
+                    </div>
+                  )}
+                </td>
+                <td className="px-2 py-2">
+                  <span
+                    className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${statusBadgeClass(r.status)}`}
+                  >
+                    {r.status}
+                  </span>
+                  {r.rejected && (
+                    <span className="ml-1 text-[9px] text-[hsl(var(--color-muted-foreground))]">
+                      已删除
+                    </span>
+                  )}
+                </td>
+                <td className="px-2 py-2 text-right tabular-nums text-[10px]">
+                  {r.durationMs
+                    ? `${Math.round(r.durationMs / 100) / 10} s`
+                    : '—'}
+                </td>
+                <td className="px-2 py-2 text-right tabular-nums text-[10px] font-medium">
+                  ¥{Number(r.costCny).toFixed(2)}
+                </td>
+                <td className="max-w-xs px-2 py-2 text-[10px]">
+                  {r.errorMsg && (
+                    <div className="break-words text-red-700 dark:text-red-400">
+                      ❌ {r.errorMsg}
+                    </div>
+                  )}
+                  <div className="mt-0.5 text-[hsl(var(--color-muted-foreground))]">
+                    {r.createdBy?.displayName ?? r.createdBy?.email ?? '系统'}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }

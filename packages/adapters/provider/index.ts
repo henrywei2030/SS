@@ -342,20 +342,36 @@ function constructVideoProvider(cfg: ResolvedConfig): IVideoProvider {
   const defaultModel =
     (cfg.defaultParams.defaultModel as string | undefined) ?? cfg.providerId;
 
-  if (cfg.providerId.startsWith('seedance') || cfg.providerId.startsWith('doubao-seedance') || cfg.providerId.startsWith('relay-doubao-seedance')) {
+  // 2026-05-27 audit r12 P0:adapter 路由原来只看 providerId.startsWith,
+  // 但 admin 添加中转站模型时 providerId = `${relayName}-${suffix}`,
+  // 任意 relayName(moyu / openrouter / poe / 自定义)都不命中 startsWith('seedance/doubao-seedance')
+  // → fallback Mock(用户假装跑了 Seedance,实际返 sintel.mp4 样片 + 错单价)。
+  // 改基于 defaultModel(catalog 规范化字段)判断,覆盖任意 relay 前缀。
+  const adapterHint =
+    typeof cfg.defaultParams.adapter === 'string'
+      ? (cfg.defaultParams.adapter as string).toLowerCase()
+      : null;
+  const isSeedance =
+    adapterHint === 'seedance' ||
+    defaultModel.includes('seedance') ||
+    cfg.providerId.startsWith('seedance') ||
+    cfg.providerId.startsWith('doubao-seedance') ||
+    cfg.providerId.startsWith('relay-doubao-seedance');
+
+  if (isSeedance) {
     return new SeedanceProvider({
       apiUrl: cfg.apiUrl || (endpointStyle === 'relay' ? '' : 'https://ark.cn-beijing.volces.com/api/v3'),
       apiKey: cfg.apiKey,
       defaultModel,
       fastModel: cfg.defaultParams.fastModel as string | undefined,
-      maxDuration: Number(cfg.defaultParams.maxDuration ?? 10),
+      maxDuration: Number(cfg.defaultParams.maxDuration ?? 15),
       unitPriceCny: cfg.unitPriceCny,
       endpointStyle,
     });
   }
   // TODO Phase 2:Kling / HappyHorse / 本地模型按上述注释模板接入
   console.warn(
-    `[providers] no concrete class for ${cfg.providerId}, falling back to MockVideoProvider`,
+    `[providers] no concrete class for ${cfg.providerId} (defaultModel=${defaultModel}), falling back to MockVideoProvider`,
   );
   return new MockVideoProvider({
     providerId: cfg.providerId,

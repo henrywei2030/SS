@@ -8,9 +8,26 @@
  *
  * 调用模式：异步任务（创建 → 轮询）
  */
-import { request } from 'undici';
+import { Agent, request } from 'undici';
 
 import { ProviderError } from '@ss/shared';
+
+// 2026-05-27 audit r15 P0:Seedance 专属 undici Agent
+// 用户反馈根因:worker POST moyu /v1/video/generations 默认 connect timeout 10s 不够 →
+// moyu 收到 POST 并返了 task_id,但我们 worker 因 10s timeout 标 FAILED → task_id 丢失,
+// moyu 端继续异步生成完视频,我们前端永远看不到。
+//
+// 必须用专属 Agent(不依赖 openai-compat.ts 的 global dispatcher,worker 可能先调 Seedance 后调 Text)
+// Connect 60s + body/headers 180s,覆盖 moyu 偶发网络抖动 / TLS 慢握手 / 中转排队
+const seedanceDispatcher = new Agent({
+  connect: { timeout: 60_000 }, // TCP connect 60s(默认 10s 不够,moyu 偶发抖动)
+  keepAliveTimeout: 30_000,
+  keepAliveMaxTimeout: 60_000,
+  connections: 16,
+  pipelining: 1,
+  bodyTimeout: 180_000, // 3 分钟 body 接收
+  headersTimeout: 180_000, // 3 分钟 headers 接收(POST create + GET query 都用)
+});
 
 import { BaseProvider } from './base.js';
 import type {
@@ -50,21 +67,31 @@ interface CreateTaskResponse {
   status: string;
 }
 
-interface QueryTaskResponse {
-  id: string;
-  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
-  content?: {
-    video_url?: string;
-    cover_url?: string;
-    width?: number;
-    height?: number;
-    duration?: number;
-    fps?: number;
-  };
-  error?: { code?: string; message?: string };
-  usage?: {
-    completion_tokens?: number;
-  };
+/**
+ * 2026-05-27 audit r15 用户反馈根因:
+ *   Seedance 2.0 真实 query response 跟 1.x ARK 完全不同(docs §15),
+ *   嵌套两层 data + 状态值大写(SUCCESS/IN_PROGRESS/FAILURE/NOT_START)。
+ *   原代码假设 status='succeeded' + content.video_url 直接 → 永远不命中 → poll 超时 → mark FAILED
+ *   但 moyu 端真生成了视频(用户后台能看到),只是我们 DB 没拿到。
+ *
+ * Seedance 2.0 (moyu relay) 结构:
+ *   { code:'success', data:{ task_id, status:'SUCCESS', progress:'100%', data:{ content:{ video_url }, duration, framespersecond, error } } }
+ *
+ * Seedance 1.x (ARK 老接口) 结构:
+ *   { id, status:'succeeded', content:{ video_url, cover_url, duration, fps, width, height } }
+ *
+ * parseQueryResponse 规范化两种格式 → 统一 {kind, videoUrl, durationS, ...}
+ */
+interface NormalizedQuery {
+  kind: 'pending' | 'success' | 'failed';
+  videoUrl?: string;
+  thumbnailUrl?: string;
+  durationS?: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+  errorMsg?: string;
+  rawResponse: unknown;
 }
 
 export class SeedanceProvider extends BaseProvider implements IVideoProvider {
@@ -84,9 +111,89 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
       maxDuration: cfg.maxDuration,
       maxConcurrent: 5,
     };
-    this.pollIntervalMs = cfg.pollIntervalMs ?? 3000;
-    this.pollTimeoutMs = cfg.pollTimeoutMs ?? 5 * 60 * 1000;
+    this.pollIntervalMs = cfg.pollIntervalMs ?? 5000;
+    // 2026-05-27 audit r15:Seedance 2.0 标准版生成 5-8 分钟(docs §15),5min 超时永远不够
+    // 提到 15min 留足余量(2.0 fast 3-4 分钟、2.0 std 5-8 分钟)
+    this.pollTimeoutMs = cfg.pollTimeoutMs ?? 15 * 60 * 1000;
     this.endpointStyle = cfg.endpointStyle ?? 'ark';
+  }
+
+  /**
+   * 2026-05-27 audit r15:适配 Seedance 2.0 query response 嵌套结构 + 兼容 1.x ARK 格式
+   * 用户用 moyu relay → 2.0 协议(data.data.content.video_url + 大写 status)
+   */
+  private parseQueryResponse(raw: unknown): NormalizedQuery {
+    const root = raw as Record<string, unknown>;
+    // 优先尝试 Seedance 2.0 (moyu relay) 嵌套结构
+    const lvl1 = root.data as Record<string, unknown> | undefined;
+    const lvl1Status =
+      lvl1 && typeof lvl1.status === 'string' ? (lvl1.status as string) : null;
+    if (lvl1 && lvl1Status) {
+      const upper = lvl1Status.toUpperCase();
+      const inner = (lvl1.data as Record<string, unknown>) ?? {};
+      const content = inner.content as Record<string, unknown> | undefined;
+      const innerErr = inner.error as Record<string, unknown> | undefined;
+      if (upper === 'SUCCESS') {
+        const videoUrl =
+          typeof content?.video_url === 'string' ? content.video_url : undefined;
+        return {
+          kind: 'success',
+          videoUrl,
+          durationS:
+            typeof inner.duration === 'number' ? inner.duration : undefined,
+          fps:
+            typeof inner.framespersecond === 'number'
+              ? inner.framespersecond
+              : undefined,
+          rawResponse: raw,
+        };
+      }
+      if (upper === 'FAILURE' || upper === 'CANCELLED') {
+        const failReason =
+          typeof lvl1.fail_reason === 'string' ? lvl1.fail_reason : '';
+        const innerMsg =
+          typeof innerErr?.message === 'string' ? innerErr.message : '';
+        return {
+          kind: 'failed',
+          errorMsg: innerMsg || failReason || `Task ${upper}`,
+          rawResponse: raw,
+        };
+      }
+      // NOT_START / IN_PROGRESS / 其他 → pending
+      return { kind: 'pending', rawResponse: raw };
+    }
+    // Seedance 1.x ARK 格式:平铺 status + content
+    if (typeof root.status === 'string') {
+      const s = (root.status as string).toLowerCase();
+      if (s === 'succeeded' || s === 'success') {
+        const content = root.content as Record<string, unknown> | undefined;
+        return {
+          kind: 'success',
+          videoUrl:
+            typeof content?.video_url === 'string' ? content.video_url : undefined,
+          thumbnailUrl:
+            typeof content?.cover_url === 'string' ? content.cover_url : undefined,
+          durationS:
+            typeof content?.duration === 'number' ? content.duration : undefined,
+          width: typeof content?.width === 'number' ? content.width : undefined,
+          height: typeof content?.height === 'number' ? content.height : undefined,
+          fps: typeof content?.fps === 'number' ? content.fps : undefined,
+          rawResponse: raw,
+        };
+      }
+      if (s === 'failed' || s === 'cancelled' || s === 'failure') {
+        const err = root.error as Record<string, unknown> | undefined;
+        return {
+          kind: 'failed',
+          errorMsg:
+            typeof err?.message === 'string' ? err.message : `Task ${s}`,
+          rawResponse: raw,
+        };
+      }
+      return { kind: 'pending', rawResponse: raw };
+    }
+    // 完全不识别 — 视为 pending,继续 poll(防误把临时网络故障当 success)
+    return { kind: 'pending', rawResponse: raw };
   }
 
   /** create task endpoint path(根据 endpointStyle 切换) */
@@ -100,21 +207,106 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
       : `/contents/generations/tasks/${taskId}`;
   }
 
-  /** 构造 create task body(根据 endpointStyle 切换 — relay 简化结构 / ark 原生 content+parameters) */
+  /** 构造 create task body — 根据 endpointStyle + modelId 切分
+   *
+   *  Seedance 2.0 / 2.0-fast(对照 moyu docs §15):metadata.content 数组结构
+   *    { model, prompt:"占位", metadata: { content:[{type:"text",text:...}, ...], duration, resolution, ratio, generate_audio } }
+   *  Seedance 1.x relay(老协议):平铺 { model, prompt, duration, ratio, image }
+   *  Volcengine ARK 原生(endpointStyle='ark'):content + parameters
+   */
   private buildCreateBody(req: VideoRequest, modelId: string): Record<string, unknown> {
     if (this.endpointStyle === 'relay') {
-      // 中转站 /v1/video/generations OpenAI 兼容简化结构
+      // 用 modelId 区分 Seedance 2.0(metadata 结构)vs 1.x(简化结构)
+      const isSeedance2 = modelId.includes('seedance-2-');
+      if (isSeedance2) {
+        // 2026-05-27 audit r13:Seedance 2.0 正确协议(对照 moyu docs §15)
+        // 顶层 prompt 必须非空但实际 prompt 来自 metadata.content;media role 必须显式
+        const content: Array<Record<string, unknown>> = [
+          { type: 'text', text: req.prompt },
+        ];
+        // 首帧 / 尾帧 / 参考图 — 三种 role 互斥(docs §15 image Role 说明)
+        if (req.firstFrameUrl) {
+          content.push({
+            type: 'image_url',
+            image_url: { url: req.firstFrameUrl },
+            role: 'first_frame',
+          });
+        }
+        if (req.lastFrameUrl) {
+          content.push({
+            type: 'image_url',
+            image_url: { url: req.lastFrameUrl },
+            role: 'last_frame',
+          });
+        }
+        // refImageUrls 当 reference_image(若用户未传 firstFrame,first 张当首帧也可,但优先 reference)
+        if (req.refImageUrls?.length && !req.firstFrameUrl && !req.lastFrameUrl) {
+          for (const url of req.refImageUrls) {
+            content.push({
+              type: 'image_url',
+              image_url: { url },
+              role: 'reference_image',
+            });
+          }
+        }
+        // 2026-05-27 audit r13:refAudioUrls(role:reference_audio)— 角色配音 binding
+        // docs §15:不可单独输入音频,应至少有 1 个参考视频或图片
+        // r14 修正:之前 `content.length > 1` 不等于含 media(可能只是多条 text),严格检查 image_url/video_url 类型
+        const hasMediaInContent = content.some(
+          (c) => c.type === 'image_url' || c.type === 'video_url',
+        );
+        if (req.refAudioUrls?.length && hasMediaInContent) {
+          for (const url of req.refAudioUrls) {
+            content.push({
+              type: 'audio_url',
+              audio_url: { url },
+              role: 'reference_audio',
+            });
+          }
+        }
+        // Seedance 2.0 duration 范围 4-15 整数(docs §15)
+        const duration = clamp(
+          Math.round(req.durationS),
+          4,
+          Math.min(this.cfg.maxDuration, 15),
+        );
+        const extra = (req.extra ?? {}) as Record<string, unknown>;
+        const metadata: Record<string, unknown> = {
+          content,
+          duration,
+          ratio: req.aspectRatio,
+          // Seedance 2.0 只支持 480p/720p(docs §15)— 用户传 1080p 时降到 720p
+          resolution:
+            extra.resolution === '480p' || extra.resolution === '720p'
+              ? extra.resolution
+              : '720p',
+        };
+        // generate_audio 默认 true(docs §15) — 用户显式传 false 才关
+        if (extra.generateAudio !== undefined) {
+          metadata.generate_audio = Boolean(extra.generateAudio);
+        }
+        // tools(web_search 联网搜索增强)— 仅文生视频且无参考媒体时
+        if (extra.webSearchEnabled === true && content.length === 1) {
+          metadata.tools = [{ type: 'web_search' }];
+        }
+        return {
+          model: modelId,
+          prompt: '占位', // 平台校验非空,实际 prompt 在 metadata.content
+          metadata,
+        };
+      }
+      // Seedance 1.x relay (旧协议,docs §14):中转站 /v1/video/generations 简化结构
       const body: Record<string, unknown> = {
         model: modelId,
         prompt: req.prompt,
         duration: clamp(req.durationS, 1, this.cfg.maxDuration),
         ratio: req.aspectRatio,
       };
-      if (req.refImageUrls?.length) body.image = req.refImageUrls[0]; // i2v 首张参考图
+      if (req.refImageUrls?.length) body.images = req.refImageUrls; // docs §14:images 数组
       if (req.firstFrameUrl) body.first_frame_image = req.firstFrameUrl;
       if (req.lastFrameUrl) body.last_frame_image = req.lastFrameUrl;
       if (req.seed !== undefined) body.seed = req.seed;
-      if (req.extra) Object.assign(body, req.extra);
+      // 1.x 不支持 extra params 的 metadata 透传,只 merge whitelisted
       return body;
     }
     // ark 原生协议(content + parameters 结构)
@@ -164,6 +356,7 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
           Authorization: `Bearer ${this.cfg.apiKey}`,
         },
         body: JSON.stringify(taskBody),
+        dispatcher: seedanceDispatcher, // 2026-05-27 r15:60s connect + 180s body/headers,防 moyu 抖动
       });
       const text = await body.text();
       if (statusCode >= 400) {
@@ -188,9 +381,9 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
       this.wrapCallError(e);
     }
 
-    // 轮询任务完成
+    // 轮询任务完成(2026-05-27 audit r15:用 parseQueryResponse 规范化 2.0 嵌套 + 大写状态)
     const deadline = Date.now() + this.pollTimeoutMs;
-    let lastQuery: QueryTaskResponse | undefined;
+    let lastQuery: NormalizedQuery | undefined;
     while (Date.now() < deadline) {
       await sleep(this.pollIntervalMs);
       try {
@@ -209,8 +402,8 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
         this.wrapCallError(e);
       }
 
-      if (lastQuery.status === 'succeeded') break;
-      if (lastQuery.status === 'failed' || lastQuery.status === 'cancelled') {
+      if (lastQuery.kind === 'success') break;
+      if (lastQuery.kind === 'failed') {
         await this.recordLedger({
           ctx,
           providerId: modelId,
@@ -223,12 +416,12 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
         });
         throw new ProviderError(
           this.info.id,
-          lastQuery.error?.message ?? `Task ${lastQuery.status}`,
+          lastQuery.errorMsg ?? 'Task failed',
         );
       }
     }
 
-    if (!lastQuery || lastQuery.status !== 'succeeded' || !lastQuery.content?.video_url) {
+    if (!lastQuery || lastQuery.kind !== 'success' || !lastQuery.videoUrl) {
       await this.recordLedger({
         ctx,
         providerId: modelId,
@@ -239,10 +432,13 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
         unitPriceCny: this.cfg.unitPriceCny,
         success: false,
       });
-      throw new ProviderError(this.info.id, 'Task timeout');
+      throw new ProviderError(
+        this.info.id,
+        `Task timeout (${Math.round(this.pollTimeoutMs / 60000)}min) — Seedance 任务超过预期未完成,可能 moyu 端拥塞或 task 卡死`,
+      );
     }
 
-    const actualDuration = lastQuery.content.duration ?? req.durationS;
+    const actualDuration = lastQuery.durationS ?? req.durationS;
     const costCny = actualDuration * this.cfg.unitPriceCny;
 
     await this.recordLedger({
@@ -257,51 +453,53 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
     });
 
     return {
-      videoUrl: lastQuery.content.video_url,
-      thumbnailUrl: lastQuery.content.cover_url,
+      videoUrl: lastQuery.videoUrl,
+      thumbnailUrl: lastQuery.thumbnailUrl,
       durationS: actualDuration,
-      width: lastQuery.content.width,
-      height: lastQuery.content.height,
-      fps: lastQuery.content.fps,
+      width: lastQuery.width,
+      height: lastQuery.height,
+      fps: lastQuery.fps,
       providerJobId,
       costCny,
-      rawResponse: lastQuery,
+      rawResponse: lastQuery.rawResponse,
     };
   }
 
   async poll(providerJobId: string): Promise<VideoResult | { status: 'pending' }> {
     const q = await this.queryTask(providerJobId);
-    if (q.status === 'queued' || q.status === 'running') return { status: 'pending' };
-    if (q.status !== 'succeeded' || !q.content?.video_url) {
-      throw new ProviderError(this.info.id, q.error?.message ?? `Task ${q.status}`);
+    if (q.kind === 'pending') return { status: 'pending' };
+    if (q.kind === 'failed' || !q.videoUrl) {
+      throw new ProviderError(this.info.id, q.errorMsg ?? 'Task failed');
     }
-    const dur = q.content.duration ?? 0;
+    const dur = q.durationS ?? 0;
     return {
-      videoUrl: q.content.video_url,
-      thumbnailUrl: q.content.cover_url,
+      videoUrl: q.videoUrl,
+      thumbnailUrl: q.thumbnailUrl,
       durationS: dur,
-      width: q.content.width,
-      height: q.content.height,
-      fps: q.content.fps,
+      width: q.width,
+      height: q.height,
+      fps: q.fps,
       providerJobId,
       costCny: dur * this.cfg.unitPriceCny,
-      rawResponse: q,
+      rawResponse: q.rawResponse,
     };
   }
 
-  private async queryTask(taskId: string): Promise<QueryTaskResponse> {
+  private async queryTask(taskId: string): Promise<NormalizedQuery> {
     const { statusCode, body } = await request(
       `${this.cfg.apiUrl}${this.queryTaskPath(taskId)}`,
       {
         method: 'GET',
         headers: { Authorization: `Bearer ${this.cfg.apiKey}` },
+        dispatcher: seedanceDispatcher, // 2026-05-27 r15:复用 keep-alive Agent + 长 timeout
       },
     );
     const text = await body.text();
     if (statusCode >= 400) {
       throw new ProviderError(this.info.id, `Query task failed (${statusCode}): ${text}`);
     }
-    return JSON.parse(text) as QueryTaskResponse;
+    const raw = JSON.parse(text) as unknown;
+    return this.parseQueryResponse(raw);
   }
 }
 

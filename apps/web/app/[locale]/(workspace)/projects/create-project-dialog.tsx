@@ -15,9 +15,9 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ASPECT_RATIOS } from '@ss/shared/constants';
 
 const PROJECT_TYPES = ['AI_REAL', 'ANIM_3D', 'ANIM_2D', 'POSTER'] as const;
-const ASPECT_RATIOS = ['9:16', '16:9', '1:1'] as const;
 
 export function CreateProjectDialog({
   open,

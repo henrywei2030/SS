@@ -7,6 +7,8 @@
  */
 import { z } from 'zod';
 
+import { ASPECT_RATIOS } from '@ss/shared/constants';
+
 /** 队列名常量 — ADR-25 M6 channel 派生也用这个 */
 export const VIDEO_GEN_QUEUE_NAME = 'video-gen' as const;
 
@@ -32,9 +34,13 @@ export const VideoGenJobDataSchema = z.object({
   modelId: z.string(),
 
   prompt: z.string().min(1).max(20000),
-  durationS: z.number().min(1).max(15),
-  aspectRatio: z.enum(['9:16', '16:9', '1:1']),
+  // 2026-05-27 audit r12:int 强制,跟 generateVideo input 一致
+  durationS: z.number().int().min(1).max(15),
+  aspectRatio: z.enum(ASPECT_RATIOS),
   refImageUrls: z.array(z.string().min(1)).optional(),
+  // 2026-05-27 audit r13:binding 含 AUDIO 类资产(角色配音等)时 server 收集 voiceMediaId 入队
+  // Seedance 2.0 metadata.content audio_url role:reference_audio 消费
+  refAudioUrls: z.array(z.string().min(1)).optional(),
 
   // ============================================================================
   // W5.5.1 扩展参数(2026-05-24)— 对照即梦 / 可灵等同行 UI

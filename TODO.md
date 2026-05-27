@@ -1,6 +1,6 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-05-27(**二十四收工 · UI 大改造 r2~r7 + 删剪辑模块 + IN_EDIT 删枚举值 + 10 维度 audit 5 bug 修**)
+> 最后更新:2026-05-27(**二十五收工 · AIGC 真接通 Seedance 2.0 · 14 项 UX 反馈连续修 · 3 路 audit 16 项 P0/P1 修**)
 > 仓库:https://github.com/henrywei2030/SS
 > **🚀 一键启动**:`pnpm start`(详见 [README.md](README.md#快速启动) / [CLAUDE.md](CLAUDE.md#设备登记))
 > **📖 实战前必读**:[docs/W1-W7-followup.md](docs/W1-W7-followup.md)(P0 已完成,留 Phase 1.5/2/3 续做项)
@@ -71,9 +71,22 @@
   - **IN_EDIT 枚举彻底删除**:schema.prisma 删枚举值 + project.ts 进度统计去 IN_EDIT + storyboard.ts 注释 + i18n zh/en 翻译 + 新 migration `20260527000000_drop_in_edit_shot_status`(防御 assert 0 数据后 ALTER TYPE)— ⚠️ migration 需 `pnpm db:migrate:deploy` 手动跑
   - **loadConfig 错误信息精确化** + **删剪辑 IN_EDIT 数据决策注释**
   - typecheck:web + api + adapters + shared 全 pass · 累计 ~30 处改动 跨 24 文件 + 1 新 migration
+- [x] **AIGC 真接通 Seedance 2.0 + 14 项 UX 反馈连续修(二十五收工)** — 2026-05-27:
+  - **AIGC 全链路重构**:原始剧本紧凑布局(独立 div + scene 标签 inline)/ 视频提示词 normalizePrompt 抽 `@ss/shared/prompt-utils.ts`(server + 前端 + 训练集对齐)/ 全集 group 同页堆叠(删左侧选中→右侧切换,改 scrollIntoView 锚点 + 每个 GroupDetail 独立 query/state) / 视频预览简化删 dialog + 历史常驻列表 + 点条目自动播 / 主预览 placeholder 区分 SUCCESS/FAILED/RUNNING/empty 显具体 errorMsg / 动态进度条(SSE percent 优先 fallback 时间估算)/ 删除 take 软删 rejected=true + 二次 confirm / RUNNING take 自动 polling 5s / 下载文件名 `{项目}-Ep{N}-{组}-第{N}次-{时间}.mp4` / 同步音频默认勾选 / 时长 `Xs` → `X s`
+  - **画面比例 6 选项全栈扩展**:`ASPECT_RATIOS = ['16:9','4:3','1:1','3:4','9:16','21:9']` 单一真相源 + 全 zod schema 派生 + 删 'auto' + AspectRatio type 全栈 + ASPECT_LABEL + ASPECT_CLASS helper + 项目 aspect 联动 AIGC 预览框
+  - **最长时长 10→15s 全栈**:catalog + seed + clamp + 测试期望同步;`RelayCatalogModel` 扩 minDuration/supportedResolutions/defaultResolution/supportsAudio/supportsWebSearch/supportsRefVideo/supportsRefAudio + admin.createFromCatalog 透传
+  - **Seedance 2.0 协议真接通(对照 moyu docs §15)**:adapter 路由 `defaultModel.includes('seedance')` 覆盖任意中转站前缀(`moyu-doubao-seedance-*` 之前 fallback Mock 的根因)/ buildCreateBody 2.x metadata.content[] + role 显式 + duration 4-15 + resolution 仅 480p/720p / parseQueryResponse 适配 v2 嵌套 `data.data.content.video_url` + 大写 SUCCESS/FAILURE/IN_PROGRESS / pollTimeoutMs 5min→15min / undici 专属 Agent (connect 60s + body/headers 180s + keepAlive)修 connect timeout 10s P0
+  - **BullMQ attempts 5→1** 一次性任务不自动重试 + capabilities maxDuration 字段名对齐 + fallbackReason 4 种显式 + 视频模型下拉 listVideoProviders + 高级选项展平 toolbar + 删水印/联网搜索/参考素材冗余 UI
+  - **3 路 audit r12-r15 16 项 P0/P1 修**:rejectVideoTake 返 shotGroupId 定向 invalidate / 删 `.catch(() => null)` 吞 DB 异常 / isMock 检测 `/\(Mock\b/.test()` 严格匹配 / refAudioUrl 跟 binding 统一 silent drop / Seedance 2.0 audio 守卫 `content.some(image_url|video_url)` / aspectRatio race 用 useRef.current 替代 useState flag / 自动播改 onLoadedMetadata / listGroups invalidate 限定 episodeId / 历史 dialog ESC 关闭 / generateAudio reset 守卫
+  - **r14 P0 真根因**:CostLedgerEntry.attemptId UNIQUE 老索引没删,DB 同时有 unique + 非 unique 两个 index → worker 写 REFUND 退多扣 P2002 violation → catch 静默 → attempt 卡 RUNNING + moyu 端视频丢失。新 migration `20260527120000_drop_ledger_attempt_unique` apply / stale RUNNING 10min 自愈 + 退 PREPAY
+  - **r15 死代码 audit**:3 agent 并行扫 server+前端+共享 31 项报告 → 真删 1 项:`story-compass.tsx` 死 prop `locale`(删 + page.tsx caller 同步)
+  - **admin 视频生成明细复盘页**:`/admin/api-usage` 加 videoAttempts section(时间/项目/Ep/组/Provider/状态/耗时/成本/errorMsg/操作员)+ 状态筛选 + 条数选择
+  - **工具留档**:`scripts/fix-seedance-provider-config.mjs` + `packages/queue/monitor-12-14.mjs` + `sync-orphan-attempts.mjs` + `recover-lost-video.mjs`(connect timeout 丢 task_id 时找回)
+  - **真打通 moyu API 验证**:moyu 后台 13:08:55→13:11:54 SUCCESS cgt-20260527130855-r5kjq · DB 同 attemptId connect timeout fail → recovery script 拿回 video_url + 升 SUCCESS
+  - typecheck:9 packages 全 pass · 60/60 tests pass · 累计 ~30+ 文件改动 + 1 migration
 - [ ] **W5.6 进阶**(留 Phase 2)— 音频波形(wavesurfer.js)/ AI 自动打标(BPM/时长)/ pgvector 向量搜索
-- [ ] **Polish 剩余**(留 Phase 2)— 34 处硬编码颜色 / a11y / listBindings N+1 / OperationLog 命名规范
-- [ ] **W8 团队实战**(下次启动)— 5 人冷启动 + 配 API Key 真接 Seedance + 1 集 7 镜头
+- [ ] **Polish 剩余**(留 Phase 2)— 34 处硬编码颜色 / a11y / listBindings N+1 / OperationLog 命名规范 / worker boot stale sweep 退 PREPAY
+- [ ] **W8 团队实战**(下次启动)— 5 人冷启动 + 配 API Key 真接 Seedance + 1 集 7 镜头(已具备所有底层条件)
 
 - [ ] **跨设备协作工作流验证**(多端)
   - [x] 家里 Mac Studio `git pull` + 登录同一 Project + 说 `开工,在 mac-studio` 验证接续 — 2026-05-23

@@ -1,11 +1,10 @@
 /**
  * VideoGen Queue — web 入队 + worker 消费同一份定义
  *
- * ADR-25 M3:defaultJobOptions 集中,不在 add() 处散写。
- *   - attempts: 5(langfuse 实战 ≥ 5,LLM API 抖动需要余量)
- *   - exponential backoff 5000ms(实际重试间隔 5/10/20/40/80s)
- *   - removeOnComplete: 100(调试足够)
- *   - removeOnFail: 1000(W7 后台审计页拉历史失败 job)
+ * 2026-05-27 audit r13(用户反馈):视频生成是一次性任务,失败不自动重试。
+ *   - attempts: 1(用户偏好 explicit-fail-first;视频抽卡按秒计费,重试 5 次会重复扣费)
+ *   - 失败直接 publish 'failed' + sanitizeErrorMsg → 前端显示具体原因引导用户决策
+ *   - worker 内的 isUnrecoverableError 分类仍保留,用于日志区分(临时网络 vs 业务硬错)
  *
  * ADR-25 M3:jobId = `videogen:attempt:{attemptId}` → BullMQ 内建去重
  *   前端 client 重复提交同 attemptId 不会建第二个 job。
@@ -19,10 +18,9 @@ import {
   type VideoGenJobData,
 } from './types.js';
 
-// fynt 模式:count + age 双维度,长尾任务也能自动清理防 Redis 膨胀
+// 2026-05-27:attempts:1 一次性任务,失败立即返用户具体原因
 const defaultJobOptions: JobsOptions = {
-  attempts: 5,
-  backoff: { type: 'exponential', delay: 5000 },
+  attempts: 1,
   removeOnComplete: { count: 100, age: 24 * 3600 },           // 1 天
   removeOnFail: { count: 1000, age: 7 * 24 * 3600 },          // 7 天(W7 后台审计页拉历史失败)
 };

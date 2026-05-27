@@ -83,7 +83,8 @@ export class MockVideoProvider implements IVideoProvider {
       displayName: `${opts.providerId} (Mock W5.4)`,
       defaultUnitPriceCny: opts.unitPriceCny,
       unitName: 'second',
-      maxDuration: 10,
+      // 2026-05-27:业务上限 15s(用户反馈)
+      maxDuration: 15,
       maxConcurrent: 3,
     };
   }
@@ -112,7 +113,7 @@ export class MockVideoProvider implements IVideoProvider {
 
     const videoUrl = SAMPLE_VIDEOS[req.aspectRatio] ?? FALLBACK_VIDEO;
     const { width, height } = sizeFromAspect(req.aspectRatio);
-    const durationS = Math.max(3, Math.min(req.durationS, 10));
+    const durationS = Math.max(3, Math.min(req.durationS, 15));
 
     return {
       videoUrl,

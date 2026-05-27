@@ -24,7 +24,9 @@ import {
 } from '@ss/core/storyboard';
 import { EVENTS } from '@ss/shared/events';
 // r11 audit:错误消息脱敏(防 Provider URL/token/stack 泄漏到前端)
-import { sanitizeErrorMsg } from '@ss/shared';
+import { sanitizeErrorMsg, normalizePrompt } from '@ss/shared';
+import { ASPECT_RATIOS, type AspectRatio } from '@ss/shared/constants';
+import { aspectRatioSchema } from '@ss/shared/schemas';
 import { addVideoGenJob } from '@ss/queue/video-gen';
 import { signStreamToken } from '@ss/queue/sse-token';
 
@@ -42,7 +44,7 @@ import {
 async function getVideoBindings(ctx: Context): Promise<{
   providerId: string;
   maxDurationS: number;
-  defaultAspectRatio: '9:16' | '16:9' | '1:1';
+  defaultAspectRatio: AspectRatio;
   dailyBudgetCny: number;
   requireComplianceForVideo: boolean;
 }> {
@@ -61,14 +63,23 @@ async function getVideoBindings(ctx: Context): Promise<{
   });
   const map = new Map(settings.map((s) => [s.key, s.value]));
   const rawAr = map.get('shot.video.defaultAspectRatio') ?? '9:16';
-  const ar: '9:16' | '16:9' | '1:1' =
-    rawAr === '16:9' ? '16:9' : rawAr === '1:1' ? '1:1' : '9:16';
+  // 2026-05-27:扩到 6 比例后用 ASPECT_RATIOS 真相源校验,白名单外的默认 9:16
+  const ar: AspectRatio = (ASPECT_RATIOS as readonly string[]).includes(rawAr)
+    ? (rawAr as AspectRatio)
+    : '9:16';
+  // 2026-05-27 audit r12:Number() 非法值返 NaN 会污染下游 Math.min / Decimal 计算
+  // SystemSetting 老值 / admin 误填 null/字符串时,fallback 到合理默认而非 NaN
+  const parseNum = (raw: string | undefined, fallback: number): number => {
+    if (raw == null) return fallback;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : fallback;
+  };
   return {
     // 二十收工后用户反馈:不 hardcode 默认 provider,空时调用方判断(generateVideo 有 input.providerOverride 优先)
     providerId: map.get('binding.shot.video.providerId') ?? '',
-    maxDurationS: Number(map.get('shot.video.maxDurationS') ?? '10'),
+    maxDurationS: parseNum(map.get('shot.video.maxDurationS'), 15),
     defaultAspectRatio: ar,
-    dailyBudgetCny: Number(map.get('shot.video.dailyBudgetCny') ?? '500'),
+    dailyBudgetCny: parseNum(map.get('shot.video.dailyBudgetCny'), 500),
     requireComplianceForVideo:
       (map.get('asset.compliance.requireForVideo') ?? 'false') === 'true',
   };
@@ -300,6 +311,13 @@ export const aigcRouter = router({
     .query(async ({ ctx, input }) => {
       const grp = await loadGroupOrThrow(ctx, input.groupId, { skipLockCheck: true });
 
+      // 用户反馈 2026-05-27:返项目 aspect 让前端默认 aspect 跟项目走
+      // r15:加 project.name + episode.number 给下载文件名规则化用
+      const project = await ctx.prisma.project.findUnique({
+        where: { id: grp.episode.projectId },
+        select: { aspect: true, name: true },
+      });
+
       // 1. 组内 shots(按 positionIdx 排序)
       const shots = await ctx.prisma.shot.findMany({
         where: { groupId: grp.id, deletedAt: null },
@@ -409,6 +427,13 @@ export const aigcRouter = router({
         };
       });
 
+      // 项目 aspect 白名单校验(老项目 DB 字段是 String,可能有非标准值)
+      const projectAspect: AspectRatio =
+        project?.aspect &&
+        (ASPECT_RATIOS as readonly string[]).includes(project.aspect)
+          ? (project.aspect as AspectRatio)
+          : '9:16';
+
       return {
         group: {
           id: grp.id,
@@ -418,6 +443,18 @@ export const aigcRouter = router({
           prompt: grp.prompt,
           promptCompiled: grp.promptCompiled,
           status: grp.status,
+          // 2026-05-27 audit r12 P1:暴露 episodeId 给前端 invalidate 限定使用
+          episodeId: grp.episodeId,
+        },
+        project: {
+          aspect: projectAspect,
+          // r15:下载文件名规则化用
+          name: project?.name ?? '',
+        },
+        // r15:剧集编号 + 标题给下载文件名拼接用
+        episode: {
+          number: grp.episode.number,
+          title: grp.episode.title ?? null,
         },
         shots,
         bindings: bindingsWithMedia,
@@ -624,13 +661,17 @@ export const aigcRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const grp = await loadGroupOrThrow(ctx, input.groupId);
-      if (grp.prompt === input.prompt) {
+      // 2026-05-27 audit r12 P0-C1:server 端 normalize 跟前端显示对齐
+      // 训练集 PromptEdit before/after 用 normalize 版本(否则 LLM 原始 raw 跟用户改后的 compact 对不上,数据失真)
+      const normalizedAfter = normalizePrompt(input.prompt);
+      const normalizedBefore = normalizePrompt(grp.prompt);
+      if (normalizedBefore === normalizedAfter) {
         return { changed: false, prompt: grp.prompt };
       }
       const updated = await ctx.prisma.$transaction(async (tx) => {
         const u = await tx.shotGroup.update({
           where: { id: grp.id },
-          data: { prompt: input.prompt },
+          data: { prompt: normalizedAfter },
         });
         await tx.promptEdit.create({
           data: {
@@ -639,8 +680,8 @@ export const aigcRouter = router({
             projectId: grp.episode.projectId,
             episodeId: grp.episodeId,
             field: 'prompt',
-            before: grp.prompt,
-            after: input.prompt,
+            before: normalizedBefore,
+            after: normalizedAfter,
             diffNote: input.diffNote ?? null,
             userId: ctx.user.id,
           },
@@ -658,9 +699,10 @@ export const aigcRouter = router({
     .input(
       z.object({
         groupId: z.string().cuid(),
-        durationS: z.number().min(1).max(15).optional(),
-        // W1-W5 audit 三轮 P2-13:aspectRatio 改 enum 与 generateVideo 一致
-        aspectRatio: z.enum(['9:16', '16:9', '1:1']).optional(),
+        // 2026-05-27 audit r12:int 强制,跟 generateVideo 一致防小数预扣偏差
+        durationS: z.number().int().min(1).max(15).optional(),
+        // W1-W5 audit 三轮 P2-13:aspectRatio 改 enum 与 generateVideo 一致(用 shared 真相源)
+        aspectRatio: aspectRatioSchema.optional(),
         extraInstruction: z.string().max(500).optional(),
         extraNegative: z.array(z.string().max(50)).max(20).optional(),
       }),
@@ -921,10 +963,11 @@ export const aigcRouter = router({
           },
         });
         if (existing) {
-          throw new TRPCError({
-            code: 'CONFLICT',
-            message: `资产 "${asset.name}" 已用 ${usageType} 关联到本生成段`,
-          });
+          // 2026-05-27 audit r12 P0-C2:重复绑定改幂等(跟 unbindAsset 设计一致)
+          // 前端 BindAssetDialog 已关闭,如果硬错用户无 retry 入口,UX 卡顿
+          return { ...existing, alreadyBound: true } as typeof existing & {
+            alreadyBound: boolean;
+          };
         }
 
         // 续 refSlotIdx — IMAGE 类 / AUDIO 类各自一个计数器
@@ -955,15 +998,18 @@ export const aigcRouter = router({
         });
       });
 
-      await logOperation(ctx, 'aigc.bindAsset', 'shotGroup', grp.id, null, {
-        bindingId: binding.id,
-        assetId: input.assetId,
-        assetName: asset.name,
-        usageType,
-        refSlotIdx: binding.refSlotIdx,
-        groupNumber: grp.number,
-        projectId: grp.episode.projectId,
-      });
+      // 2026-05-27 audit r12 P0-C2:幂等命中时不写 OperationLog(不是真的新增动作)
+      if (!('alreadyBound' in binding && binding.alreadyBound)) {
+        await logOperation(ctx, 'aigc.bindAsset', 'shotGroup', grp.id, null, {
+          bindingId: binding.id,
+          assetId: input.assetId,
+          assetName: asset.name,
+          usageType,
+          refSlotIdx: binding.refSlotIdx,
+          groupNumber: grp.number,
+          projectId: grp.episode.projectId,
+        });
+      }
 
       return binding;
     }),
@@ -1001,7 +1047,11 @@ export const aigcRouter = router({
         data: { deletedAt: new Date() },
       });
       if (result.count === 0) {
-        return { id: binding.id, alreadyUnbound: true };
+        return {
+          id: binding.id,
+          alreadyUnbound: true,
+          shotGroupId: binding.shotGroupId,
+        };
       }
 
       await logOperation(ctx, 'aigc.unbindAsset', 'assetUsageBinding', binding.id, binding, {
@@ -1010,7 +1060,8 @@ export const aigcRouter = router({
         projectId: binding.episode.projectId,
       });
 
-      return { id: binding.id, alreadyUnbound: false };
+      // 2026-05-27 audit r15:返 shotGroupId 给前端 onSuccess 定向 invalidate({groupId}),防跨 group 污染
+      return { id: binding.id, alreadyUnbound: false, shotGroupId: binding.shotGroupId };
     }),
 
   // ============================== W5.4 视频生成 ==============================
@@ -1048,8 +1099,10 @@ export const aigcRouter = router({
     .input(
       z.object({
         groupId: z.string().cuid(),
-        durationS: z.number().min(1).max(15).optional(),
-        aspectRatio: z.enum(['9:16', '16:9', '1:1', 'auto']).optional(),
+        // 2026-05-27 audit r12 P0:int 强制整数,防小数 durationS 预扣多扣(用户输 10.5 → Provider 出 10s)
+        durationS: z.number().int().min(1).max(15).optional(),
+        // 用户反馈 2026-05-27:不再支持 'auto',aspectRatio 必须显式选(用户偏好 explicit-choice-only)
+        aspectRatio: aspectRatioSchema.optional(),
         providerOverride: z.string().max(100).optional(),
         extraInstruction: z.string().max(500).optional(),
         extraNegative: z.array(z.string().max(50)).max(20).optional(),
@@ -1074,12 +1127,8 @@ export const aigcRouter = router({
           message: '视频生成未配置 Video Provider — 请去 /admin/bindings 选择 binding.shot.video.providerId(或在调用时传 input.providerOverride 显式指定)',
         });
       }
-      // W5.5.1:'auto' 比例 resolve 到项目默认(短剧默认 9:16)
-      const resolvedAspect =
-        input.aspectRatio === 'auto' || input.aspectRatio === undefined
-          ? bindings.defaultAspectRatio
-          : input.aspectRatio;
-      const aspectRatio = resolvedAspect;
+      // 2026-05-27:不再支持 'auto',undefined 时 fallback 到 binding 默认值
+      const aspectRatio = input.aspectRatio ?? bindings.defaultAspectRatio;
       const durationS = Math.min(
         input.durationS ?? grp.durationS ?? 5,
         bindings.maxDurationS,
@@ -1105,18 +1154,75 @@ export const aigcRouter = router({
           `SELECT pg_advisory_xact_lock(hashtext('aigc_video:' || $1)::bigint)`,
           grp.id,
         );
-        const inflight = await tx.generationAttempt.findFirst({
+        // 2026-05-27 audit r13 P0(用户反馈):stale RUNNING 自愈
+        //   worker 进程崩 / network drop / 真接 Provider 异步 task 失踪时,attempt 永久卡在 RUNNING
+        //   → inflight check 永久 block 同 group 新建 → 用户必须等管理员手动清理
+        //   解法:findFirst 拿全部 inflight + 把 startedAt > 10min 视为 stale,事务内标 FAILED + 退 PREPAY
+        const STALE_RUNNING_TIMEOUT_MS = 10 * 60 * 1000;
+        const inflightCandidates = await tx.generationAttempt.findMany({
           where: {
             shotGroupId: grp.id,
             action: 'VIDEO',
             status: { in: ['QUEUED', 'RUNNING'] },
           },
-          select: { id: true, providerId: true, startedAt: true },
+          select: { id: true, providerId: true, startedAt: true, createdAt: true },
         });
-        if (inflight) {
+        const now = Date.now();
+        const staleAttempts = inflightCandidates.filter((a) => {
+          const ts = (a.startedAt ?? a.createdAt)?.getTime() ?? now;
+          return now - ts > STALE_RUNNING_TIMEOUT_MS;
+        });
+        for (const stale of staleAttempts) {
+          // 标 FAILED + 退 PREPAY(idempotent — 已退过的不重写)
+          await tx.generationAttempt.update({
+            where: { id: stale.id },
+            data: {
+              status: 'FAILED',
+              errorMsg: `stale RUNNING auto-recovered (>${STALE_RUNNING_TIMEOUT_MS / 60000}min, worker likely crashed)`,
+              finishedAt: new Date(),
+            },
+          });
+          const existingRefund = await tx.costLedgerEntry.findFirst({
+            where: { attemptId: stale.id, entryType: 'REFUND' },
+            select: { id: true },
+          });
+          if (!existingRefund) {
+            const prepay = await tx.costLedgerEntry.findFirst({
+              where: { attemptId: stale.id, entryType: 'PREPAY' },
+              select: { id: true, costCny: true },
+            });
+            if (prepay && Number(prepay.costCny) > 0) {
+              await tx.costLedgerEntry.create({
+                data: {
+                  userId: ctx.user.id,
+                  projectId: grp.episode.projectId,
+                  episodeId: grp.episodeId,
+                  attemptId: stale.id,
+                  providerId: stale.providerId,
+                  modelId: stale.providerId,
+                  action: 'video.generate',
+                  inputUnits: 0,
+                  outputUnits: 0,
+                  unitPriceCny: '0',
+                  costCny: `-${prepay.costCny}`,
+                  success: true,
+                  entryType: 'REFUND',
+                  refundReason: 'stale_running_auto_recovered',
+                  parentEntryId: prepay.id,
+                  billingCycle: new Date().toISOString().slice(0, 7),
+                },
+              });
+            }
+          }
+        }
+        // 自愈后仍存活的 inflight(startedAt 在 10min 内)— 真在跑,拒绝
+        const aliveInflight = inflightCandidates.find(
+          (a) => !staleAttempts.some((s) => s.id === a.id),
+        );
+        if (aliveInflight) {
           throw new TRPCError({
             code: 'CONFLICT',
-            message: `本生成段已有进行中的视频任务(provider=${inflight.providerId})— 等完成或失败后再点`,
+            message: `本生成段已有进行中的视频任务(provider=${aliveInflight.providerId})— 等完成或失败后再点`,
           });
         }
         // 锁内创建占位 attempt(QUEUED),commit 后即占位防其他并发
@@ -1450,14 +1556,20 @@ export const aigcRouter = router({
         .filter((r) => r.kind === 'IMAGE')
         .map((r) => r.mediaUrl)
         .filter((u): u is string => !!u);
+      // 2026-05-27 audit r13:binding 含 AUDIO 类资产(角色配音 voiceMediaId)时收集
+      // capsParams.supportsRefAudio !== true 时静默丢弃(Provider 不支持就别传,避 422)
+      const rawRefAudioUrls = compiled.references
+        .filter((r) => r.kind === 'AUDIO')
+        .map((r) => r.mediaUrl)
+        .filter((u): u is string => !!u);
 
       // W5.5.1 audit 修复 P2:Provider 不支持的多模态参考字段直接拒(防绕 UI 直调 API 滥用)
-      const caps = await ctx.prisma.providerConfig
-        .findUnique({
-          where: { providerId },
-          select: { defaultParams: true },
-        })
-        .catch(() => null);
+      // 2026-05-27 audit r14 P0:删 `.catch(() => null)` — 之前吞掉 DB 异常导致 capsParams={} → supportsRef* 校验失效
+      // 真异常(DB 连接 / schema 错)应该往上抛,trpc 会返 INTERNAL_SERVER_ERROR 让 caller 处理
+      const caps = await ctx.prisma.providerConfig.findUnique({
+        where: { providerId },
+        select: { defaultParams: true },
+      });
       const capsParams =
         caps?.defaultParams && typeof caps.defaultParams === 'object'
           ? (caps.defaultParams as Record<string, unknown>)
@@ -1468,12 +1580,25 @@ export const aigcRouter = router({
           'BAD_REQUEST',
         );
       }
-      if (input.refAudioUrl && capsParams.supportsRefAudio !== true) {
-        await failPlaceholder(
-          new Error(`当前 Provider 不支持 refAudio`),
-          'BAD_REQUEST',
+      // 2026-05-27 audit r14 P1:audio 处理统一(input.refAudioUrl + binding 来的 audio 都 silent drop)
+      // 之前 input.refAudioUrl 不支持时直接 failPlaceholder 拒,但 binding 来的 audio silent drop —
+      // 用户体感不一致(同样不支持,一种拒一种丢)。统一改 silent drop + 日志,不阻断生成
+      const allAudioUrls =
+        capsParams.supportsRefAudio === true
+          ? [
+              ...rawRefAudioUrls,
+              ...(input.refAudioUrl ? [input.refAudioUrl] : []),
+            ]
+          : [];
+      const droppedAudio =
+        (capsParams.supportsRefAudio === true ? 0 : rawRefAudioUrls.length) +
+        (capsParams.supportsRefAudio !== true && input.refAudioUrl ? 1 : 0);
+      if (droppedAudio > 0) {
+        console.warn(
+          `[generateVideo] provider ${providerId} 不支持 refAudio,丢弃 ${droppedAudio} 个音频 URL`,
         );
       }
+      const refAudioUrls = allAudioUrls;
 
       // W5.5 audit 修复 P0-7:入队失败时占位 attempt 必须标 FAILED,否则 5min 内同 group 抽卡被拒
       try {
@@ -1489,6 +1614,7 @@ export const aigcRouter = router({
           durationS,
           aspectRatio,
           refImageUrls: refImageUrls.length > 0 ? refImageUrls : undefined,
+          refAudioUrls: refAudioUrls.length > 0 ? refAudioUrls : undefined,
           // W5.5.1 扩展参数透传(Provider 自己消费 extra)
           resolution: input.resolution,
           generateAudio: input.generateAudio,
@@ -1587,13 +1713,31 @@ export const aigcRouter = router({
     }),
 
   /**
+   * 列出所有 active VIDEO Provider — 用户反馈 2026-05-27:AIGC 视频预览加模型下拉
+   *
+   * 默认选当前 binding 的 providerId(由 getProviderCapabilities 返回),用户可切换。
+   * 切换后 capabilities 重 query + generateVideo 传 providerOverride。
+   */
+  listVideoProviders: protectedProcedure.query(async ({ ctx }) => {
+    const rows = await ctx.prisma.providerConfig.findMany({
+      where: { kind: 'VIDEO', isActive: true },
+      orderBy: [{ providerId: 'asc' }],
+      select: {
+        providerId: true,
+        displayName: true,
+      },
+    });
+    return rows;
+  }),
+
+  /**
    * Provider 能力查询(W5.5)— 前端渲染时长选择器范围 / 比例选择 / 显示当前模型名
    *
    * 数据源优先级:
    *   1. ProviderConfig.defaultParams.maxDurationS(后台 /admin/providers 可改 JSON 字段)
    *   2. Provider.info.maxDuration(Adapter 自报)
    *   3. SystemSetting `shot.video.maxDurationS`(全局兜底)
-   *   4. 10s 默认
+   *   4. 15s 默认(2026-05-27 业务上限提到 15s)
    *
    * 不传 providerId 时返回当前 SystemSetting binding 的 video provider 信息。
    * 业界 2026 现状:视频模型上限 ≤15s,这里硬截。
@@ -1622,25 +1766,36 @@ export const aigcRouter = router({
           ? (config.defaultParams as Record<string, unknown>)
           : {};
 
+      // 2026-05-27 audit r13:字段名跟 catalog/seed.ts 对齐(都用 maxDuration / minDuration,无 S)
+      // 之前 capabilities 读 maxDurationS / minDurationS 永远 undefined → fallback 走 provider.info.maxDuration
+      // 老 ProviderConfig 行(maxDuration:10)未 reseed 时仍是 10,用户看到下拉只到 10 — 字段名不一致根因
       const adminMaxDuration =
-        typeof params.maxDurationS === 'number' ? params.maxDurationS : null;
+        typeof params.maxDuration === 'number'
+          ? params.maxDuration
+          : typeof params.maxDurationS === 'number'
+            ? params.maxDurationS // 兼容老字段名(若有手工写入)
+            : null;
       const adminMinDuration =
-        typeof params.minDurationS === 'number' ? params.minDurationS : null;
+        typeof params.minDuration === 'number'
+          ? params.minDuration
+          : typeof params.minDurationS === 'number'
+            ? params.minDurationS
+            : null;
       const adminAspectRatios = Array.isArray(params.supportedAspectRatios)
         ? (params.supportedAspectRatios as unknown[]).filter(
-            (r): r is '9:16' | '16:9' | '1:1' =>
-              r === '9:16' || r === '16:9' || r === '1:1',
+            (r): r is AspectRatio =>
+              typeof r === 'string' && (ASPECT_RATIOS as readonly string[]).includes(r),
           )
         : null;
 
       const rawMaxDuration =
-        adminMaxDuration ?? provider.info.maxDuration ?? bindings.maxDurationS ?? 10;
+        adminMaxDuration ?? provider.info.maxDuration ?? bindings.maxDurationS ?? 15;
       const maxDurationS = Math.min(Math.max(rawMaxDuration, 1), 15);
       const minDurationS = Math.max(adminMinDuration ?? 1, 1);
       const supportedAspectRatios =
         adminAspectRatios && adminAspectRatios.length > 0
           ? adminAspectRatios
-          : (['9:16', '16:9', '1:1'] as const);
+          : ASPECT_RATIOS;
 
       // W5.5.1 扩展(2026-05-24):分辨率 / 音频 / 水印 / 参考素材等能力标志
       // 数据源同 maxDuration:ProviderConfig.defaultParams 优先,fallback 到默认值
@@ -1650,10 +1805,12 @@ export const aigcRouter = router({
               r === '480p' || r === '720p' || r === '1080p',
           )
         : null;
+      // 用户反馈 2026-05-27:分辨率默认全 3 档 480p/720p/1080p
+      // 各 model 实际能力由 admin 后台 ProviderConfig.defaultParams.supportedResolutions 覆盖
       const supportedResolutions: Array<'480p' | '720p' | '1080p'> =
         adminResolutions && adminResolutions.length > 0
           ? adminResolutions
-          : ['720p', '1080p'];
+          : ['480p', '720p', '1080p'];
       const defaultResolution =
         typeof params.defaultResolution === 'string' &&
         ['480p', '720p', '1080p'].includes(params.defaultResolution)
@@ -1667,7 +1824,29 @@ export const aigcRouter = router({
       const supportsRefVideo = params.supportsRefVideo === true;
       const supportsRefAudio = params.supportsRefAudio === true;
 
-      const isMock = provider.info.displayName.toLowerCase().includes('mock');
+      // 2026-05-27 audit r14 P1:isMock 检测统一用 provider 实例类型 + providerId 对比
+      // 之前 `displayName.toLowerCase().includes('mock')` 会误报(displayName 含 'Mock' / 'demo-mock' 等)
+      // MockVideoProvider 的 info.displayName 必含 "(Mock W5.4)" 标记,但更稳的是
+      // 看 provider.info.id 跟原 providerId 是否被 fallback 改造过 — 实际 MockVideoProvider 保留原 id,
+      // 改用 displayName 严格含 "(Mock " 前缀(MockVideoProvider 构造器固定模板)
+      const isMock = /\(Mock\b/.test(provider.info.displayName);
+      // 4 种 fallback 原因(给前端 banner 显式提示)
+      //   - 'explicit_mock'        - providerId 本就是 mock-*(dev 占位,正常)
+      //   - 'no_provider_config'   - ProviderConfig 不存在(admin 没添加)
+      //   - 'provider_inactive'    - 找到了但 isActive=false(admin 没启用)
+      //   - 'adapter_route_failed' - config OK 但 adapter 路由没命中(token / 适配器 missing)
+      let fallbackReason: string | null = null;
+      if (isMock) {
+        if (providerId.toLowerCase().startsWith('mock-') || providerId.toLowerCase() === 'mock') {
+          fallbackReason = 'explicit_mock';
+        } else if (!config) {
+          fallbackReason = 'no_provider_config';
+        } else if (!config.isActive) {
+          fallbackReason = 'provider_inactive';
+        } else {
+          fallbackReason = 'adapter_route_failed';
+        }
+      }
 
       return {
         providerId,
@@ -1686,6 +1865,7 @@ export const aigcRouter = router({
         supportsRefAudio,
         isActive: config?.isActive ?? true,
         isMock,
+        fallbackReason,
       };
     }),
 
@@ -1781,7 +1961,13 @@ export const aigcRouter = router({
         ...updated,
         projectId: attempt.shotGroup.episode.projectId,
       });
-      return { id: updated.id, alreadyRejected: false };
+      // 2026-05-27 audit r14 P0:返 shotGroupId 给前端 onSuccess 定向 invalidate({groupId})
+      // 防多 group 同页堆叠时跨 group cache 污染
+      return {
+        id: updated.id,
+        alreadyRejected: false,
+        shotGroupId: attempt.shotGroupId,
+      };
     }),
 
   // ============================== W5 完善 G1:ShotGroup CRUD ==============================

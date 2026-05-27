@@ -307,8 +307,21 @@ const providerRouter = router({
       if (m.endpointStyle) defaultParams.endpointStyle = m.endpointStyle;
       if (m.defaultSize) defaultParams.defaultSize = m.defaultSize;
       if (m.maxDuration !== undefined) defaultParams.maxDuration = m.maxDuration;
+      if (m.minDuration !== undefined) defaultParams.minDuration = m.minDuration;
       if (m.defaultDuration !== undefined)
         defaultParams.defaultDuration = m.defaultDuration;
+      // 2026-05-27 audit r13:Video 能力字段透传 — capabilities query 读这些字段决定 UI 选项
+      if (m.supportedResolutions !== undefined)
+        defaultParams.supportedResolutions = m.supportedResolutions;
+      if (m.defaultResolution !== undefined)
+        defaultParams.defaultResolution = m.defaultResolution;
+      if (m.supportsAudio !== undefined) defaultParams.supportsAudio = m.supportsAudio;
+      if (m.supportsWebSearch !== undefined)
+        defaultParams.supportsWebSearch = m.supportsWebSearch;
+      if (m.supportsRefVideo !== undefined)
+        defaultParams.supportsRefVideo = m.supportsRefVideo;
+      if (m.supportsRefAudio !== undefined)
+        defaultParams.supportsRefAudio = m.supportsRefAudio;
 
       const created = await ctx.prisma.providerConfig.create({
         data: {
@@ -1710,6 +1723,83 @@ const apiUsageRouter = router({
         filename: `cost-ledger-${input.days}d-${new Date().toISOString().slice(0, 10)}.csv`,
         truncated: rows.length >= input.maxRows,
       };
+    }),
+
+  /**
+   * 2026-05-27 用户反馈:视频生成明细复盘
+   * 返最近 N 条 VIDEO GenerationAttempt 全量明细(prompt 来自 inputJson.positivePrompt,已脱敏)
+   * 用于 /admin/api-usage 明细 table:时间 / 项目 / 集 / 分镜组 / Provider / Status / 耗时 / 成本 / errorMsg / requestId / 操作员
+   */
+  videoAttempts: adminProcedure
+    .input(
+      z.object({
+        limit: z.number().int().min(1).max(200).default(50),
+        statusFilter: z.enum(['ALL', 'SUCCESS', 'FAILED', 'RUNNING']).default('ALL'),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const where: Record<string, unknown> = { action: 'VIDEO' };
+      if (input.statusFilter !== 'ALL') {
+        where.status = input.statusFilter;
+      }
+      const rows = await ctx.prisma.generationAttempt.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: input.limit,
+        include: {
+          shotGroup: {
+            select: {
+              number: true,
+              episode: {
+                select: {
+                  number: true,
+                  project: { select: { id: true, name: true } },
+                },
+              },
+            },
+          },
+          user: { select: { id: true, displayName: true, email: true } },
+        },
+      });
+      return rows.map((a) => {
+        const aj = (a.inputJson ?? {}) as Record<string, unknown>;
+        return {
+          id: a.id,
+          createdAt: a.createdAt,
+          startedAt: a.startedAt,
+          finishedAt: a.finishedAt,
+          durationMs: a.durationMs,
+          status: a.status,
+          providerId: a.providerId,
+          modelId: a.modelId,
+          providerJobId: a.providerJobId,
+          costCny: a.costCny.toString(),
+          errorMsg: a.errorMsg,
+          rejected: a.rejected,
+          // 项目 / 集 / 分镜组
+          projectId: a.shotGroup?.episode?.project?.id ?? null,
+          projectName: a.shotGroup?.episode?.project?.name ?? null,
+          episodeNumber: a.shotGroup?.episode?.number ?? null,
+          groupNumber: a.shotGroup?.number ?? null,
+          // 输入(已脱敏:preview + hash)
+          promptPreview:
+            typeof aj.positivePrompt === 'object' && aj.positivePrompt !== null
+              ? ((aj.positivePrompt as Record<string, unknown>).preview as
+                  | string
+                  | undefined)
+              : typeof aj.positivePrompt === 'string'
+                ? (aj.positivePrompt as string).slice(0, 100)
+                : null,
+          aspectRatio:
+            typeof aj.aspectRatio === 'string' ? aj.aspectRatio : null,
+          durationS:
+            typeof aj.durationS === 'number' ? aj.durationS : null,
+          // 操作员
+          createdBy: a.user
+            ? { id: a.user.id, displayName: a.user.displayName, email: a.user.email }
+            : null,
+        };
+      });
     }),
 });
 

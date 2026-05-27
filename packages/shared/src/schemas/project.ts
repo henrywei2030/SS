@@ -1,8 +1,11 @@
 import { z } from 'zod';
 
+import { ASPECT_RATIOS } from '../constants.js';
+
 export const projectTypeSchema = z.enum(['AI_REAL', 'ANIM_3D', 'ANIM_2D', 'POSTER', 'CUSTOM']);
 
-export const aspectRatioSchema = z.enum(['9:16', '16:9', '1:1']);
+// 单一真相源:从 constants.ts ASPECT_RATIOS 派生(不再硬编码 union)
+export const aspectRatioSchema = z.enum(ASPECT_RATIOS);
 
 export const createProjectSchema = z.object({
   name: z.string().min(1).max(120),

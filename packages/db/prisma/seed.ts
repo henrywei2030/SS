@@ -67,7 +67,8 @@ async function main() {
       unitName: 'second',
       maxConcurrent: 5,
       rateLimitRpm: 30,
-      defaultParams: { maxDuration: 10, defaultDuration: 5 },
+      // 2026-05-27:业务上限 15s(用户反馈)— Provider 实际不支持时由 adapter 二次 clamp
+      defaultParams: { maxDuration: 15, defaultDuration: 5 },
     },
     {
       providerId: 'seedance-2.0-fast',
@@ -79,7 +80,7 @@ async function main() {
       unitName: 'second',
       maxConcurrent: 8,
       rateLimitRpm: 60,
-      defaultParams: { maxDuration: 5, defaultDuration: 5 },
+      defaultParams: { maxDuration: 15, defaultDuration: 5 },
     },
     {
       providerId: 'doubao-1-5-pro-256k',
@@ -193,8 +194,8 @@ async function main() {
       versionTag: 'v1',
       name: '剧本分镜生成',
       description: '基于剧本生成线性分镜的提示词',
-      content: '你是经验丰富的导演。任务：将剧本拆解为线性分镜。\n\n要求：\n1. 每个镜头标注：景别、机位角度、镜头内容、视频提示词\n2. 镜头时长按 1-10 秒拆分（默认 5 秒），便于视频模型生成\n3. 优先级 S/A/B/C：爽点/反转=S，冲突高潮=A，叙事推进=B，过渡=C\n4. 引用人物/场景/道具时使用 @资产名 占位符',
-      varsJson: { maxDurationS: { type: 'number', default: 10 } },
+      content: '你是经验丰富的导演。任务：将剧本拆解为线性分镜。\n\n要求：\n1. 每个镜头标注：景别、机位角度、镜头内容、视频提示词\n2. 镜头时长按 1-15 秒拆分（默认 5 秒），便于视频模型生成\n3. 优先级 S/A/B/C：爽点/反转=S，冲突高潮=A，叙事推进=B，过渡=C\n4. 引用人物/场景/道具时使用 @资产名 占位符',
+      varsJson: { maxDurationS: { type: 'number', default: 15 } },
     },
     {
       category: PromptCategory.PANORAMA_360,
@@ -437,9 +438,9 @@ async function main() {
     // ----- W5.0 视频生成业务参数 -----
     {
       key: 'shot.video.maxDurationS',
-      value: '10',
+      value: '15',
       category: 'general',
-      description: '单次 aigc.generateVideo 调用 Provider 的硬上限(秒)— 区别于 storyboard.maxDurationS(mergeShots 合并组上限)',
+      description: '单次 aigc.generateVideo 调用 Provider 的硬上限(秒)— 2026-05-27 业务上限提到 15s',
     },
     {
       key: 'shot.video.defaultAspectRatio',

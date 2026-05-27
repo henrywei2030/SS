@@ -5,6 +5,132 @@
 
 ---
 
+## 2026-05-27(周三,win-laptop · 二十五次收工)— AIGC 全链路真接通 Seedance 2.0 · 14 项用户反馈连续修 · 3 路 audit 16 项 P0/P1 修 · 真打通 moyu API
+
+**完成 — 跨 30+ 文件 · 1 新 migration · 9 packages typecheck 全 pass · 60/60 tests pass**
+
+### 用户反馈连续修(14 项 UX 改造)
+
+**第 1 波:AIGC 工坊紧凑布局 + 字体缩放**
+- AIGC `原始剧本` section 改紧凑无空行(每条 shot 独立 div · 参考 `shots-pane` GroupRow)
+- AIGC `视频提示词` section 加 `normalizePrompt` 抽到 `@ss/shared/prompt-utils.ts`(server + 前端共用,训练集对齐)
+- 字号缩放跟 storyboard 同 `--storyboard-fs` 联动
+
+**第 2 波:剧本分析 modelId 硬编码 P0**
+- `story-compass.tsx` 删 `modelId: 'claude-sonnet-4-5'` 硬编码(违反 ADR-28 §F)
+- 后端 [script.ts:884-899](packages/api/src/routers/script.ts) 已支持读 binding · 用户需 admin 显式选
+
+**第 3 波:全集 group 同页堆叠 + 同页交互重构**
+- 删除"左侧选择→右侧切换"模式,所有 group 在主区垂直堆叠
+- 左侧改 scrollIntoView 锚点 nav · URL `?g=xxx` 初始 scroll target
+- `groups.map(GroupDetail)` 每个独立实例 · callback 接 groupId 参数 · mutation onSuccess 用 variables.groupId
+- bindDialogOpen+selectedGroupId → bindDialogGroupId 单值 · autoSelect 改 {groupId, attemptId}
+
+**第 4 波:画面比例 6 选项全栈扩展**
+- `packages/shared/src/constants.ts` `ASPECT_RATIOS = ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9']`(单一真相源)
+- 全 zod schema 从硬编码 `z.enum(['9:16','16:9','1:1'])` 改派生 `z.enum(ASPECT_RATIOS)`
+- 删 'auto' 选项 · `aspectRatio` 从硬编码 union 改 `AspectRatio` type 全栈
+- ASPECT_LABEL + ASPECT_CLASS helper map(`16:9 横屏` / `21:9 宽银幕` 等)
+- 项目 aspect 默认通过 `getGroupDetail.project.aspect` 联动 AIGC 预览框
+
+**第 5 波:视频预览简化 + 历史 dialog → 展平 + 自动播 + 删除按钮**
+- 删除 grid 双列 → 主预览满宽单列
+- 加 lucide `Download` / `History` / `Trash2` / `X` icon
+- 历史从 dialog 改主预览下方常驻列表
+- 点条目自动播(`onLoadedMetadata` + `pendingPlayId`,等元数据再 play 防 src 切换中断)
+- 删除按钮(主预览 info bar + 每条 card)+ window.confirm 二次确认 → 软删 rejected=true
+- `visibleTakes = takes.filter(!t.rejected)` · server `rejectVideoTake` return `shotGroupId` 定向 invalidate
+
+**第 6 波:最长时长 10→15s 全栈**
+- catalog `relay-catalogs.json` 6 个 Seedance variants `maxDuration: 15`
+- seed.ts ProviderConfig defaultParams + SystemSetting `shot.video.maxDurationS = '15'`
+- `clampDuration` 上限 10→15 · `video.test.ts` 期望值同步
+- `RelayCatalogModel` type 扩 `minDuration` / `supportedResolutions` / `defaultResolution` / `supportsAudio` / `supportsWebSearch` / `supportsRefVideo` / `supportsRefAudio`
+- `admin.createFromCatalog` 把这些字段透传到 ProviderConfig.defaultParams
+
+**第 7 波:Seedance 2.0 协议 + 视频模型下拉 + connect timeout P0(真接通 moyu)**
+
+底层 4 大 P0 bug(对照 moyu docs §15):
+- **adapter 路由 fallback** — `constructVideoProvider` 改 `defaultModel.includes('seedance')`,覆盖任意中转站名前缀(`moyu-doubao-seedance-*` 之前不命中老 startsWith 白名单 → 静默 fallback Mock)
+- **Seedance 2.0 协议 metadata 结构** — buildCreateBody 按 `modelId.includes('seedance-2-')` 分支:2.x 用嵌套 `metadata.content[]` 数组 + role 显式 + duration 4-15 + resolution 仅 480p/720p / 1.x 用旧简化结构
+- **Seedance 2.0 query response 解析** — `data.data.content.video_url` + 大写 SUCCESS/FAILURE/IN_PROGRESS/NOT_START(老代码假设 ARK 1.x 小写 + 平铺,永远不命中 SUCCESS → 5min 超时 mark FAILED 但 moyu 端真完成了)
+- **undici Connect Timeout 10s** — Seedance 专属 Agent(connect 60s + body/headers 180s + keepAlive),修不 fallback global dispatcher(worker 先调 Seedance 时 global 还没设)
+
+其他改:
+- BullMQ `attempts: 5→1`(用户偏好 explicit-fail-first,视频抽卡按秒计费,重试 5 次会重复扣费)
+- `getProviderCapabilities` 字段名 `maxDurationS→maxDuration`(对齐 catalog/seed)
+- 加 `fallbackReason: 'explicit_mock'|'no_provider_config'|'provider_inactive'|'adapter_route_failed'` + 前端 isMock 黄色 banner
+- 视频模型下拉(列出所有 active VIDEO provider) · default 选 binding · 用户切走传 `providerOverride`
+- 高级选项展平到 toolbar(分辨率 + 同步音频 toggle inline checkbox)
+- 删除"添加水印"/"联网搜索增强"/"参考素材" 占位 UI(视频 API 不暴露 watermark/webSearch 作为输入参数 · 参考素材已通过 W4 资产匹配)
+
+**第 8 波:同步音频默认勾选 + 时长数字加空格 + 容器 aspect 联动**
+- `generateAudio useState(true)`(Seedance 2.0 docs §15 默认 true)
+- 时长全 UI `Xs` → `X s`(分镜表 / AIGC / edit-dialog)
+- placeholder 容器 `aspect-[9/16]` 硬编码 → `ASPECT_CLASS[aspectRatio]`,16:9 项目时不留白
+- 主预览 placeholder 区分 FAILED/RUNNING/QUEUED/empty 显具体信息(红框 + ❌ + 完整 errorMsg / 黄框 + 脉冲点 + "Seedance 3-4 分钟")
+- 历史 card errorMsg slice(0,40) → 完整换行红字
+- 默认选 latest take(不再 firstSuccess 优先,FAILED/RUNNING 也能看)
+
+**第 9 波:RUNNING take 自动 polling + 下载文件名规则化**
+- `listVideoTakes` `refetchInterval` 5s polling 直到全部 SUCCESS/FAILED
+- `buildDownloadFilename`:`{项目名}-Ep{集号}-{分镜组号}-第{N}次-{时间}.mp4`
+- `getGroupDetail` 返 `project.name` + `episode.number/title` 给前端拼
+
+**第 10 波:动态进度条 + 错误信息完整显示 + admin 复盘页**
+- 进度条 SSE percent 优先 fallback 时间估算(2.0 fast 3min / std 6min)· 95% 卡顿等真终态
+- 每秒 setInterval tick · CSS width 动画
+- admin `/admin/api-usage` 加 `videoAttempts` 复盘 section(时间 / 项目 / Ep-组 / Provider / 状态 / 耗时 / 成本 / errorMsg / 操作员)
+
+### 3 路 audit + 16 项 P0/P1 修(去重去误报后)
+
+**audit r12(server + 前端 + 跨模块)修真 P0/P1**:
+- P0:rejectVideoTake server return shotGroupId + 前端定向 invalidate(防同页 group 间 cache 污染)
+- P0:删 `.catch(() => null)` 吞 DB 异常(让 supportsRef* 校验真起作用)
+- P0:Seedance 2.0 协议(metadata) + query 解析(嵌套 data.data + 大写 status)+ adapter 路由(defaultModel.includes)
+- P1:isMock 检测改用 `/\(Mock\b/.test()` 严格匹配 + fallbackReason 显式
+- P1:refAudioUrl input 跟 binding 统一 silent drop(不再不对称)
+- P1:Seedance 2.0 audio 守卫 `content.some(c => c.type === 'image_url' || 'video_url')`(docs §15 要求)
+- P1:aspectRatio race 用 useRef.current 替代 useState flag
+- P1:自动播改 onLoadedMetadata 替代 requestAnimationFrame
+- P1:listGroups.invalidate 限定 episodeId / generateAudio reset 守卫 / 历史 dialog ESC 关闭
+
+**audit r13/r14/r15 P0 真根因(对照 docs + 真打 API 验证)**:
+- **CostLedgerEntry.attemptId UNIQUE 老索引没删** — schema 改成 @@index 但 migration 没生成,DB 仍 unique → worker 写 REFUND 退多扣 unique violation → catch 静默 → attempt 卡 RUNNING + moyu 端视频丢失。新 migration `20260527120000_drop_ledger_attempt_unique` 已 apply
+- **undici Connect Timeout 10s** — moyu 端真收到 POST 并生成完视频,但 worker 因 10s connect timeout 标 FAILED + task_id 丢失。修 Seedance 专属 Agent (connect 60s)
+- **Seedance 2.0 query response 嵌套结构** — 已修 parseQueryResponse 适配 v2 nested + v1 平铺,pollTimeoutMs 5min→15min
+- **stale RUNNING 自愈** — generateVideo entry 10min cutoff + 标 FAILED + 退 PREPAY(防 worker 崩 / network drop 后用户永久 block)
+
+### r15 audit:W1-Phase 1.5 全栈 3 路死代码/冗余审计 → 真修 1 项
+- 3 agent 并行扫 server router / 前端 / shared+adapters+core+queue
+- 整合 31 项报告 · 去重去误报后真要修:`story-compass.tsx` 死 prop `locale`(删 + page.tsx caller 同步)+ unbindMutation 定向 invalidate
+- 其余:`Search` icon `hidden md:flex` 响应式(不是死代码)/ `void ctx` lint 惯例 / EVENT_TOPICS r11 已删 / Phase 2 schema 契约保留 / schema deprecated 字段 backward compat 不动 / W5.5.1 字段设计契约 Phase 2 消费 / useCallback 历史 R7 优化保留
+
+### 工具留档
+- `scripts/fix-seedance-provider-config.mjs` — 用 catalog 重建 ProviderConfig.defaultParams + isActive=true + 同步 binding
+- `packages/queue/monitor-12-14.mjs` — 监控某 group 全链路(DB attempts + BullMQ queue + CostLedger + Provider 状态)
+- `packages/queue/sync-orphan-attempts.mjs` — BullMQ failed 但 DB RUNNING 孤儿同步 + 退 PREPAY
+- `packages/queue/recover-lost-video.mjs` — connect timeout / 任何原因 task_id 丢失时,用 (attemptId + moyu task_id) 找回视频
+- `packages/db/prisma/migrations/20260527120000_drop_ledger_attempt_unique/` — drop 老 UNIQUE index
+
+### 真打通 moyu API ✓(用户截图证据)
+- moyu 后台:13:08:55 → 13:11:54 成功 cgt-20260527130855-r5kjq(179s)
+- DB:同 attemptId connect timeout fail
+- Recovery script 拿回 video_url + 升 SUCCESS + 写 MediaItem
+- 后续重启 worker(60s connect timeout)→ 链路稳定打通
+
+**问题/待决策**
+- ❓ moyu API 偶发 connect timeout 根因(网络 / DNS / TLS),60s 应该够,继续观察
+- ❓ token 充值流程缺 admin 凭证更新提醒(用户多次以为 isActive=换 token)— Phase 2 admin UX 改进
+
+**下次接着做**
+- 📌 Phase 2 W8 团队实战:5 人冷启动 + 真接 Seedance 测 1 集 7 镜头(已具备所有底层条件)
+- 📌 admin /api-usage 加导出明细 CSV(目前只能导 CostLedger)
+- 📌 worker boot stale sweep 加退 PREPAY(目前只标 FAILED 没退,资金漏小)
+- 📌 W6 polish:34 处硬编码颜色 / a11y / listBindings N+1 / OperationLog 命名规范
+
+---
+
 ## 2026-05-27(周三,win-laptop · 二十四次收工)— UI 大改造 r2~r7 6 波反馈连续修 + 删剪辑模块 + IN_EDIT 删枚举 + audit 5 bug 修
 
 **完成 — 跨 24 文件 ~30 处改动 + 1 新 migration · web+api+adapters+shared typecheck 全 pass**

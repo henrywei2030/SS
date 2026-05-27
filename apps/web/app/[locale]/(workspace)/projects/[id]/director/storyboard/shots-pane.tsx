@@ -12,6 +12,8 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 
+import { normalizePrompt } from '@ss/shared';
+
 import { trpc } from '@/lib/trpc/client';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -430,7 +432,7 @@ function GroupRow({
         <div className="flex flex-col gap-0.5">
           <span className="font-mono text-[length:1.05em] font-semibold">{group.number}</span>
           <span className="text-[length:0.7em] text-[hsl(var(--color-muted-foreground))]">
-            {group.durationS.toFixed(1)}s · {group.shots.length} 镜合并
+            {group.durationS.toFixed(1)} s · {group.shots.length} 镜合并
           </span>
           <StatusBadge status={group.status} />
         </div>
@@ -491,14 +493,8 @@ function GroupRow({
 // 保存调 storyboard.updateGroup(无 diffNote,inline 场景不收集修改原因)
 // ---------------------------------------------------------------------------
 
-// normalize 合并组 prompt:
-//   1. 多换行收紧为单换行(去段间空行)
-//   2. [i/N] 标题行 + 下一行非另一段标题 → 合并为同行空格分隔
-//      用户反馈 r3:`[1/6] 特写 平视 0°` 不应另起一行,跟 prompt 内容单空格连接
-const normalizePrompt = (s: string): string =>
-  s
-    .replace(/\n{2,}/g, '\n')
-    .replace(/^(\[\d+\/\d+\][^\n]+)\n(?=[^\[])/gm, '$1 ');
+// 2026-05-27 audit r12:normalizePrompt 抽到 @ss/shared(server + 前端共用避免漂移)
+// 见 packages/shared/src/prompt-utils.ts
 
 function GroupPromptEditor({
   groupId,
@@ -655,7 +651,7 @@ function ShotRow({
         <div className="flex flex-col gap-0.5">
           <span>{shot.number}</span>
           <span className="text-[length:0.7em] text-[hsl(var(--color-muted-foreground))]">
-            {shot.durationS.toFixed(1)}s
+            {shot.durationS.toFixed(1)} s
           </span>
           {shot.priority && (
             <Badge

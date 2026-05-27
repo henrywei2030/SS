@@ -7,6 +7,8 @@
  *   - Phase 2 通过 LiteLLM 接入更多模型，无需改业务代码
  */
 
+import type { AspectRatio } from '@ss/shared/constants';
+
 export type ProviderKind = 'video' | 'image' | 'text' | 'audio' | 'compliance' | 'embedding';
 
 export interface ProviderInfo {
@@ -45,10 +47,12 @@ export interface VideoRequest {
   prompt: string;
   /** 视频时长（秒） */
   durationS: number;
-  aspectRatio: '9:16' | '16:9' | '1:1';
+  aspectRatio: AspectRatio;
   seed?: number;
   refImageUrls?: string[];
   refImageBuffers?: Buffer[];
+  /** 参考音频 URL(2026-05-27:binding 含 AUDIO 类资产时由 server 自动收集传过来) */
+  refAudioUrls?: string[];
   /** 火山合规 ID（真人脸场景） */
   complianceIds?: string[];
   /** 首帧/尾帧约束 */

@@ -345,11 +345,11 @@ function compileNegative(
 }
 
 /**
- * 时长 clamp:防 0/负数 / 超过 10s 上限(Seedance 等单次生成硬限)。
+ * 时长 clamp:防 0/负数 / 超过 15s 上限(2026-05-27 业务调到 15s)。
  * 业务层应在调用前结合 SystemSetting.shot.video.maxDurationS 做更精确限制。
  */
 function clampDuration(s: number): number {
   if (!Number.isFinite(s) || s <= 0) return 5;
-  if (s > 10) return 10;
+  if (s > 15) return 15;
   return Math.round(s * 10) / 10;
 }

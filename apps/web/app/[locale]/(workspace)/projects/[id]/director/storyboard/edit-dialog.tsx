@@ -251,7 +251,7 @@ export function GroupEditDialog({
         <DialogHeader>
           <DialogTitle>编辑合并组 {group.number}</DialogTitle>
           <DialogDescription>
-            组级提示词是送给视频生成模型的最终 prompt({group.durationS.toFixed(1)}s 一次生成),改动会入训练集。
+            组级提示词是送给视频生成模型的最终 prompt({group.durationS.toFixed(1)} s 一次生成),改动会入训练集。
           </DialogDescription>
         </DialogHeader>
 
