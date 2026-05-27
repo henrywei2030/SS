@@ -1416,6 +1416,47 @@ export const assetRouter = router({
     }),
 
   /**
+   * W6 polish:批量列出多个资产的出场绑定,按 assetId group 返回
+   *
+   * 修复 N+1:art-workspace 资产列表里每张 AssetCard 原来各调 listBindings,
+   * 50 张资产 = 50 次 query。现父级批量查一次,返回 { assetId → bindings[] }。
+   */
+  listBindingsByAssetIds: protectedProcedure
+    .input(
+      z.object({
+        projectId: z.string().cuid(),
+        assetIds: z.array(z.string().cuid()).max(500),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      if (!ctx.user) throw new TRPCError({ code: 'UNAUTHORIZED' });
+      if (input.assetIds.length === 0) return {} as Record<string, never>;
+      await assertProjectAccess(ctx, input.projectId);
+
+      const bindings = await ctx.prisma.assetUsageBinding.findMany({
+        where: {
+          assetId: { in: input.assetIds },
+          deletedAt: null,
+          asset: { projectId: input.projectId, deletedAt: null },
+        },
+        include: {
+          episode: { select: { id: true, number: true, title: true } },
+          scene: { select: { id: true, number: true, place: true } },
+          shot: { select: { id: true, number: true, positionIdx: true } },
+        },
+        orderBy: [{ episode: { number: 'asc' } }, { createdAt: 'asc' }],
+      });
+
+      const grouped: Record<string, typeof bindings> = {};
+      for (const b of bindings) {
+        const list = grouped[b.assetId] ?? [];
+        list.push(b);
+        grouped[b.assetId] = list;
+      }
+      return grouped;
+    }),
+
+  /**
    * 按 shotId 列出 binding(W1-W5 audit P1 followup P1-8)
    *
    * AIGC 工作台跑 group 级查询,但导演侧编辑单镜时(原 W3 ShotAssetRef 兼容路径)

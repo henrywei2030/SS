@@ -34,8 +34,18 @@ if (isProd || dbLooksProd || dbNotLocal) {
 
 console.log('✓ NODE_ENV 守卫通过,进入 prisma migrate dev');
 
-const result = spawnSync('pnpm', ['--filter', '@ss/db', 'exec', 'prisma', 'migrate', 'dev', ...process.argv.slice(2)], {
+const migrateResult = spawnSync('pnpm', ['--filter', '@ss/db', 'exec', 'prisma', 'migrate', 'dev', ...process.argv.slice(2)], {
   stdio: 'inherit',
   shell: true,
 });
-process.exit(result.status ?? 1);
+if (migrateResult.status !== 0) {
+  process.exit(migrateResult.status ?? 1);
+}
+
+// Prisma 7:migrate dev 不再自动跑 generate,这里显式跑
+console.log('\n✓ migrate 完成,显式跑 generate(Prisma 7 不再自动)');
+const generateResult = spawnSync('pnpm', ['--filter', '@ss/db', 'exec', 'prisma', 'generate'], {
+  stdio: 'inherit',
+  shell: true,
+});
+process.exit(generateResult.status ?? 1);

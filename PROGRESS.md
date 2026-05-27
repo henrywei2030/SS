@@ -5,6 +5,77 @@
 
 ---
 
+## 2026-05-27(周三,mac-studio · 二十六次收工)— Prisma 6.19.3 → 7.8.0 升级 + W6 polish N+1 真凶修复 + login typo
+
+**完成 — 跨 16 文件 · typecheck 15/15 · tests 95/95 · 真打 DB 链路验证 ✓**
+
+### 开工先做:跨设备同步 + 环境修复(本会话首段)
+
+切到 mac-studio 后做了一轮"漏洞扫除":
+- **git 同步** — 本地 d6fee81 → origin/main a62f3d7,fast-forward 48 commits 无冲突;远程已删的 .d.ts/.js 编译产物 git 自动清理
+- **env 漏洞** — 三轮检查发现 `.env` / `.env.local` / `packages/db/.env` 都缺 6 个新 key(`ADMIN_DEFAULT_PASSWORD` / `AUTH_DRIVER` / `AUTH_TOKEN_TTL_SEC` / `RELAY_API_KEY` / `STORAGE_LOCAL_DIR` / `WORKER_HEALTH_PORT`),append 补齐到对齐 .env.example
+- **infra 拉起** — 启 Docker Desktop + `pnpm infra:up`(PG/Redis/MinIO 全 healthy) + `pnpm db:generate` + `pnpm db:migrate:deploy`(把 15 个落后 migration 应用,DB 从 10/25 拉到 25/25)+ `pnpm preflight` 7 项全绿
+
+### Prisma 6.19.3 → 7.8.0 升级(原估 1-2 天,实际 1.5h)
+
+**意外发现**:升级文档预警的"强制 ESM"对本项目零成本 —— 8 个 packages 已经 `"type": "module"` + tsconfig 已 `module: ESNext`。原估 1-2 天的工作量被项目早已 ESM 化的事实消解到 1.5h。
+
+底层改造:
+- **deps 升** `prisma + @prisma/client@7.8.0` + 装 `@prisma/adapter-pg@7.8.0` + `pg@8.21.0` + `@types/pg`
+- **schema.prisma** generator 从 `prisma-client-js` 改 `prisma-client` + `output = "../src/generated/prisma"` + ESM 配置(`runtime/moduleFormat/generatedFileExtension/importFileExtension`)+ `datasource.url` 从 schema 移到 prisma.config.ts(7 强制)
+- **新建 `packages/db/prisma.config.ts`** — `defineConfig({ schema, migrations: { path, seed }, datasource: { url: env('DATABASE_URL') } })` + 显式 `import 'dotenv/config'`(7 CLI 不再自动加载 .env);删 `package.json#prisma` 字段
+- **client.ts Driver Adapter** — `new PrismaClient({ adapter: new PrismaPg({ connectionString }) })` + import 从 `'@prisma/client'` 改 `'./generated/prisma/client.js'`
+- **enums.ts** 改 `export * from './generated/prisma/enums.js'` 一键 re-export(原 22 个手动列表少了 7 个 W4-W7 加的 enum,触发 @ss/api typecheck `TS2742` 不可命名 inferred type)
+- **db-migrate-dev-guard.mjs** 加显式 `pnpm db:generate`(7 的 `migrate dev` 不再自动 generate)
+- **seed.ts** 改用 `@ss/db` 单例 + dotenv;**scripts/set-admin-password.ts** 同改
+
+兼容性修:
+- **`@ss/adapters` `Prisma.Decimal.Value` namespace 兼容** — Prisma 7 把 `Prisma.Decimal` 从 namespace 改纯 type,`Prisma.Decimal.Value` 不能这么访问。`new Prisma.Decimal(opts.costCnyOverride as Prisma.Decimal.Value)` → 直接 `new Prisma.Decimal(opts.costCnyOverride)`(类型已是 `Prisma.Decimal | string | number` 自动适配构造函数)
+- **`packages/db/src/generated/`** 加 `.gitignore`(生成代码不入 git)
+
+真打 DB 验证:
+- `pnpm db:generate` 成功(101ms)
+- `pnpm db:migrate:deploy` "No pending migrations" 正常
+- 临时 tsx 脚本 import `@ss/db` 单例查 `prisma.user.count()` / `prisma.project.count()` 等 5 个表 + 一次 `findFirst` 拿 admin email → **PrismaPg adapter 真打通** ✓
+
+### W6 polish — listBindings N+1 真凶 + login --color-success typo
+
+**N+1 真凶**:art-workspace 渲染资产网格时,每张 `AssetCard` 内部各调 `trpc.asset.listBindings.useQuery({ assetId })` — 50 张资产 = 50 次 query。修复:
+- **后端加 `listBindingsByAssetIds`**(packages/api/src/routers/asset.ts)— 接 `{ projectId, assetIds: max(500) }`,`assertProjectAccess(projectId)` 一次校验,`assetUsageBinding.findMany WHERE assetId IN (...) AND asset.projectId = projectId`(防越权),按 `assetId` group 返回 `Record<assetId, Binding[]>`
+- **前端 art-workspace** 父级一次 `trpc.asset.listBindingsByAssetIds.useQuery({ projectId, assetIds })`(disabled when assetIds empty)
+- **AssetCard** prop 从 `(asset, heroUrl, onClick)` 改 `(asset, heroUrl, bindings, onClick)`,去掉 self-query;`Binding` type 用 `inferRouterOutputs<AppRouter>['asset']['listBindings'][number]`(复用原 procedure 的类型契约)
+
+`listBindings` procedure 保留(其他单资产场景还在用,无 break)。
+
+**login typo**:`apps/web/app/[locale]/login/page.tsx:52` 用了 `bg-[hsl(var(--success))]`,但 globals.css 项目惯例是 `--color-*` 前缀(`--color-success`)。改为 `bg-[hsl(var(--color-success))]` 规范化。
+
+**留 follow-up**(本次没做,改动量大需要逐处视觉测试):
+- 15+ 处硬编码颜色(emerald-300 / rose-300 / amber-300 / blue-500/600/700)→ CSS vars,需 1-2h + 视觉验证
+- `<button>` 缺 `type="button"`(form context 内才触发 submit bug,需逐处判定上下文)
+
+### 工程化决策记录
+
+- **未走 worktree 隔离** — Prisma 升级直接在 `prisma-7-upgrade` 分支做,本地工作树同步改。原因:风险评估后判断 ESM 已就绪,失败回退成本低
+- **未拆 commit** — 用户拍 1 commit 全打包(Prisma 7 + W6 polish 一起),merge 回 main + push;commit message Conventional Commits `feat(prisma-7+polish)`
+
+### 工具更新
+
+- `scripts/db-migrate-dev-guard.mjs` 加 Prisma 7 显式 generate 兼容
+- `scripts/set-admin-password.ts` 改用 `@ss/db` 单例(原 `new PrismaClient()` 在 7 需传 adapter,改单例后无需 scripts 内置 adapter 配置)
+
+**问题/待决策**
+- ❓ Prisma 7 的 generated client 在 `packages/db/src/generated/prisma/` 加了 `.gitignore` — 新设备首次拉起需先 `pnpm db:generate` 才能 typecheck/test,有没有更优雅的 bootstrap 方式(turbo 加 `db:generate` dep?)
+- ❓ pnpm 警告 dual install 残留:`@prisma/client@6.19.3` 还在 node_modules(transitive 引用),空间冗余 — 下次 `pnpm prune` 或显式 deduplicate
+
+**下次接着做**
+- 📌 W6 polish 剩余:15+ 处硬编码颜色 → CSS vars(需逐处视觉测试)
+- 📌 W6 polish 剩余:`<button>` 缺 `type="button"`(form context 精细识别)
+- 📌 Phase 2 W8 团队实战:5 人冷启动 + 真接 Seedance 测 1 集 7 镜头
+- 📌 admin /api-usage 加视频明细 CSV 导出
+- 📌 worker boot stale sweep 加退 PREPAY(资金漏小)
+
+---
+
 ## 2026-05-27(周三,win-laptop · 二十五次收工)— AIGC 全链路真接通 Seedance 2.0 · 14 项用户反馈连续修 · 3 路 audit 16 项 P0/P1 修 · 真打通 moyu API
 
 **完成 — 跨 30+ 文件 · 1 新 migration · 9 packages typecheck 全 pass · 60/60 tests pass**

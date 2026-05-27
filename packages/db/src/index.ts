@@ -6,7 +6,8 @@ export * from './client.js';
 export * from './enums.js';
 // W1-W5 audit P1 followup(R9):Prisma 既作类型(Prisma.Decimal 类型)也作 value(new Prisma.Decimal()),
 // 必须 value-export 而不能 type-only
-export { Prisma } from '@prisma/client';
+// Prisma 7 升级:Prisma + model 类型从生成的 client 导出,不再从 @prisma/client
+export { Prisma } from './generated/prisma/client.js';
 export type {
   User,
   Project,
@@ -30,7 +31,7 @@ export type {
   Invitation,
   Notification,
   WorkReportSnapshot,
-} from '@prisma/client';
+} from './generated/prisma/client.js';
 
 // W1-W5 audit P2 followup(P2-3):ShotAssetRef 类型已从公共导出移除
 // schema 里 model 还在(@deprecated 标记),W6 schema 升级时一起 drop 表 + enum AssetRefKind。

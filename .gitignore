@@ -48,6 +48,7 @@ desktop.ini
 # Prisma
 packages/db/prisma/dev.db
 packages/db/prisma/dev.db-journal
+packages/db/src/generated/
 
 # Local data
 .local

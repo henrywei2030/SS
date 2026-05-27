@@ -62,6 +62,13 @@ export function ArtWorkspace({ projectId, locale, initialType }: Props): React.R
   const assets = data?.assets;
   const mediaMap = data?.mediaMap ?? {};
 
+  // W6 polish:batch 查所有 asset 的 binding(替原 AssetCard 内 N 次 useQuery)
+  const assetIds = React.useMemo(() => assets?.map((a) => a.id) ?? [], [assets]);
+  const { data: bindingsByAssetId } = trpc.asset.listBindingsByAssetIds.useQuery(
+    { projectId, assetIds },
+    { enabled: assetIds.length > 0 },
+  );
+
   const selectType = (t: AssetType): void => {
     const params = new URLSearchParams(window.location.search);
     params.set('type', t);
@@ -227,6 +234,7 @@ export function ArtWorkspace({ projectId, locale, initialType }: Props): React.R
                         key={a.id}
                         asset={a}
                         heroUrl={heroUrl}
+                        bindings={bindingsByAssetId?.[a.id] ?? []}
                         onClick={() => setEditingAssetId(a.id)}
                       />
                     );

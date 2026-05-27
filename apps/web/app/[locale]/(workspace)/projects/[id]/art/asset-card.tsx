@@ -1,11 +1,14 @@
 'use client';
 import * as React from 'react';
 import { Image as ImageIcon, Shield, ShieldAlert, Lock } from 'lucide-react';
+import type { inferRouterOutputs } from '@trpc/server';
 
-import { trpc } from '@/lib/trpc/client';
+import type { AppRouter } from '@ss/api';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+
+type Binding = inferRouterOutputs<AppRouter>['asset']['listBindings'][number];
 
 type AssetBrief = {
   id: string;
@@ -38,15 +41,13 @@ interface Props {
   asset: AssetBrief;
   /** 主形象 URL — 由父组件从 mediaMap 查好传入,避免 N+1 */
   heroUrl?: string | null;
+  /** W6 polish:出场绑定从父级 batch query 传入(原本卡片内 useQuery 是 N+1) */
+  bindings: Binding[];
   onClick: () => void;
 }
 
-export function AssetCard({ asset, heroUrl, onClick }: Props): React.ReactElement {
-  // 出场绑定按集 group
-  const { data: bindings } = trpc.asset.listBindings.useQuery({ assetId: asset.id });
-
+export function AssetCard({ asset, heroUrl, bindings, onClick }: Props): React.ReactElement {
   const episodeBadges = React.useMemo(() => {
-    if (!bindings) return [];
     const byEp = new Map<number, string[]>();
     for (const b of bindings) {
       const epNo = b.episode.number;

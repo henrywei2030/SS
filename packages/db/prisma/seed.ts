@@ -1,11 +1,13 @@
 /**
  * Seed 脚本 — 初始化系统默认数据
  * 运行: pnpm db:seed
+ *
+ * Prisma 7 升级:用 @ss/db 单例 + dotenv 显式加载(7 CLI 不再自动加载 .env)
  */
+import 'dotenv/config';
 import bcrypt from 'bcryptjs';
-import { PrismaClient, StyleKind, PromptCategory, ProviderKind } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../src/index.js';
+import { StyleKind, PromptCategory, ProviderKind } from '../src/generated/prisma/client.js';
 
 async function main() {
   console.log('🌱 StarsAlign Studio · 星垣工坊 · 种子数据初始化\n');

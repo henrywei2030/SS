@@ -49,7 +49,7 @@ export default async function LoginPage({
       <footer className="flex items-center justify-between border-t border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-1.5 text-[11px] text-[hsl(var(--muted-fg))]">
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1.5">
-            <span className="size-1.5 rounded-full bg-[hsl(var(--success))]" />
+            <span className="size-1.5 rounded-full bg-[hsl(var(--color-success))]" />
             connected
           </span>
           <span className="wordmark-metallic font-semibold tracking-wide">StarsAlign</span>

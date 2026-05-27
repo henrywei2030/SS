@@ -1,6 +1,6 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-05-27(**二十五收工 · AIGC 真接通 Seedance 2.0 · 14 项 UX 反馈连续修 · 3 路 audit 16 项 P0/P1 修**)
+> 最后更新:2026-05-27(**二十六收工 · Prisma 6 → 7 升级 + W6 polish N+1 修复**)
 > 仓库:https://github.com/henrywei2030/SS
 > **🚀 一键启动**:`pnpm start`(详见 [README.md](README.md#快速启动) / [CLAUDE.md](CLAUDE.md#设备登记))
 > **📖 实战前必读**:[docs/W1-W7-followup.md](docs/W1-W7-followup.md)(P0 已完成,留 Phase 1.5/2/3 续做项)
@@ -10,6 +10,8 @@
 
 ## 🚧 进行中
 
+- [x] **Prisma 6.19.3 → 7.8.0 升级**(二十六收工 · mac-studio)— Driver Adapter (PrismaPg) + prisma.config.ts + prisma-client generator + dotenv 显式 / `Prisma.Decimal.Value` namespace 兼容 / db-migrate-dev-guard 加显式 generate / enums 改 `export *` 一键 re-export / typecheck 15/15 + tests 95/95 + 真打 DB query 验证 — 2026-05-27
+- [x] **W6 polish — listBindings N+1 + login --color-success typo**(二十六收工)— 后端加 `listBindingsByAssetIds` batch procedure(按 projectId 一次查全部 AssetCard 的 binding,按 assetId group 返回)+ art-workspace 父级一次查 + AssetCard 接 prop 去 self-query / login page `--success` → `--color-success` 规范化 — 2026-05-27
 - [x] **W5.0 数据底座** — SystemSetting 4 条 + compileShotVideoPrompt 拼接公式 + GenerationAttempt.providerJobId — 2026-05-22(六收工)
 - [x] **W5.0 修补**(Win-laptop · 八收工)— vitest 跨平台 / aspectRatio 空白 fallback / 9 段顺序断言 — 2026-05-23
 - [x] **W1-W5 跨模块 audit P0 8 项**(Win-laptop · 八收工)— D1 partial unique / D2 publish 状态守卫 / A1 maturity 重算 / A2 archetypeKey 贯穿 / C1 script.upload 软锁 / B1 三入口 GenerationAttempt / B2 失败 ledger / B3 真单价 — 2026-05-23
@@ -129,7 +131,7 @@
 - [ ] PromptEdit 加 Project / Episode / Script `@@index` 反向外键
 - [ ] 单 shot durationS > maxDurationS 时算法的明确处理
 - [ ] storyboard.generateForEpisode 并发限流(p-limit 3)+ 流式进度
-- [ ] `listBindings batch` 端点 — art-workspace 100 张卡 N+1 性能
+- [x] `listBindings batch` 端点 — art-workspace 100 张卡 N+1 性能 — 二十六收工 2026-05-27
 - [ ] OperationLog action 命名规范化(asset.create / asset.binding.create / image.generate 混风)
 - [ ] a11y aria-label / focus trap / ESC 关闭(Dialog/img/icon-button)
 - [ ] 替换 20 处硬编码颜色(emerald/rose/amber)→ CSS 变量 跟主题
