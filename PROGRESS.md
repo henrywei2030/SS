@@ -5,6 +5,99 @@
 
 ---
 
+## 2026-05-27(周三,mac-studio · 二十八次收工)— 死代码 3 agent 并行 audit + 真删 10 项 + git author/credential 漏洞修
+
+**完成 — 跨 6 文件 · -314/+9 净清理 · typecheck 16/16 · tests 95/95 · 0 残留引用**
+
+### git config 漏洞修(用户授权直接改)
+
+二十七收工后用户跑 `gh auth login` 解 status line 报警,我做全链路检查时发现 2 个隐藏漏洞:
+
+**漏洞 A — git user.name/email 完全没设**
+- `~/.gitconfig` 不存在 + global/local user 都未配 → git 用 hostname 推断 author
+- 今天 2 个 commit (e748310 + 3827b03) author 都是 `henrywai6594@henrywai6594s-Mac-Studio.local`(暴露 hostname + GitHub 不关联账号)
+- 修:`git config --global user.name "henrywei2030"` + `user.email "henrywei1624@gmail.com"`(跟之前正确的 a62f3d7 commit 一致)
+- 验证:空 commit + reset 实测 author 显示正确(`e39ca37 | henrywei1624@gmail.com | henrywei2030`)
+
+**漏洞 B — credential.helper 还是老 osxkeychain**
+- 系统级 `/Library/.../git-core/gitconfig` 配的 osxkeychain,gh auth login 后新 token 没注入 keychain
+- 修:host-specific 配置 — `credential.https://github.com.helper` 先 `""` 重置链,再 `!gh auth git-credential`(github 走 gh token,其他 host 仍走 keychain,无副作用)
+- 验证:`git credential fill` + `git ls-remote origin main` 真打通
+
+留 follow-up:**漏洞 C** `gh auth refresh -s user` 加 user scope(让 gh 能拿账号 email/name) — 也是交互命令,用户自跑
+
+### 死代码 audit r16 — 3 Explore agent 并行扫(模仿 r15 模式但更系统)
+
+用户要求"检查 50 遍全部代码,去除死代码"。开 3 agent 各扫一层:
+- **Agent A** server 端:trpc procedure + router helper + SystemSetting key + middleware + enum value
+- **Agent B** 前端:React component + hook + lib utility + 未用 props + dead route + icon + i18n key
+- **Agent C** 共享+脚本+配置:`@ss/{shared,core,adapters,queue,i18n}` 跨包引用 + `scripts/` 一次性脚本 + `.env.example` 死 key + `turbo.json` task + `package.json` scripts + tmp/backup 残留
+
+整合 + 我自己 grep 二次验证后,**10 项高信心可删,7 项中等保留**。
+
+### 真删 10 项
+
+**Server (asset.ts -116 行):**
+- `listArchetypeVariants` (1637) — 0 引用,前端"同人物多变体"功能未实现
+- `listArchetypeKeys` (1657) — 0 引用,同上
+- `complianceCheck` (1914) — W4.6 placeholder,实现就是 throw NOT_IMPLEMENTED,无人调
+- `setComplianceManually` (1930) — W4.6 过渡方案,被 complianceCheck 一起留下来给 admin 手动填,但前端从未接入
+
+**前端 (-150 行):**
+- `apps/web/lib/utils.ts` `formatPct()` (line 21) — 0 引用 utility
+- `apps/web/lib/trpc/error-toast.ts` `isAuthError()` (line 59) — 0 引用,Phase 2 注释明确说是"留 hook 备用",当前无人用
+- `apps/web/components/brand/logo.tsx` `Wordmark` 组件 + `WordmarkProps` — 0 引用(LogoMark / LogoLockup 仍在用)
+- `apps/web/components/ui/aurora-background.tsx` 整文件(`AuroraBackground` + `AuroraSpotlight`)— 0 引用
+
+**配置 (turbo.json -2 行):**
+- `SEEDANCE_API_URL` globalEnv 条目 — 0 process.env 引用,.env.example 也无,死配
+- `GPT_IMAGE_API_KEY` globalEnv 条目 — 同上(GPT image 通过 RELAY_API_KEY 走 OpenAI 兼容中转,直接 key 没人用)
+
+### 中等信心保留(本次没删)
+
+- `extractRequestId` / `formatRequestIdSuffix`(error-toast.ts):虽然只被同文件 `showTrpcError` 内部用,但 `export` 出去是设计选择;留(信号弱不强删)
+- `scripts/` 5 个一次性运维脚本(`relay-batch-test.mjs` / `relay-real-test.mjs` / `test-admin-provider-crud.mjs` / `w8-smoke.mjs` / `fix-seedance-provider-config.mjs`):Agent C 标"建议删",但都是"按需跑"的运维 / 验证脚本,TODO 标注"工具留档",删了就丢追溯
+- `packages/queue/{inspect,monitor-12-14,sync-orphan-attempts,recover-lost-video}.mjs`:同样运维工具,monitor-12-14 命名虽然过期但实现通用,留
+- @deprecated schema 字段(`mainMediaId` / `threeViewIds` / `panorama360Id` / `bindings`):有兼容读取逻辑,W4-MM.0 重构遗留,等 W8 真使用确认无依赖再 drop
+
+### 误报排除(交叉验证后非死)
+
+Agent 各自报"误以为死但实际活":
+- `trpc.asset.auditProject / lockAsset / unlockAsset`:前端 art-workspace 和 asset-edit-dialog 都在调
+- `trpc.aigc.listVideoProviders / getProviderCapabilities`:aigc-workspace.tsx 实际在调
+- `locale` prop on aigc-workspace:通过 searchParams 间接用
+- 所有 lucide-react icons:全部被 JSX 引用
+- `ASPECT_LABEL` / `ASPECT_CLASS`:JSX 渲染用
+- `.env.example` API_KEY 们:通过 `required('KEY')` helper 间接读
+- `normalizePrompt` import:line 837 实际用
+
+### 验证
+
+- typecheck:**16/16** 全过(`computeMaturity` 删 setComplianceManually 后还有 5 处剩余引用,非孤儿)
+- tests:**95/95** 全过
+- 跨文件 grep 残留:**0 处**(Wordmark / AuroraBackground / 4 个 procedure 都干净)
+- 净改动:`-314 / +9`(+9 是 logo.tsx 注释更新)
+
+### 工程化决策
+
+- **3 agent 并行 + 我二次 grep**:agent 报告高信心项,我再亲手 grep 一遍确认,避免 LLM 误判
+- **保守删除**:`export` 但内部用的 helper 不强删(`extractRequestId` 留);scripts 运维工具不删(TODO 标了留档)
+- **整段删整文件**:`aurora-background.tsx` 整文件删而不留空壳;`Wordmark` 全段 + Props interface 一起删 + logo.tsx 头部注释从"三种变体"改"两种变体"
+
+**问题/待决策**
+- ❓ C6 lastLoginAt 未刷新仍未复现验证(用户重启 dev 后没 logout/login)
+- ❓ scripts/ 5 个一次性脚本是否真该删 — 长期看是垃圾,但 commit 历史可追溯;建议加 README 说明各自用途 + "无用时可删"
+
+**下次接着做**
+- 📌 W6 polish 剩余:15+ 处硬编码颜色 → CSS vars
+- 📌 W6 polish 剩余:`<button>` 缺 `type="button"`
+- 📌 复现 C6 lastLoginAt 后决定修 / won't fix
+- 📌 W8 团队实战 · admin /api-usage CSV · worker stale sweep 退 PREPAY
+- 📌 (可选)漏洞 C `gh auth refresh -s user` — 用户自己跑
+- 📌 (可选)scripts/ 运维脚本加 README + 一次性脚本清理策略
+
+---
+
 ## 2026-05-27(周三,mac-studio · 二十七次收工)— 三遍 audit 修 7 项 onboarding 漏洞 + Prisma DATABASE_URL fail-fast + 默认密码警示
 
 **完成 — 跨 10 文件 · typecheck 16/16 · tests 95/95 · setup:env / preflight 真打验证**

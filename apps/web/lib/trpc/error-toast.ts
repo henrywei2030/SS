@@ -52,12 +52,3 @@ export function showTrpcError(error: unknown, prefix?: string, description?: str
   toast.error(main + suffix, description ? { description } : undefined);
 }
 
-/**
- * 401 / 403 触发时,可考虑跳转 /login(由 caller 自决,不强制)
- * 当前留 hook 供 Phase 2 全局 error interceptor 用
- */
-export function isAuthError(error: unknown): boolean {
-  const err = error as TRPCLikeError;
-  const code = err?.data?.ssCode;
-  return code === 'FORBIDDEN' || code === 'UNAUTHORIZED';
-}

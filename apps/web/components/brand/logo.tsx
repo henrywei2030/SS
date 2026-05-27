@@ -1,18 +1,17 @@
 /**
  * StarsAlign Studio · 星垣工坊 — Logo 系统
  *
- * 三种变体：
- *   1. <LogoMark />     — 仅图标（星系环 + 两颗星），用于 nav / favicon / 头像位
- *   2. <Wordmark />     — 仅文字（StarsAlign Studio 银色金属字）
- *   3. <LogoLockup />   — 图标 + 文字组合，用于登录页 hero 等大场景
+ * 两种变体:
+ *   1. <LogoMark />     — 仅图标(星系环 + 两颗星),用于 nav / favicon / 头像位
+ *   2. <LogoLockup />   — 图标 + 文字组合,用于登录页 hero 等大场景
  *
- * 设计还原（基于用户提供的 logo 图）：
- *   - 倾斜 -22° 的多层椭圆环（星系盘）
- *   - 右上大星 + 左下小星（four-point star，带十字光芒）
+ * 设计还原(基于用户提供的 logo 图):
+ *   - 倾斜 -22° 的多层椭圆环(星系盘)
+ *   - 右上大星 + 左下小星(four-point star,带十字光芒)
  *   - 冷蓝白配色 (#7BC4F6 主调 / #E0EDF7 高光)
- *   - 字体使用 metallic silver 渐变（CSS background-clip）
+ *   - 字体使用 metallic silver 渐变(CSS background-clip)
  *
- * 如有 PNG 原图请放 /apps/web/public/logo.png，会自动作为 OpenGraph 图。
+ * 如有 PNG 原图请放 /apps/web/public/logo.png,会自动作为 OpenGraph 图。
  */
 import { cn } from '@/lib/utils';
 
@@ -105,39 +104,7 @@ export function LogoMark({
 }
 
 // ============================================================================
-// Wordmark — 仅文字（金属银渐变）
-// ============================================================================
-
-export interface WordmarkProps {
-  className?: string;
-  /** zh = 星垣工坊；en = StarsAlign Studio；both = 双行 */
-  variant?: 'en' | 'zh' | 'both';
-}
-
-export function Wordmark({ className, variant = 'en' }: WordmarkProps): React.ReactElement {
-  return (
-    <div className={cn('flex flex-col items-center', className)}>
-      {variant !== 'zh' && (
-        <span className="wordmark-metallic text-[18px] font-semibold tracking-wide">
-          StarsAlign Studio
-        </span>
-      )}
-      {variant !== 'en' && (
-        <span
-          className={cn(
-            'wordmark-metallic font-semibold tracking-[0.04em]',
-            variant === 'zh' ? 'text-[20px]' : 'text-[14px]',
-          )}
-        >
-          星垣工坊
-        </span>
-      )}
-    </div>
-  );
-}
-
-// ============================================================================
-// LogoLockup — 图标 + 文字组合（登录页 hero 等）
+// LogoLockup — 图标 + 文字组合(登录页 hero 等)
 // ============================================================================
 
 export interface LogoLockupProps {

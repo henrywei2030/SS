@@ -17,7 +17,3 @@ export function formatCny(amount: number | string): string {
   if (n > 0 && n < 0.01) return '<¥0.01';
   return `¥${n.toFixed(2)}`;
 }
-
-export function formatPct(n: number): string {
-  return `${Math.round(n)}%`;
-}
