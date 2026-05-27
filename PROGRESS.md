@@ -5,6 +5,97 @@
 
 ---
 
+## 2026-05-28(周四,mac-studio · 三十三次收工)— R1 Phase A 部分启动:useGenerationUI + useVideoSettings 2 hooks 抽出 + aigc-workspace -57 行
+
+**完成 — 跨 3 文件(1 modified + 2 new) · typecheck 16/16 · tests 95/95 · aigc-workspace 1982 → 1925 行**
+
+### 触发场景
+
+三十二收工后用户说"继续做,做完收工"。按"下次接着做"启动 R1(有 design 文档可直接执行),R2 因 3 决策点待用户拍跳过。
+
+### R1 Phase A1 — useGenerationUI(主组件 dialog/confirm 态抽出)
+
+新建 `apps/web/lib/hooks/use-generation-ui.ts`(64 行):
+- 聚合 4 个 state:`bindDialogGroupId` / `promptDialog` / `confirmDialog` / `autoSelect`
+- 各自独立类型 export:`PromptDialogConfig` / `ConfirmDialogConfig` / `AutoSelectTarget` / `GenerationUI`
+- 主组件 destructure 命名不变,零行为变化
+
+aigc-workspace.tsx 改动:
+- import `useGenerationUI`
+- 替原 4 个独立 useState → 1 个 hook destructure
+- 删 ~20 行 state declaration
+
+### R1 Phase A2 — useVideoSettings(派生 state + 跟随 capabilities effects 抽出)
+
+新建 `apps/web/lib/hooks/use-video-settings.ts`(117 行):
+- 聚合 4 个 video state:`aspectRatio` / `durationS` / `resolution` / `generateAudio`
+- 聚合 4 个跟随 capabilities/groupDetail 的 useEffect:
+  1. durationS 智能默认(group 复杂度 + capabilities clamp)
+  2. aspectRatio 首次初始化(跟项目 aspect)+ 切 Provider fallback(useRef 防 flag effect 重跑)
+  3. resolution 切 Provider 时 fallback 到 defaultResolution
+  4. generateAudio capabilities 不支持音频时 reset false
+- minimal interface `CapabilitiesInfo` / `GroupDetailInfo`(不依赖 trpc inferRouterOutputs,避免 hook 文件耦合 router 类型)
+
+**关键设计修订**:`selectedProviderId` **留主组件管理**,不抽到 hook
+- 原因:它是 `getProviderCapabilities.useQuery({ providerId: selectedProviderId ?? undefined })` 的 input
+- 抽到 hook 会让 hook 依赖 capabilities,而 capabilities query 又依赖 hook 出的 selectedProviderId → 循环依赖
+- 解法:hook 只管"capabilities-derived" state,selectedProviderId 留主组件
+
+主组件(实际在 VideoPreviewSection 子组件内,line 1056-)改动:
+- 替 4 个 state declaration + 4 个跟随 useEffect → 1 个 hook destructure
+- 删 ~70 行(state + effect 全聚合)
+
+**调试修复**:第一次跑 typecheck 报 `Cannot redeclare block-scoped variable 'resolution'/'generateAudio'`,因为第一个 Edit 的 old_string 没匹配上(原 state declaration 多了 comment),手动二次 Edit 删干净。
+
+### 跳过的部分(本次不做,留 follow-up)
+
+**A3 `useAigcTakes`** — 收益小:
+- `selectedTakeId` + `pendingPlayId` 已经在 `VideoPreviewSection` 子组件内隔离(line 1056-),不污染主组件 state
+- 抽 hook 等价搬位置,实质收益低,跳过
+
+**Phase B 抽 7 子组件到独立文件** — 工作量大:
+- 现有 7 内部子组件(PromptDialog / ConfirmDialog / GroupDetail / VideoPreviewSection / BindingCard / BindAssetDialog / InflightProgressPanel)
+- 拆每个文件需要逐个 import / props 类型转移
+- 1-2h 工作量 + risk 中,留 follow-up 单独会话做
+
+**R4 `useAdminConfirm`** — over-engineering:
+- 只 users-table 1 个 callsite 有 `ConfirmAction` 类型
+- styles / prompts 用 ad-hoc `setDeleteConfirm` state
+- 抽 generic hook 仅 1 实例,不算共享,跳过
+
+**admin/binding.ts helper 扩** — 语义不匹配:
+- list 用 `findMany({ where: { category: 'model_binding' } })` 是按 category 查
+- `loadSystemSettings(prisma, keys[])` helper 是 by-key 查
+- 设计模式不同,改 helper 反而坏其他调用方;跳过
+
+### 验证 matrix
+
+- typecheck:**16/16** 全过(从 16/16 cache miss 2 → cache hit 14)
+- tests:**95/95** 全过(11 task 全 cache)
+- aigc-workspace.tsx:**1982 → 1925 行**(-57 行,-3%)
+- UI 真打:login API HTTP 200 + cookie + /admin/styles HTTP 200(HMR reload 成功)
+- 改动:1 modified + 2 new files,净改 -57 行(其中删 117 行,加 60 行 import + destructure)
+
+### 工程化决策
+
+- **Hook 不依赖 trpc inferRouterOutputs**:用 minimal interface 输入,hook 文件解耦 router schema(router 演化时 hook 不一定要改)
+- **selectedProviderId 留主组件**:循环依赖优先级 > 状态聚合美感
+- **Phase A3 跳过基于实际代码扫**:发现 state 已在子组件内隔离 ≠ 主组件 1949 行的 design 假设;及时调整避免无用功
+- **本次只做 Phase A,不强推 Phase B**:符合"做完收工"的快速节奏,Phase B 留 follow-up
+
+**问题/待决策**
+- ❓ Phase B 何时启动(7 子组件抽文件,1-2h)— 当 aigc-workspace.tsx 再大一倍或频繁 conflict 时考虑
+- ❓ Phase A3 useAigcTakes 是否真不做(VideoPreviewSection 子组件如果也变巨大,可能需要)
+
+**下次接着做**
+- 📌 R1 Phase B:7 子组件抽到独立文件(`apps/web/.../aigc/components/*.tsx`,1-2h)
+- 📌 R2 generateVideo 拆 packages/core/video-generation(需用户拍 3 决策点)
+- 📌 W8 真人冷启动(需 5 人 + 真 API key)
+- 📌 (可选)R4 跟进:providers-table 1337 行做独立 R 级 design
+- 📌 (可选)Phase B 后整理 aigc-workspace 内部还可抽的 utility
+
+---
+
 ## 2026-05-28(周四,mac-studio · 三十二次收工)— C6 再验 + R4 小颗粒抽用 + S3 followup 6 处 + R1+R2 design 文档 + UI 真打验证
 
 **完成 — 跨 11 文件(7 modified + 4 new) · typecheck 16/16 · tests 95/95 · curl + JWT cookie UI 真打验证 3 页全 200**

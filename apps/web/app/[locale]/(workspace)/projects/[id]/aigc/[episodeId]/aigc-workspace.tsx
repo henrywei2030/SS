@@ -6,6 +6,10 @@ import { toast } from 'sonner';
 
 import { trpc } from '@/lib/trpc/client';
 import { useAigcProgress, type AigcProgressState } from '@/lib/hooks/use-aigc-progress';
+// 三十三收工 R1 Phase A1:dialog / confirm 态聚合
+import { useGenerationUI } from '@/lib/hooks/use-generation-ui';
+// 三十三收工 R1 Phase A2:video 派生 state + 跟随 capabilities effects
+import { useVideoSettings } from '@/lib/hooks/use-video-settings';
 import { ASPECT_RATIOS, type AspectRatio } from '@ss/shared/constants';
 import { normalizePrompt } from '@ss/shared';
 
@@ -158,11 +162,18 @@ export function AigcWorkspace({
     onError: (e) => toast.error(`保存失败:${e.message}`),
   });
 
-  // autoSelect — 视频生成后自动选中那个 attempt(只对触发的 group 生效)
-  const [autoSelect, setAutoSelect] = React.useState<{
-    groupId: string;
-    attemptId: string;
-  } | null>(null);
+  // 三十三收工 R1 Phase A1:4 dialog/confirm state 抽到 useGenerationUI hook
+  // bindDialogGroupId / promptDialog / confirmDialog / autoSelect 全部 destructure
+  const {
+    bindDialogGroupId,
+    setBindDialogGroupId,
+    promptDialog,
+    setPromptDialog,
+    confirmDialog,
+    setConfirmDialog,
+    autoSelect,
+    setAutoSelect,
+  } = useGenerationUI();
 
   const generateVideoMutation = trpc.aigc.generateVideo.useMutation({
     onSuccess: (data, variables) => {
@@ -220,25 +231,7 @@ export function AigcWorkspace({
     onError: (e) => toast.error(`归档失败:${e.message}`),
   });
 
-  // ---------- dialog state(group CRUD + bind asset) ----------
-
-  // bindDialog 哪个 group 触发的 — 替代之前的 bindDialogOpen+selectedGroupId 组合
-  const [bindDialogGroupId, setBindDialogGroupId] = React.useState<string | null>(null);
-
-  const [promptDialog, setPromptDialog] = React.useState<{
-    title: string;
-    description?: string;
-    defaultValue: string;
-    placeholder?: string;
-    onConfirm: (value: string) => void;
-  } | null>(null);
-  const [confirmDialog, setConfirmDialog] = React.useState<{
-    title: string;
-    description?: string;
-    confirmLabel?: string;
-    danger?: boolean;
-    onConfirm: () => void;
-  } | null>(null);
+  // bindDialogGroupId / promptDialog / confirmDialog 已抽到 useGenerationUI(三十三收工 R1 Phase A1)
 
   const onCreateGroup = (): void => {
     setPromptDialog({
@@ -1086,16 +1079,8 @@ function VideoPreviewSection({
     setSelectedTakeId(takeId);
     setPendingPlayId(takeId); // 标记需要播,onLoadedMetadata 回调消费
   }, []);
-  const [aspectRatio, setAspectRatio] = React.useState<AspectRatio>('9:16');
-  const [durationS, setDurationS] = React.useState<number>(5);
-
-  // W5.5.1 扩展选项 state — 2026-05-27 精简:去 watermark / webSearch(视频 API 无此参数)
-  const [resolution, setResolution] = React.useState<'480p' | '720p' | '1080p'>('720p');
-  // 2026-05-27 用户反馈:音频默认勾选(Seedance 2.0 docs §15 generate_audio 默认 true)
-  const [generateAudio, setGenerateAudio] = React.useState<boolean>(true);
-
-  // 用户反馈 2026-05-27:加 provider 下拉,默认用 binding(selectedProviderId=null 时),
-  // 用户选其他 active video provider 后 capabilities 重 query + generate 传 providerOverride
+  // 三十三收工 R1 Phase A2:4 个 video setting state + 4 effect 抽到 useVideoSettings
+  // selectedProviderId 留主组件管理(capabilities query input,避免循环依赖)
   const [selectedProviderId, setSelectedProviderId] = React.useState<string | null>(null);
   const { data: videoProviders } = trpc.aigc.listVideoProviders.useQuery();
 
@@ -1133,59 +1118,17 @@ function VideoPreviewSection({
   const progress = useAigcProgress(autoSelectAttemptId);
   const utils = trpc.useUtils();
 
-  // W5.5 D6:capabilities + group 加载后,按 group 复杂度 + Provider 上限设默认 durationS
-  React.useEffect(() => {
-    if (!capabilities || !groupDetail) return;
-    const groupDur = Math.round(groupDetail.group.durationS) || 5;
-    const def = Math.min(
-      Math.max(groupDur, capabilities.minDurationS),
-      capabilities.maxDurationS,
-    );
-    setDurationS(def);
-  }, [capabilities, groupDetail]);
-
-  // 用户反馈 2026-05-27:首次默认 aspect 跟项目 aspect 走(getGroupDetail.project.aspect)
-  // 切 provider 时 capabilities 变,若当前 aspect 不在支持列表则 fallback 到 first
-  // 2026-05-27 audit r14 P1:用 useRef 替代 useState — flag 变化不该触发 effect 重跑,
-  // 防 provider 快速切换时首次初始化逻辑被打断 / 重复执行
-  const aspectRatioInitializedRef = React.useRef(false);
-  React.useEffect(() => {
-    if (!capabilities) return;
-    if (aspectRatioInitializedRef.current) {
-      if (!capabilities.supportedAspectRatios.includes(aspectRatio)) {
-        const first = capabilities.supportedAspectRatios[0];
-        if (first) setAspectRatio(first);
-      }
-      return;
-    }
-    // 首次:等 groupDetail 加载拿项目 aspect
-    if (!groupDetail) return;
-    const candidate = groupDetail.project?.aspect as AspectRatio | undefined;
-    if (candidate && capabilities.supportedAspectRatios.includes(candidate)) {
-      setAspectRatio(candidate);
-    } else {
-      const first = capabilities.supportedAspectRatios[0];
-      if (first) setAspectRatio(first);
-    }
-    aspectRatioInitializedRef.current = true;
-  }, [capabilities, groupDetail, aspectRatio]);
-
-  // W5.5.1:capabilities 加载后,同步默认分辨率(切 Provider 时分辨率列表可能变)
-  React.useEffect(() => {
-    if (!capabilities) return;
-    setResolution((prev) =>
-      capabilities.supportedResolutions.includes(prev)
-        ? prev
-        : capabilities.defaultResolution,
-    );
-  }, [capabilities]);
-
-  // W5.5.1 audit 修 P1-4:capabilities 切换 Provider 时,toggle 状态 reset 到合规默认
-  // 防止前一个 Provider 支持音频时用户开了,切到不支持的 Provider 后 UI 还停在 ON 误导
-  React.useEffect(() => {
-    if (!capabilities) return;
-    if (!capabilities.supportsAudio) setGenerateAudio(false);
-  }, [capabilities]);
+  // 三十三收工 R1 Phase A2:4 个跟随 capabilities effect 抽到 useVideoSettings hook
+  const {
+    aspectRatio,
+    setAspectRatio,
+    durationS,
+    setDurationS,
+    resolution,
+    setResolution,
+    generateAudio,
+    setGenerateAudio,
+  } = useVideoSettings({ capabilities, groupDetail });
 
   // W5.5 D5:终态后 invalidate listVideoTakes + 当前 episode 的 listGroups
   // 2026-05-27 audit r12 P1:listGroups invalidate 限定 episodeId(从 groupDetail 取),防跨 episode cache 污染
