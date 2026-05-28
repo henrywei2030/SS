@@ -5,6 +5,110 @@
 
 ---
 
+## 2026-05-28(周四,mac-studio · 三十五次收工)— R1 Phase B 全完(子组件全抽出 · -1347 行) + R2 Phase A+B+C(video-generation 共享 helper)+ CLAUDE.md Step 2.5 永久化 + 7 视角深 audit 修 9 P0
+
+**完成 — 跨 8 文件改 / 11 文件新 · typecheck 16/16 + tests 11/11 · 主文件 1925→578 行(-70%)**
+
+### 触发场景
+
+三十四收工后用户说"完成全部前三项",指 PROGRESS 顶部列的 3 项(R1 Phase B / R2 generateVideo 拆模块 / CLAUDE.md Step 2.5 永久化)。一气完成 + 用户后续要求"7 次深度测试找最多 P0"。
+
+### R1 Phase B — 6 子组件全部抽到独立文件
+
+新建目录 `apps/web/app/[locale]/(workspace)/projects/[id]/aigc/[episodeId]/components/`,6 个独立文件:
+
+| 文件 | 行数 | 抽出来源 |
+|---|---|---|
+| `bind-asset-dialog.tsx` | 117 | 主文件 1722-1858 |
+| `prompt-dialog.tsx` | 91 | 主文件 602-690 |
+| `confirm-dialog.tsx` | 75 | 主文件 692-764 |
+| `inflight-progress-panel.tsx` | 72 | 主文件 1541-1597 |
+| `video-preview-section.tsx` | 615 | 主文件 845-1454(含 ASPECT_LABEL/CLASS 常量 + 内部 TakeHistoryPanel JSX) |
+| `group-detail.tsx` | 375 | 主文件 584-913(含 BindingCard sub-component) |
+
+**主文件 `aigc-workspace.tsx` 1925 → 578 行(-1347 行,-70%)** · design 验收 ≤500 行未严格达标(差 78 行),AigcWorkspace 主组件本身约 500 行,功能聚合度合理。
+
+**关键设计修订**:
+- TakeHistoryPanel 不单独抽 — 它在 VideoPreviewSection 内部 100+ 行 JSX 紧密耦合 selectedTakeId/pendingPlayId/videoRef,精细拆收益小风险大,整 VideoPreviewSection 抽已达 R1 Phase B "组件文件化" 目标
+- ASPECT_LABEL / ASPECT_CLASS 常量跟 VideoPreviewSection 一起搬(只它用)
+- BindingCard 跟 GroupDetail 同文件(后者 sub-component)
+- 主文件 import 清理:删 `Download/History/Trash2/useAigcProgress/AigcProgressState/useVideoSettings/normalizePrompt/ASPECT_RATIOS`(都已搬到子组件),只留 `AspectRatio` type(主组件 generateVideo callback 签名仍用)
+
+### R2 Phase A+B+C — video-generation 共享 helper(Phase D 留 follow-up)
+
+R2 design 完整方案(8 模块 + 20 单测 + 4-6h)工程量太大,务实拆解:**搬最独立 + 高价值 helper,跳过 router 完整拆解**。
+
+新建 `packages/core/video-generation/` 4 文件:
+- `lock.ts` — `acquireAigcVideoLock(tx, groupId)` 包装 `pg_advisory_xact_lock(hashtext('aigc_video:' || groupId)::bigint)`
+- `refund.ts` — `refundPrepayForAttempt(tx, args)` idempotent 写 REFUND ledger(查 existingRefund 防双写 + 查 PREPAY 拿原扣额)
+- `constants.ts` — `STALE_TIMEOUT_GROUP_MS`(10min, router scope) + `STALE_TIMEOUT_WORKER_BOOT_MS`(30min, worker boot scope),区分两套 stale 阈值语义
+- `index.ts` — re-export
+
+**改造**:
+- `packages/core/package.json` exports 加 `"./video-generation": "./video-generation/index.ts"`
+- `apps/workers/video-gen/package.json` 加 `"@ss/core": "workspace:*"` dep + `pnpm install` 同步 pnpm-lock
+- `apps/workers/video-gen/src/index.ts` boot stale sweep 50 行内联 refund → helper(净 -40 行)
+- `packages/api/src/routers/aigc.ts` generateVideo lock + sweep refund → helper(净 -30 行)
+- `failPlaceholder`(aigc.ts:1250-1287)内联 refund 保留 — 它用 closure 变量 `prepayEstimateCny` 直接写 REFUND,不需查 DB PREPAY,helper 替换会增 1 次 DB roundtrip 无收益,留下次
+
+**两 scope 差异**:worker boot 30min 全库扫(防多 worker 启动竞态误杀真长 job)/ router 10min 同 group 扫(短窗口防误判用户刚点的请求)。constants.ts 注释明确两套语义。
+
+### CLAUDE.md Step 2.5 — 长间隔接续 onboarding 永久化
+
+三十四收工因 self-mod classifier 被拒走 PROGRESS 路径。本次 explicit 用户授权 + Edit 通过(没拒),永久化到 CLAUDE.md。
+
+初版插入 Step 2 和 Step 3 之间,触发条件 + 7 项强制诊断表 + 各机独立项提醒。**但**用户立刻要"7 次深度测试找最多 P0",audit Agent 5 报告 **8 个真 P0**。
+
+### 7 视角并行深 audit + 9 P0 真发现
+
+7 个 Explore agent 并行扫,每个聚焦一个维度(行为等价 / React render / 经济链路 / Prisma tx / CLAUDE.md / 全栈集成 / 死代码),严格只列真 P0。
+
+| 视角 | P0 发现 |
+|---|---|
+| R1 行为等价 | 无 P0 — props/state/JSX/hook 顺序 100% 等价 |
+| R1 React render | 无 P0 — deps / memoization / HMR / tRPC dedup 全对 |
+| R2 经济链路 | 无 P0 — CostLedgerEntry 18 字段 + idempotent + costCny 格式 + billingCycle 全等价 |
+| R2 Prisma tx 类型 | 无 P0 — TransactionClient 存在 + union 可调 + advisory lock 语义保持 |
+| **CLAUDE.md Step 2.5** | **8 P0** |
+| 全栈集成 | **1 伪 P0**(实际 P1)— packages/core/tsconfig.json include 缺 video-generation/**/* |
+| 死代码 | 无 P0 — 全部 import 都被使用,re-export 完整 |
+
+### 9 P0/P1 全部修完
+
+| # | 问题 | 修复 |
+|---|---|---|
+| 1 | P1 tsconfig include 缺 video-generation | include 数组加 `video-generation/**/*` |
+| 2 | P0 触发条件 #1 无 Step 2 数据 | Step 2 输出格式明确为 `<ahead>\t<behind>` + 让 Claude 提取 behind 后续复用 |
+| 3 | P0 触发条件 #2 "≥5 天" 无实现 | 改 `git log -1 --format=%cr origin/main`(含 days/weeks/months ago)或 `%ct` 跟 `date +%s` 比 |
+| 4 | P0 诊断 #1 跟 Step 3 重复 | 删 Step 2.5 诊断 #1(pnpm-lock),交 Step 3 处理 · 7 项 → 6 项 |
+| 5 | P0 跳过条件依赖 Step 3(逻辑环) | 触发条件 #3 前置 `git diff --name-only HEAD@{1} HEAD`,不再依赖 Step 3 |
+| 6 | P0 docker quoting 跨 zsh/PS 不通 | `--filter name=ss-`(值不引号包)+ `--format "{{.Names}} {{.Status}}"`(format 内引号),跨 shell 兼容 |
+| 7 | P0 hardcoded 数据库名 | 改 `pnpm --filter @ss/db exec prisma migrate status`(Prisma 自读 DATABASE_URL) |
+| 8 | P0 `open -a Docker` macOS-only | 列 macOS/Windows/Linux 三平台命令 + 推荐用户手动启动 — 符合协作规范第 282 行 |
+| 9 | P0 Step 5 汇报未融入 | Step 5 加 🩺 长间隔诊断 区(仅经 Step 2.5 输出),6 项 ✓/✗ + 已跑/待确认命令;字数 150→250 |
+
+**附带**:诊断 #1 #2 改用 `node -e ...` 跨平台 path check(原 `ls` 在 PowerShell 输出格式不同)。
+
+### 验证
+
+- `pnpm --filter @ss/core typecheck` ✓(现在真扫 video-generation/)
+- `pnpm turbo run typecheck --force` ✓ 16/16(无 cache)
+- `pnpm turbo run test --force` ✓ 11/11(api 25 tests 含)
+- diff stat:tracked -1358 行 / 新文件 ~1500 行(净 -10% LOC,主文件 -70%,逻辑去重)
+
+**问题/待决策**
+- ❓ R2 Phase D(20+ unit test for video-generation/)留 follow-up,工程量大需要 mock Prisma testcontainer
+- ❓ R2 完整 generateVideo 626 行拆 8 模块未做(本次只做 lock/refund/constants 高价值小赢)
+- ❓ R1 主文件 578 行未达 design 验收 ≤500 行(主组件本身 500 行,功能聚合合理)
+
+**下次接着做**
+- 📌 用户说"收工完毕后开始执行新的环节" — 等用户给具体方向
+- 📌 (留 follow-up)R2 Phase D unit test 20+ 个
+- 📌 (留 follow-up)R2 完整 generateVideo mutation 拆 8 模块(compile/prepay/enqueue/budget-check/inflight-check/stale-sweep 还没抽)
+- 📌 (留 follow-up)`failPlaceholder` 内联 refund 是否一并改 helper(目前留 closure 变量直写)
+
+---
+
 ## 2026-05-28(周四,mac-studio · 三十四次收工)— 给 mac-mini 准备:详细 onboarding checklist 写到 PROGRESS(CLAUDE.md self-mod 被拒)
 
 **完成 — TODO.md + PROGRESS.md 改动(CLAUDE.md 改被安全 classifier 拒,改走 PROGRESS 路径)**

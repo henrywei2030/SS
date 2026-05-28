@@ -13,6 +13,11 @@
 import 'dotenv/config';
 import { prisma } from '@ss/db';
 import { getPrimaryRedis } from '@ss/queue/redis';
+// 三十五收工 R2 Phase A:共享 refund + stale timeout helper(去 worker / router 重复实现)
+import {
+  refundPrepayForAttempt,
+  STALE_TIMEOUT_WORKER_BOOT_MS,
+} from '@ss/core/video-generation';
 
 import { startHealthServer, stopHealthServer } from './health.js';
 import { createWorker } from './worker.js';
@@ -40,7 +45,7 @@ async function bootstrap(): Promise<void> {
   //   - 改 updateMany → findMany + 逐个事务标 FAILED + 写 REFUND ledger
   //   - 复用 aigc.ts:1175-1209 的同款 idempotent 退款逻辑(查 REFUND 是否已存在防双写)
   try {
-    const staleCutoff = new Date(Date.now() - 30 * 60_000);
+    const staleCutoff = new Date(Date.now() - STALE_TIMEOUT_WORKER_BOOT_MS);
     const staleAttempts = await prisma.generationAttempt.findMany({
       where: {
         status: 'RUNNING',
@@ -59,7 +64,7 @@ async function bootstrap(): Promise<void> {
     let refundedCount = 0;
     for (const stale of staleAttempts) {
       try {
-        await prisma.$transaction(async (tx) => {
+        const refunded = await prisma.$transaction(async (tx) => {
           await tx.generationAttempt.update({
             where: { id: stale.id },
             data: {
@@ -68,41 +73,16 @@ async function bootstrap(): Promise<void> {
               finishedAt: new Date(),
             },
           });
-
-          const existingRefund = await tx.costLedgerEntry.findFirst({
-            where: { attemptId: stale.id, entryType: 'REFUND' },
-            select: { id: true },
+          return refundPrepayForAttempt(tx, {
+            attemptId: stale.id,
+            userId: stale.createdBy,
+            projectId: stale.projectId,
+            episodeId: stale.episodeId,
+            providerId: stale.providerId,
+            reason: 'worker_restart_stale_sweep',
           });
-          if (existingRefund) return;
-
-          const prepay = await tx.costLedgerEntry.findFirst({
-            where: { attemptId: stale.id, entryType: 'PREPAY' },
-            select: { id: true, costCny: true },
-          });
-          if (!prepay || Number(prepay.costCny) <= 0) return;
-
-          await tx.costLedgerEntry.create({
-            data: {
-              userId: stale.createdBy,
-              projectId: stale.projectId,
-              episodeId: stale.episodeId,
-              attemptId: stale.id,
-              providerId: stale.providerId,
-              modelId: stale.providerId,
-              action: 'video.generate',
-              inputUnits: 0,
-              outputUnits: 0,
-              unitPriceCny: '0',
-              costCny: `-${prepay.costCny}`,
-              success: true,
-              entryType: 'REFUND',
-              refundReason: 'worker_restart_stale_sweep',
-              parentEntryId: prepay.id,
-              billingCycle: new Date().toISOString().slice(0, 7),
-            },
-          });
-          refundedCount++;
         });
+        if (refunded) refundedCount++;
       } catch (perAttemptErr) {
         console.error(
           `[${workerId}] stale sweep: attempt ${stale.id} refund failed (non-fatal):`,

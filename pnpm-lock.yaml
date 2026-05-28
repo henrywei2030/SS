@@ -165,6 +165,9 @@ importers:
       '@ss/adapters':
         specifier: workspace:*
         version: link:../../../packages/adapters
+      '@ss/core':
+        specifier: workspace:*
+        version: link:../../../packages/core
       '@ss/db':
         specifier: workspace:*
         version: link:../../../packages/db

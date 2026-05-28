@@ -22,6 +22,12 @@ import {
   type AutoTagBinding,
   type VideoReference,
 } from '@ss/core/storyboard';
+// 三十五收工 R2 Phase A:共享 video lock + refund helper(去 router / worker 重复实现)
+import {
+  acquireAigcVideoLock,
+  refundPrepayForAttempt,
+  STALE_TIMEOUT_GROUP_MS,
+} from '@ss/core/video-generation';
 import { EVENTS } from '@ss/shared/events';
 
 // 三十一收工 S3:SystemSetting 单 key 读 helper
@@ -1148,15 +1154,12 @@ export const aigcRouter = router({
       // 锁释放后占位 attempt 仍在 DB,其他并发 inflight check 会看到 QUEUED → 拒。
       // 后续检查(gachaMax/budget/compile)失败时 update 占位为 FAILED + 写 REFUND 退还 PREPAY;通过则 worker 接管。
       const { attempt: earlyAttempt, prepayEntryId } = await ctx.prisma.$transaction(async (tx) => {
-        await tx.$executeRawUnsafe(
-          `SELECT pg_advisory_xact_lock(hashtext('aigc_video:' || $1)::bigint)`,
-          grp.id,
-        );
+        // 三十五收工 R2 Phase A:共享 helper(原 inline lock raw → acquireAigcVideoLock)
+        await acquireAigcVideoLock(tx, grp.id);
         // 2026-05-27 audit r13 P0(用户反馈):stale RUNNING 自愈
         //   worker 进程崩 / network drop / 真接 Provider 异步 task 失踪时,attempt 永久卡在 RUNNING
         //   → inflight check 永久 block 同 group 新建 → 用户必须等管理员手动清理
         //   解法:findFirst 拿全部 inflight + 把 startedAt > 10min 视为 stale,事务内标 FAILED + 退 PREPAY
-        const STALE_RUNNING_TIMEOUT_MS = 10 * 60 * 1000;
         const inflightCandidates = await tx.generationAttempt.findMany({
           where: {
             shotGroupId: grp.id,
@@ -1168,50 +1171,27 @@ export const aigcRouter = router({
         const now = Date.now();
         const staleAttempts = inflightCandidates.filter((a) => {
           const ts = (a.startedAt ?? a.createdAt)?.getTime() ?? now;
-          return now - ts > STALE_RUNNING_TIMEOUT_MS;
+          return now - ts > STALE_TIMEOUT_GROUP_MS;
         });
         for (const stale of staleAttempts) {
-          // 标 FAILED + 退 PREPAY(idempotent — 已退过的不重写)
+          // 标 FAILED + 退 PREPAY(idempotent — refundPrepayForAttempt 内查 REFUND 防双写)
           await tx.generationAttempt.update({
             where: { id: stale.id },
             data: {
               status: 'FAILED',
-              errorMsg: `stale RUNNING auto-recovered (>${STALE_RUNNING_TIMEOUT_MS / 60000}min, worker likely crashed)`,
+              errorMsg: `stale RUNNING auto-recovered (>${STALE_TIMEOUT_GROUP_MS / 60000}min, worker likely crashed)`,
               finishedAt: new Date(),
             },
           });
-          const existingRefund = await tx.costLedgerEntry.findFirst({
-            where: { attemptId: stale.id, entryType: 'REFUND' },
-            select: { id: true },
+          // 三十五收工 R2 Phase A:用共享 refund helper 替原 ~30 行内联逻辑
+          await refundPrepayForAttempt(tx, {
+            attemptId: stale.id,
+            userId: ctx.user.id,
+            projectId: grp.episode.projectId,
+            episodeId: grp.episodeId,
+            providerId: stale.providerId,
+            reason: 'stale_running_auto_recovered',
           });
-          if (!existingRefund) {
-            const prepay = await tx.costLedgerEntry.findFirst({
-              where: { attemptId: stale.id, entryType: 'PREPAY' },
-              select: { id: true, costCny: true },
-            });
-            if (prepay && Number(prepay.costCny) > 0) {
-              await tx.costLedgerEntry.create({
-                data: {
-                  userId: ctx.user.id,
-                  projectId: grp.episode.projectId,
-                  episodeId: grp.episodeId,
-                  attemptId: stale.id,
-                  providerId: stale.providerId,
-                  modelId: stale.providerId,
-                  action: 'video.generate',
-                  inputUnits: 0,
-                  outputUnits: 0,
-                  unitPriceCny: '0',
-                  costCny: `-${prepay.costCny}`,
-                  success: true,
-                  entryType: 'REFUND',
-                  refundReason: 'stale_running_auto_recovered',
-                  parentEntryId: prepay.id,
-                  billingCycle: new Date().toISOString().slice(0, 7),
-                },
-              });
-            }
-          }
         }
         // 自愈后仍存活的 inflight(startedAt 在 10min 内)— 真在跑,拒绝
         const aliveInflight = inflightCandidates.find(

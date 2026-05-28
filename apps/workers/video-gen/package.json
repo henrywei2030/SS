@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@ss/adapters": "workspace:*",
+    "@ss/core": "workspace:*",
     "@ss/db": "workspace:*",
     "@ss/queue": "workspace:*",
     "@ss/shared": "workspace:*",
