@@ -1,17 +1,17 @@
 'use client';
 import * as React from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
-import { toast } from 'sonner';
 
 import { trpc } from '@/lib/trpc/client';
 // 三十三收工 R1 Phase A1:dialog / confirm 态聚合
 import { useGenerationUI } from '@/lib/hooks/use-generation-ui';
+// 三十六收工 R1 收尾:10 mutation + 11 callback/opener 聚合
+import { useAigcMutations } from '@/lib/hooks/use-aigc-mutations';
 // 三十五收工 R1 Phase B:子组件抽到独立文件
 import { BindAssetDialog } from './components/bind-asset-dialog';
 import { PromptDialog } from './components/prompt-dialog';
 import { ConfirmDialog } from './components/confirm-dialog';
 import { GroupDetail } from './components/group-detail';
-import { type AspectRatio } from '@ss/shared/constants';
 
 interface Props {
   projectId: string;
@@ -85,66 +85,7 @@ export function AigcWorkspace({
     [utils, episodeId],
   );
 
-  // ---------- mutations ----------
-  // onSuccess 通过 variables.groupId 拿 group(同页堆叠后没有"selected"概念)
-
-  const autoMatchMutation = trpc.aigc.autoMatchAssets.useMutation({
-    onSuccess: (data, variables) => {
-      toast.success(`自动匹配:新增 ${data.created} 项,跳过 ${data.skipped} 项重复`);
-      invalidateGroup(variables.groupId);
-    },
-    onError: (e) => toast.error(`自动匹配失败:${e.message}`),
-  });
-
-  const autoTagMutation = trpc.aigc.autoTagPrompt.useMutation({
-    onSuccess: (data, variables) => {
-      if (data.changed) toast.success('已在提示词中插入 @图片N / @音频N token');
-      else toast.info('没有可插入的新 token(资产已全部标记)');
-      invalidateGroup(variables.groupId);
-    },
-    onError: (e) => toast.error(`自动 @ 失败:${e.message}`),
-  });
-
-  const bindAssetMutation = trpc.aigc.bindAssetToGroup.useMutation({
-    onSuccess: (_data, variables) => {
-      toast.success('已关联资产');
-      invalidateGroup(variables.groupId);
-    },
-    onError: (e) => toast.error(`关联失败:${e.message}`),
-  });
-
-  const unbindMutation = trpc.aigc.unbindAsset.useMutation({
-    onSuccess: (data) => {
-      toast.success('已移除资产');
-      // 2026-05-27 audit r15:用 server 返的 shotGroupId 定向 invalidate,防跨 group 污染
-      void utils.aigc.listGroups.invalidate({ episodeId });
-      if (data?.shotGroupId) {
-        void utils.aigc.getGroupDetail.invalidate({ groupId: data.shotGroupId });
-        void utils.aigc.previewCompiledPrompt.invalidate({
-          groupId: data.shotGroupId,
-        });
-        void utils.aigc.listAvailableAssets.invalidate({
-          groupId: data.shotGroupId,
-        });
-      } else {
-        void utils.aigc.getGroupDetail.invalidate();
-        void utils.aigc.previewCompiledPrompt.invalidate();
-        void utils.aigc.listAvailableAssets.invalidate();
-      }
-    },
-    onError: (e) => toast.error(`移除失败:${e.message}`),
-  });
-
-  const updatePromptMutation = trpc.aigc.updateGroupPrompt.useMutation({
-    onSuccess: (data, variables) => {
-      if (data.changed) toast.success('提示词已保存(进训练集)');
-      invalidateGroup(variables.groupId);
-    },
-    onError: (e) => toast.error(`保存失败:${e.message}`),
-  });
-
-  // 三十三收工 R1 Phase A1:4 dialog/confirm state 抽到 useGenerationUI hook
-  // bindDialogGroupId / promptDialog / confirmDialog / autoSelect 全部 destructure
+  // 三十三收工 R1 Phase A1:4 dialog/confirm state 聚合
   const {
     bindDialogGroupId,
     setBindDialogGroupId,
@@ -156,153 +97,36 @@ export function AigcWorkspace({
     setAutoSelect,
   } = useGenerationUI();
 
-  const generateVideoMutation = trpc.aigc.generateVideo.useMutation({
-    onSuccess: (data, variables) => {
-      // W5.5:视频生成异步化(ADR-25),handler 入队后立即返回 attemptId(status=RUNNING)
-      toast.success('视频任务已提交,等待生成完成');
-      invalidateGroup(variables.groupId);
-      setAutoSelect({ groupId: variables.groupId, attemptId: data.attemptId });
-    },
-    onError: (e) => {
-      const msg = e.message ?? '';
-      const isLong = msg.length > 40;
-      toast.error(isLong ? '视频生成被拒' : `视频生成失败:${msg}`, {
-        description: isLong ? msg : undefined,
-        duration: isLong ? 8000 : 4000,
-      });
-    },
+  // 三十六收工 R1 收尾:10 mutation + 11 callback/opener 全部聚合
+  const {
+    autoMatchMutation,
+    autoTagMutation,
+    bindAssetMutation,
+    unbindMutation,
+    updatePromptMutation,
+    generateVideoMutation,
+    rejectTakeMutation,
+    createGroupMutation,
+    onAutoMatch,
+    onAutoTag,
+    onOpenBindDialog,
+    onUnbind,
+    onSavePrompt,
+    onGenerateVideo,
+    onRejectTake,
+    onAutoSelectConsumed,
+    onCreateGroup,
+    onRenameGroup,
+    onArchiveGroup,
+  } = useAigcMutations({
+    episodeId,
+    invalidateGroup,
+    scrollToGroup,
+    setBindDialogGroupId,
+    setAutoSelect,
+    setPromptDialog,
+    setConfirmDialog,
   });
-
-  const rejectTakeMutation = trpc.aigc.rejectVideoTake.useMutation({
-    onSuccess: (data) => {
-      toast.success('已从历史中删除');
-      // 2026-05-27 audit r14 P0:用 server 返的 shotGroupId 定向 invalidate
-      // 防同页多 group 堆叠时全量 invalidate 触发跨 group cache 污染
-      if (data.shotGroupId) {
-        void utils.aigc.listVideoTakes.invalidate({ groupId: data.shotGroupId });
-      } else {
-        void utils.aigc.listVideoTakes.invalidate();
-      }
-    },
-    onError: (e) => toast.error(`操作失败:${e.message}`),
-  });
-
-  const createGroupMutation = trpc.aigc.createEmptyGroup.useMutation({
-    onSuccess: async (data) => {
-      toast.success(`新建生成段:${data.number}`);
-      await utils.aigc.listGroups.invalidate({ episodeId });
-      // 等下一帧 DOM 渲染出新 group 再 scroll
-      requestAnimationFrame(() => scrollToGroup(data.id));
-    },
-    onError: (e) => toast.error(`新建失败:${e.message}`),
-  });
-  const renameGroupMutation = trpc.aigc.renameGroup.useMutation({
-    onSuccess: async (data, variables) => {
-      toast.success(`已重命名为 "${data.number}"`);
-      await utils.aigc.listGroups.invalidate({ episodeId });
-      invalidateGroup(variables.groupId);
-    },
-    onError: (e) => toast.error(`重命名失败:${e.message}`),
-  });
-  const archiveGroupMutation = trpc.aigc.archiveGroup.useMutation({
-    onSuccess: async () => {
-      toast.success('已归档');
-      await utils.aigc.listGroups.invalidate({ episodeId });
-    },
-    onError: (e) => toast.error(`归档失败:${e.message}`),
-  });
-
-  // bindDialogGroupId / promptDialog / confirmDialog 已抽到 useGenerationUI(三十三收工 R1 Phase A1)
-
-  const onCreateGroup = (): void => {
-    setPromptDialog({
-      title: '新建生成段',
-      description: '随便起名,后续可改。例:"陆乘·开场" / "梦境场景" / "B 卷备份"',
-      defaultValue: '新片段',
-      placeholder: '生成段名称',
-      onConfirm: (label) => {
-        if (!label.trim()) return;
-        createGroupMutation.mutate({ episodeId, label: label.trim() });
-      },
-    });
-  };
-
-  const onRenameGroup = (g: { id: string; number: string }): void => {
-    setPromptDialog({
-      title: '重命名生成段',
-      description: '"1-8" 只是 W3 默认,可改成任意有意义的名称',
-      defaultValue: g.number,
-      placeholder: '新名称',
-      onConfirm: (label) => {
-        if (!label.trim() || label.trim() === g.number) return;
-        renameGroupMutation.mutate({ groupId: g.id, label: label.trim() });
-      },
-    });
-  };
-
-  const onArchiveGroup = (g: { id: string; number: string }): void => {
-    setConfirmDialog({
-      title: `归档生成段 "${g.number}"?`,
-      description: '资产关联会一起归档;视频抽卡记录保留可查(listVideoTakes 仍能读)。归档后不可直接撤销,需 DB 操作恢复。',
-      confirmLabel: '归档',
-      danger: true,
-      onConfirm: () => archiveGroupMutation.mutate({ groupId: g.id }),
-    });
-  };
-
-  // ---------- group-scoped callbacks(GroupDetail 调用时传自己的 groupId) ----------
-
-  const onAutoMatch = React.useCallback(
-    (groupId: string) => autoMatchMutation.mutate({ groupId }),
-    [autoMatchMutation],
-  );
-
-  const onAutoTag = React.useCallback(
-    (groupId: string) => autoTagMutation.mutate({ groupId }),
-    [autoTagMutation],
-  );
-
-  const onOpenBindDialog = React.useCallback(
-    (groupId: string) => setBindDialogGroupId(groupId),
-    [],
-  );
-
-  const onUnbind = React.useCallback(
-    (bindingId: string) => unbindMutation.mutate({ bindingId }),
-    [unbindMutation],
-  );
-
-  const onSavePrompt = React.useCallback(
-    (groupId: string, prompt: string, diffNote?: string) => {
-      updatePromptMutation.mutate({ groupId, prompt, diffNote });
-    },
-    [updatePromptMutation],
-  );
-
-  const onGenerateVideo = React.useCallback(
-    (
-      groupId: string,
-      opts: {
-        durationS?: number;
-        aspectRatio?: AspectRatio;
-        resolution?: '480p' | '720p' | '1080p';
-        generateAudio?: boolean;
-        providerOverride?: string;
-      },
-    ) => {
-      generateVideoMutation.mutate({ groupId, ...opts });
-    },
-    [generateVideoMutation],
-  );
-
-  const onRejectTake = React.useCallback(
-    (attemptId: string) => rejectTakeMutation.mutate({ attemptId }),
-    [rejectTakeMutation],
-  );
-
-  const onAutoSelectConsumed = React.useCallback(() => {
-    setAutoSelect(null);
-  }, []);
 
   // 用户反馈 r6:字号跟分镜界面联动 — 沿用 --storyboard-fs(分镜顶栏 A- 13 A+ 控制)
   // localStorage key 同源 'storyboard.fontSize',跨页持久 + 跨工作台一致

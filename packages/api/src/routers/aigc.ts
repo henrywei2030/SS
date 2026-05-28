@@ -22,11 +22,15 @@ import {
   type AutoTagBinding,
   type VideoReference,
 } from '@ss/core/storyboard';
-// 三十五收工 R2 Phase A:共享 video lock + refund helper(去 router / worker 重复实现)
+// 三十五收工 R2 Phase A + 三十六收工 R2 完整推进:共享 video generation helper
 import {
   acquireAigcVideoLock,
   refundPrepayForAttempt,
   STALE_TIMEOUT_GROUP_MS,
+  checkDailyVideoBudget,
+  createPlaceholderAttemptWithPrepay,
+  compileVideoPromptForGroup,
+  enqueueVideoJobOrRefund,
 } from '@ss/core/video-generation';
 import { EVENTS } from '@ss/shared/events';
 
@@ -1203,46 +1207,16 @@ export const aigcRouter = router({
             message: `本生成段已有进行中的视频任务(provider=${aliveInflight.providerId})— 等完成或失败后再点`,
           });
         }
-        // 锁内创建占位 attempt(QUEUED),commit 后即占位防其他并发
-        const attempt = await tx.generationAttempt.create({
-          data: {
-            projectId: grp.episode.projectId,
-            episodeId: grp.episodeId,
-            shotGroupId: grp.id,
-            providerId,
-            modelId: providerId,
-            action: 'VIDEO',
-            inputJson: { kind: 'aigc.generateVideo.placeholder' },
-            outputMediaIds: [],
-            inputUnits: 0,
-            outputUnits: 0,
-            unitPriceCny: '0',
-            costCny: '0',
-            status: 'QUEUED',
-            createdBy: ctx.user.id,
-          },
+        // 三十六收工 R2:placeholder attempt + PREPAY ledger 抽到 createPlaceholderAttemptWithPrepay
+        return createPlaceholderAttemptWithPrepay(tx, {
+          userId: ctx.user.id,
+          projectId: grp.episode.projectId,
+          episodeId: grp.episodeId,
+          shotGroupId: grp.id,
+          providerId,
+          durationS,
+          prepayEstimateCny,
         });
-        // Phase 1.5 P0-1:同事务写 PREPAY entry(预扣占额)— worker 完成时写 REFUND 抵消
-        const prepay = await tx.costLedgerEntry.create({
-          data: {
-            userId: ctx.user.id,
-            projectId: grp.episode.projectId,
-            episodeId: grp.episodeId,
-            attemptId: attempt.id,
-            providerId,
-            modelId: providerId,
-            action: 'video.generate',
-            inputUnits: durationS,
-            outputUnits: 0,
-            unitPriceCny: '0',
-            costCny: prepayEstimateCny.toFixed(4),
-            success: true, // PREPAY 永远 success=true(预扣动作成功);task 成败用 attempt.status,后续 REFUND 抵消
-            entryType: 'PREPAY',
-            billingCycle: new Date().toISOString().slice(0, 7),
-          },
-          select: { id: true },
-        });
-        return { attempt, prepayEntryId: prepay.id };
       });
 
       // 7 轮 audit A1:任何前置 check 失败都要把占位 attempt 标 FAILED 释放
@@ -1311,167 +1285,52 @@ export const aigcRouter = router({
       // Phase 1.5 P0-1:provider 实例 + prepayEstimateCny 已在 transaction 前 fetch,此处直接复用
       // (estimateCost 也已用,不再二次调用)
 
-      // W1-W5 audit 三轮 B1:每日预算护栏 — 用 provider.estimateCost(req) 真实预估,
-      // 不再写死 seedance 系数,Mock 也按 mock 真单价 estimate(默认 0,但若管理员 unitPriceCny>0 会拦)
-      // W1-W5 audit P1 followup(R9):Decimal 比较防大额预算累加 IEEE-754 漂移
-      // Phase 1.5 P0-1:query 排除当前 attemptId 的 PREPAY,防自己刚写的预扣被算入 spent
-      if (bindings.dailyBudgetCny > 0) {
-        const todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
-        const todaySpent = await ctx.prisma.costLedgerEntry.aggregate({
-          where: {
-            projectId: grp.episode.projectId,
-            action: 'video.generate',
-            success: true,
-            createdAt: { gte: todayStart },
-            attemptId: { not: earlyAttempt.id }, // 排除当前 attempt 已写入的 PREPAY
-          },
-          _sum: { costCny: true },
-        });
-        const spentDec = new Prisma.Decimal(todaySpent._sum.costCny ?? 0);
-        const estimateDec = new Prisma.Decimal(prepayEstimateCny);
-        const limitDec = new Prisma.Decimal(bindings.dailyBudgetCny);
-        if (spentDec.plus(estimateDec).gt(limitDec)) {
-          await failPlaceholder(
-            new Error(`今日视频预算已用 ${spentDec.toFixed(2)}¥ / 上限 ${bindings.dailyBudgetCny}¥,本次预估 ${estimateDec.toFixed(2)}¥ 会超限`),
-            'TOO_MANY_REQUESTS',
-          );
-        }
+      // 三十六收工 R2:每日预算守卫抽到 checkDailyVideoBudget(Decimal 比较防 IEEE-754 漂移)
+      const budgetDenyMsg = await checkDailyVideoBudget(ctx.prisma, {
+        projectId: grp.episode.projectId,
+        dailyBudgetCny: bindings.dailyBudgetCny,
+        prepayEstimateCny,
+        excludeAttemptId: earlyAttempt.id,
+      });
+      if (budgetDenyMsg) {
+        await failPlaceholder(new Error(budgetDenyMsg), 'TOO_MANY_REQUESTS');
       }
 
-      // 1. 取项目风格 + bindings + media,编译 prompt
-      const project = await ctx.prisma.project.findUnique({
-        where: { id: grp.episode.projectId },
-        include: { style: true },
-      });
-
-      // W1-W5 audit P1 followup(P1-6):查全 7 槽位 mediaId
-      const dbBindings = await ctx.prisma.assetUsageBinding.findMany({
-        where: { shotGroupId: grp.id, deletedAt: null, refSlotIdx: { not: null } },
-        orderBy: { refSlotIdx: 'asc' },
-        include: {
-          asset: {
-            select: {
-              id: true,
-              name: true,
-              type: true,
-              portraitMediaId: true,
-              threeViewMediaId: true,
-              sceneMainMediaId: true,
-              sceneFrontMediaId: true,
-              sceneLeftMediaId: true,
-              sceneRightMediaId: true,
-              sceneBackMediaId: true,
-              panoramaMediaId: true,
-              mainMediaId: true,
-              voiceMediaId: true,
-              complianceStatus: true,
-            },
+      // 三十六收工 R2:compile 整段(project + dbBindings + media + refs + compileShotGroupVideoPrompt)
+      // 抽到 compileVideoPromptForGroup helper(132 行 → 1 调用),compliance check 保留 router 内(需要 failPlaceholder)
+      const { compiled, characterBindingsForCompliance } = await compileVideoPromptForGroup(
+        ctx.prisma,
+        {
+          group: {
+            id: grp.id,
+            prompt: grp.prompt,
+            durationS: grp.durationS,
+            episode: { projectId: grp.episode.projectId },
           },
+          providerId,
+          durationS,
+          aspectRatio,
+          extraInstruction: input.extraInstruction,
+          extraNegative: input.extraNegative,
         },
-      });
+      );
 
-      // W1-W5 audit P1 followup(P1-5):合规守卫 — 若 system 配 requireForVideo,
-      // 引用了任何 CHARACTER 且 complianceStatus !== APPROVED 则拒生成,
-      // 防止把未过合规的人物送给视频模型出片
+      // W1-W5 audit P1 followup(P1-5):合规守卫 — 引用了任何 CHARACTER 且 complianceStatus !== APPROVED 则拒
       if (bindings.requireComplianceForVideo) {
-        const blockedChars = dbBindings.filter(
-          (b) => b.asset.type === 'CHARACTER' && b.asset.complianceStatus !== 'APPROVED',
+        const blockedChars = characterBindingsForCompliance.filter(
+          (c) => c.complianceStatus !== 'APPROVED',
         );
         if (blockedChars.length > 0) {
           await failPlaceholder(
             new Error(
               `合规未通过的人物不允许生成视频:${blockedChars
-                .map((b) => `${b.asset.name}(${b.asset.complianceStatus})`)
+                .map((c) => `${c.assetName}(${c.complianceStatus})`)
                 .join(', ')} — 在美术工作台完成合规后再试`,
             ),
             'PRECONDITION_FAILED',
           );
         }
       }
-
-      const mediaIds = new Set<string>();
-      for (const b of dbBindings) {
-        for (const id of [
-          b.asset.portraitMediaId,
-          b.asset.threeViewMediaId,
-          b.asset.sceneMainMediaId,
-          b.asset.sceneFrontMediaId,
-          b.asset.sceneLeftMediaId,
-          b.asset.sceneRightMediaId,
-          b.asset.sceneBackMediaId,
-          b.asset.panoramaMediaId,
-          b.asset.mainMediaId,
-          b.asset.voiceMediaId,
-        ]) {
-          if (id) mediaIds.add(id);
-        }
-      }
-      const medias =
-        mediaIds.size > 0
-          ? await ctx.prisma.mediaItem.findMany({
-              where: { id: { in: Array.from(mediaIds) } },
-              // Phase 1.5 P0-5:meta 含 relayAssetUrl 时 provider=relay-* 优先用 asset://(免重传)
-              select: { id: true, cdnUrl: true, meta: true },
-            })
-          : [];
-      // Phase 1.5 P0-5:provider 是 relay-* (OpenAI 兼容中转站)时优先用 meta.relayAssetUrl(asset:// 直传,免文件重传)
-      const isRelayProvider = providerId.startsWith('relay-');
-      const mediaMap = new Map(
-        medias.map((m) => {
-          let chosenUrl: string | null = m.cdnUrl;
-          if (isRelayProvider && m.meta && typeof m.meta === 'object' && !Array.isArray(m.meta)) {
-            const relayUrl = (m.meta as Record<string, unknown>).relayAssetUrl;
-            if (typeof relayUrl === 'string' && relayUrl.startsWith('asset://')) {
-              chosenUrl = relayUrl;
-            }
-          }
-          return [m.id, chosenUrl] as const;
-        }),
-      );
-
-      // W1-W5 audit P1 followup(P1-6):全 7 槽位 fallback 链
-      const refs: VideoReference[] = dbBindings.map((b) => {
-        const kind = kindFromUsage(b.usageType);
-        let chosen: string | null = null;
-        if (kind === 'AUDIO') chosen = b.asset.voiceMediaId;
-        else if (b.asset.type === 'CHARACTER')
-          chosen = b.asset.portraitMediaId ?? b.asset.threeViewMediaId ?? b.asset.mainMediaId;
-        else if (b.asset.type === 'SCENE')
-          chosen =
-            b.asset.sceneMainMediaId ??
-            b.asset.sceneFrontMediaId ??
-            b.asset.sceneLeftMediaId ??
-            b.asset.sceneRightMediaId ??
-            b.asset.sceneBackMediaId ??
-            b.asset.panoramaMediaId ??
-            b.asset.mainMediaId;
-        else chosen = b.asset.mainMediaId;
-        return {
-          refSlotIdx: b.refSlotIdx!,
-          kind,
-          assetId: b.asset.id,
-          name: b.asset.name,
-          mediaUrl: chosen ? (mediaMap.get(chosen) ?? null) : null,
-        };
-      });
-
-      const compiled = compileShotGroupVideoPrompt({
-        text: grp.prompt,
-        durationS,
-        references: refs,
-        style: project?.style
-          ? {
-              characterPrompt: project.style.characterPrompt,
-              scenePrompt: project.style.scenePrompt,
-              propPrompt: project.style.propPrompt,
-              forbiddenWords: project.style.forbiddenWords,
-            }
-          : null,
-        aspectRatio,
-        extraInstruction: input.extraInstruction,
-        extraNegative: input.extraNegative,
-      });
 
       // 2. 提示词缺图 / 未关联 token 阻断 — 让用户先修
       if (compiled.warnings.missingMedia.length > 0) {
@@ -1576,70 +1435,44 @@ export const aigcRouter = router({
       }
       const refAudioUrls = allAudioUrls;
 
-      // W5.5 audit 修复 P0-7:入队失败时占位 attempt 必须标 FAILED,否则 5min 内同 group 抽卡被拒
+      // 三十六收工 R2:入队 + 失败时回滚 attempt + REFUND 抽到 enqueueVideoJobOrRefund helper
+      // (同 failPlaceholder/refundPrepayForAttempt 单一真相源,enqueue 失败统一走 helper)
       try {
-        await addVideoGenJob({
+        await enqueueVideoJobOrRefund(ctx.prisma, {
           attemptId: attempt.id,
+          startedAt,
+          userId: ctx.user.id,
           projectId: grp.episode.projectId,
           episodeId: grp.episodeId,
-          shotGroupId: grp.id,
-          userId: ctx.user.id,
           providerId,
-          modelId: providerId,
-          prompt: compiled.positive,
-          durationS,
-          aspectRatio,
-          refImageUrls: refImageUrls.length > 0 ? refImageUrls : undefined,
-          refAudioUrls: refAudioUrls.length > 0 ? refAudioUrls : undefined,
-          // W5.5.1 扩展参数透传(Provider 自己消费 extra)
-          resolution: input.resolution,
-          generateAudio: input.generateAudio,
-          addWatermark: input.addWatermark,
-          webSearchEnabled: input.webSearchEnabled,
-          refVideoUrl: input.refVideoUrl,
-          refAudioUrl: input.refAudioUrl,
-          groupNumber: grp.number,
-          // 第 19 轮 audit P1:requestId 贯通到 worker,运维 grep 日志可看全链路
-          requestId: ctx.requestId,
+          payload: {
+            attemptId: attempt.id,
+            projectId: grp.episode.projectId,
+            episodeId: grp.episodeId,
+            shotGroupId: grp.id,
+            userId: ctx.user.id,
+            providerId,
+            modelId: providerId,
+            prompt: compiled.positive,
+            durationS,
+            aspectRatio,
+            refImageUrls: refImageUrls.length > 0 ? refImageUrls : undefined,
+            refAudioUrls: refAudioUrls.length > 0 ? refAudioUrls : undefined,
+            // W5.5.1 扩展参数透传(Provider 自己消费 extra)
+            resolution: input.resolution,
+            generateAudio: input.generateAudio,
+            addWatermark: input.addWatermark,
+            webSearchEnabled: input.webSearchEnabled,
+            refVideoUrl: input.refVideoUrl,
+            refAudioUrl: input.refAudioUrl,
+            groupNumber: grp.number,
+            // 第 19 轮 audit P1:requestId 贯通到 worker,运维 grep 日志可看全链路
+            requestId: ctx.requestId,
+          },
+          enqueue: (p) => addVideoGenJob(p),
         });
       } catch (enqueueErr) {
-        // Audit P0-A 修(2026-05-24 audit r21):enqueue 失败时 attempt 已 RUNNING,
-        // failPlaceholder 的 updateMany(status='QUEUED') 不会命中,必须独立写 REFUND
-        // 否则 PREPAY 永久悬挂 — 用户被扣但任务根本没进队
         const errMsg = enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr);
-        const finishedAt = new Date();
-        await ctx.prisma.$transaction(async (tx) => {
-          await tx.generationAttempt.update({
-            where: { id: attempt.id },
-            data: {
-              status: 'FAILED',
-              errorMsg: `enqueue failed: ${errMsg}`,
-              finishedAt,
-              durationMs: finishedAt.getTime() - startedAt.getTime(),
-            },
-          });
-          // 退还全部 PREPAY(同 failPlaceholder 逻辑,reason 区分入队失败)
-          await tx.costLedgerEntry.create({
-            data: {
-              userId: ctx.user.id,
-              projectId: grp.episode.projectId,
-              episodeId: grp.episodeId,
-              attemptId: attempt.id,
-              providerId,
-              modelId: providerId,
-              action: 'video.generate',
-              inputUnits: 0,
-              outputUnits: 0,
-              unitPriceCny: '0',
-              costCny: prepayEstimateCny > 0 ? (-prepayEstimateCny).toFixed(4) : '0',
-              success: true, // REFUND 永远 success=true(退还动作成功);task 失败用 attempt.status
-              entryType: 'REFUND',
-              refundReason: 'video_task_enqueue_failed',
-              parentEntryId: prepayEntryId,
-              billingCycle: new Date().toISOString().slice(0, 7),
-            },
-          });
-        });
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
           message: `视频任务入队失败,请稍后重试:${errMsg}`,

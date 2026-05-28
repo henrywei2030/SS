@@ -5,6 +5,95 @@
 
 ---
 
+## 2026-05-28(周四,mac-studio · 三十六次收工)— R1 收尾(达 ≤500 行)+ R2 完整推进 4 helper(generateVideo -132 行)+ Phase D 单测 +12 + 2 遍深审 0 真 P0
+
+**完成 — 跨 7 文件改 / 6 文件新 · typecheck 16/16 + tests 11/11 (core 60→72)· 主文件 578→402(-30%)+ generateVideo 590→458(-22%)**
+
+### 触发场景
+
+三十五收工后用户说"完成前三项,并深度检查 2 遍"。前三项 = 用户挑的 R1 收尾 / R2 完整推进 / R2 Phase D 单测。
+
+### R1 收尾 — useAigcMutations hook · 主文件达 ≤500 行验收
+
+抽 `apps/web/lib/hooks/use-aigc-mutations.ts`(266 行)聚合主组件 10 mutation(autoMatch/autoTag/bindAsset/unbind/updatePrompt/generateVideo/rejectTake/createGroup/renameGroup/archiveGroup) + 11 callback/opener(8 group-scoped callbacks + 3 dialog openers)。
+
+**关键设计**:hook 返回 mutation **实例**(非 boolean pending),让父级用 `mutation.isPending && variables?.groupId === g.id` 算 per-group pending detection(GroupDetail map per group 渲染需要)。
+
+主文件 `aigc-workspace.tsx` **578 → 402 行(-30%,累计 -79%)** · **达 R1 design 验收 ≤500 行** ✓ · 死 import 清理(toast / AspectRatio)。
+
+### R2 完整推进 — 抽 4 新 helper · generateVideo -132 行
+
+新建 4 文件到 `packages/core/video-generation/`:
+- `budget-check.ts` — `checkDailyVideoBudget(tx, args)` Decimal 累加守卫 + excludeAttemptId 防 self-counting
+- `prepay.ts` — `createPlaceholderAttemptWithPrepay(tx, args)` 占位 attempt + PREPAY ledger 同事务写入
+- `compile.ts` — `compileVideoPromptForGroup(tx, args)` project style + 7 槽位 dbBindings + media + refs + compileShotGroupVideoPrompt(132 行 → 1 调用)。Compliance check 拎到 router(需 failPlaceholder)
+- `enqueue.ts` — `enqueueVideoJobOrRefund(prisma, args)` BullMQ push + 失败时 attempt FAILED + refundPrepayForAttempt 自包含
+
+`index.ts` 加 4 export · `aigc.ts` import 改造 + 4 段大改:
+- placeholder + PREPAY 段 → `createPlaceholderAttemptWithPrepay`
+- dailyBudget 段 → `checkDailyVideoBudget`
+- compile + media + refs 段(132 行)→ `compileVideoPromptForGroup` + compliance check 保留
+- enqueue try/catch refund 段(70 行)→ `enqueueVideoJobOrRefund`
+
+`compile.ts` 内 `@ss/core/storyboard` self-reference 触发 TS2209,改为 `../storyboard/index.js` 相对路径解决。
+
+**aigc.ts 2095 → 1908 行(-187)· generateVideo mutation 主体 590 → 458 行(-132)**。完整方案 design 提议 ≤80 行未达 — `failPlaceholder` closure + gachaMax/compile warning/runtime update attempt 跟 router 上下文紧耦合,留 follow-up。
+
+### R2 Phase D — video-generation 单测
+
+新加 2 test file 共 12 case:
+- `refund.test.ts`(5 case)— 正常写 REFUND / idempotent 不重写 / 无 PREPAY 不退 / PREPAY=0 跳过 / 连续两次只第一次写
+- `budget-check.test.ts`(7 case)— 0 不限 / 负数不限 / 远未到 / 累加正好等于不超 / 累加超限报错 / 排除当前 attempt PREPAY 防 self-counting / 大额 Decimal 累加(1000 笔 0.1 元 = 100 元)
+
+**vitest 配置改造**:
+- 加 `vitest.setup.ts` 提供 dummy `DATABASE_URL`(防 budget-check.ts 内 `Prisma as PrismaNamespace` value-import 触发 @ss/db createPrisma() 立即评估抛错)
+- `vitest.config.ts` setupFiles 接入
+- `package.json` test 命令加 `video-generation` path
+
+**core tests 60 → 72(+12)**;prepay/compile/enqueue 涉及复杂 Prisma join + 多表写入,单测 mock 工作量大,留 follow-up。
+
+### 2 遍深度检查 — 4 agent 并行 audit
+
+启 4 个 Explore agent(R1 useAigcMutations 行为等价 / R2 经济链路完整等价 / R2 全栈集成 + tx 边界 / R2 单测完整性 + 跨视角),严格只列真 P0。
+
+**最终判定 0 真 P0 + 几个 P2/P1 真 finding**:
+
+| Agent 报的 P0 | 复审真相 |
+|---|---|
+| R1 `onOpenBindDialog/onAutoSelectConsumed` deps 跟原版差异 | False positive — 新版 deps 完整是 React best practice |
+| R1 onCreate/Rename/Archive 加 useCallback | False positive — memoization 更稳不退化 |
+| R1 `trpc.useUtils()` 双实例 | False positive — tRPC QueryClient 全局共享 |
+| R2 enqueue prepay=0 时不写 REFUND='0' | **真 P2** — 净额一致,prod providers unitPriceCny>0 不触发 |
+| R2 compile `?? 'UNKNOWN'` 跟 baseline 差异 | False positive — `complianceStatus @default(NOT_REQUIRED)` 非空,?? 是防御性 |
+| R2 compliance check 移出 tx | False positive — 原 inline 也在 tx 外(误读边界) |
+| R2 全栈集成 / typecheck / build | 全过 |
+| refund mock 忽略 select | **真 P2** — 仅测试鲁棒性,不破生产 |
+| budget-check `setHours()` 时区 | **真 P1 preexisting** — 原 inline 同问题,非本次引入 |
+
+**已加注释清楚意图**:
+- `refund.ts:9-32` 说明 prepay=0 跳过设计(prod 不触发 + 净额一致 + audit 噪音可忽略)
+- `budget-check.ts:35-37` TODO 标记时区 P1 followup(修需统一为 UTC 或传 user timezone)
+- `compile.ts:80-82` 说明 `?? 'UNKNOWN'` 防御性兜底(schema 非空 ?? 不触发)
+
+### 验证
+
+- `pnpm turbo run typecheck --force` ✓ 16/16(无 cache 真跑)
+- `pnpm turbo run test --force` ✓ 11/11 · core 72 tests
+- diff 统计:6 新文件 + 5 modified · 净 -100 行 tracked
+
+**问题/待决策**
+- ❓ generateVideo mutation 主体 458 行仍未达 design ≤80 行验收 — failPlaceholder closure 抽出需要传 6+ 参数,影响经济链路 carefulness,留下次
+- ❓ prepay / compile / enqueue 单测留 follow-up(涉及复杂 Prisma joins + 多表事务 mock 工作量大)
+- ❓ budget-check 时区 P1 preexisting bug — 需要业务决策"今天"按谁的 timezone
+
+**下次接着做**
+- 📌 (留 follow-up)generateVideo failPlaceholder closure 抽 helper → 主体 ≤80 行
+- 📌 (留 follow-up)prepay / compile / enqueue 单测补
+- 📌 (留 follow-up)budget-check 时区 bug fix(需业务拍方案)
+- 📌 W8 真人冷启动(5 人 + 真 API key)— 实战前最后铺路
+
+---
+
 ## 2026-05-28(周四,mac-studio · 三十五次收工)— R1 Phase B 全完(子组件全抽出 · -1347 行) + R2 Phase A+B+C(video-generation 共享 helper)+ CLAUDE.md Step 2.5 永久化 + 7 视角深 audit 修 9 P0
 
 **完成 — 跨 8 文件改 / 11 文件新 · typecheck 16/16 + tests 11/11 · 主文件 1925→578 行(-70%)**
