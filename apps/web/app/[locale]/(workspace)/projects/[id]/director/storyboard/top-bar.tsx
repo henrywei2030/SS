@@ -443,11 +443,14 @@ function ShotsActions({
       // AIGC 直接 query 活表,只需让 react-query cache 失效
       void utils.aigc.listGroups.invalidate({ episodeId: res.episodeId });
       void utils.aigc.getGroupDetail.invalidate();
+      // 三十七收工:publishEpisode 现在自动为 standalone shot 建 1:1 ShotGroup
+      //   shotCount > 0 即视为有 AIGC 可同步(原 aigcReady = groupCount > 0 过严)
+      const aigcSyncable = res.shotCount > 0;
       toast.success(
-        aigcReady
+        aigcSyncable
           ? `已发布 v${res.version} · ${res.shotCount} 镜 / ${res.groupCount} 组 · 已同步到 AIGC`
-          : `已发布 v${res.version}(${res.shotCount} 镜 / ${res.groupCount} 组 · 无分镜可同步到 AIGC)`,
-        aigcReady
+          : `已发布 v${res.version}(本集 0 镜,暂无内容同步到 AIGC)`,
+        aigcSyncable
           ? {
               duration: 6000,
               action: {

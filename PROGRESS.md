@@ -5,6 +5,62 @@
 
 ---
 
+## 2026-05-29(周五,mac-studio · 三十八次收工)— autoMerge default false + publish 自动 group 化 + 3 视角深审 P2 防御修
+
+**完成 — 跨 3 文件改 · typecheck 16/16 + test 11/11 · publish v3 验证 4 standalone → 4 group**
+
+### 触发场景
+
+三十七收工后用户继续真打 UI 调试。截图 1:第 1 集生成的 4 个分镜被自动合并为"1-3 合并组",用户说"默认是单个分镜,而不自动合并为分镜组"。截图 2:确认发布后 toast 显示"已发布 v3(4 镜 / 0 组 · 无分镜可同步到 AIGC)",用户说"单一分镜也可以同步到 AIGC"。
+
+### autoMerge default false
+
+`packages/db/prisma/seed.ts`:`storyboard.autoMergeOnGenerate` value `'true'` → `'false'`。DB 同步 `UPDATE system_settings`。Redis cache flush 立即生效。重新生成 ep1 → 4 standalone shot · 0 group ✓
+
+### publish 自动 group 化(单分镜也同步 AIGC)
+
+**真问题**:AIGC 工坊架构上只接受 ShotGroup(`aigc.listGroups` 拉 group 表),standalone shot(groupId=null)永远不会出现在 AIGC。
+
+**修复**:`packages/api/src/routers/storyboard.ts` publishEpisode 事务内加自动 group 化逻辑:
+- 查所有 standalone shot(groupId=null, deletedAt=null)
+- 拿 lastGroup max positionIdx(filter deletedAt 防 positionIdx 空隙)
+- for 循环:每个 standalone shot → 创建 1:1 ShotGroup(number=shot.number / positionIdx 顺延 / durationS=shot.durationS / prompt=shot.prompt / status=PUBLISHED)+ update shot.groupId
+
+`top-bar.tsx` toast 文案改 `aigcSyncable = res.shotCount > 0`(原 `groupCount > 0` 过严)。
+
+ep1 重置 IN_PROGRESS 后 publish v3 验证:**4 standalone shot → 4 single-shot groups · 全 PUBLISHED · standalone=0**。AIGC 工坊"共 4 段 · 镜头 4 · 时长 19.0s" · 4 段独立可点"生成视频"。
+
+### 3 视角深度审查(0 真 P0 阻塞)
+
+启 3 个 Explore agent 各视角并行:
+
+| 视角 | 发现 | 判定 |
+|---|---|---|
+| 经济/Prisma 链路 | P0-1 `lastGroup findFirst` 没 filter `deletedAt`(理论 partial unique 不会冲突,但 positionIdx 空隙不友好) | **P2** 防御性修 |
+| Storyboard/AIGC 全链路 | publish 后空 group 累积(splitGroup 不清)+ autoMerge 切换用户体验突变 | **P1/P2 follow-up** |
+| UX/路由/安全/死代码 | 全部 SAFE — debug 脚本 key handling OK / back-button 渲染正确 / director redirect 优雅 fallback / bindings refactor 无 NonNull risk / worker dotenv production deploy 注释清楚 | **无 P0** |
+
+**修了 P2 防御**:`lastGroup` 查询加 `deletedAt: null` filter,positionIdx 紧凑(不带 soft-deleted 空隙)。
+
+### 验证
+
+- `pnpm turbo run typecheck --force` ✓ 16/16(无 cache 真跑)
+- `pnpm turbo run test --force` ✓ 11/11
+- UI 真打:publish v3 → 4 group → AIGC 工坊看到 4 段
+
+**问题/待决策**
+- ❓ ShotGroup.number 无 unique 约束 — 极端 case 可能跟 existing group 重号(留 follow-up)
+- ❓ publish 后空 group 累积:用户合并/拆分操作可能留空 group,publishEpisode 不主动清(留 follow-up)
+- ❓ autoMerge 默认 false 后用户体验 — 是否在 storyboard top-bar 加 toggle?(留 follow-up)
+
+**下次接着做**
+- 📌 测 AIGC 视频抽卡(Seedance 2.0 Fast 真接通)
+- 📌 测全部 60 集批量生成(rate limit / DB lock / cost 控制)
+- 📌 (follow-up)publishEpisode 加空 group 清理逻辑
+- 📌 (follow-up)bindings UI 加 autoMerge 开关
+
+---
+
 ## 2026-05-29(周五,mac-studio · 三十七次收工)— 系统真打 UI 调试 · 7 处 P0 真修(worker dotenv / Sonnet via moyu 链路 / Scene partial unique / Schema 漂移 / 路由 locale)+ UX 大改造(导演子菜单/返回按钮/bindings 分类)+ openai-compat prefill bug 复审
 
 **完成 — 跨 17 文件改 / 3 文件新 + 1 migration · typecheck 16/16 + test 11/11 · Sonnet 4.6 + Gemini 3 Flash 通过 moyu 真生分镜成功**

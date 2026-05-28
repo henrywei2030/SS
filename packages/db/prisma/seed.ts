@@ -378,9 +378,9 @@ async function main() {
     },
     {
       key: 'storyboard.autoMergeOnGenerate',
-      value: 'true',
+      value: 'false',
       category: 'feature_flag',
-      description: '生成分镜时是否自动按 maxDurationS 预合并组',
+      description: '生成分镜时是否自动按 maxDurationS 预合并组(三十七收工:默认 false · 用户用每行 ↑↓ 手动合并)',
     },
 
     // ----- W4 资产工坊 model 绑定(admin 显式选,默认空) -----

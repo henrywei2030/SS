@@ -1702,6 +1702,49 @@ export const storyboardRouter = router({
           },
           data: { status: 'PUBLISHED' },
         });
+
+        // 三十七收工 P0 修(用户反馈):单分镜也要同步到 AIGC
+        //   AIGC 工坊架构上只接受 ShotGroup(aigc.listGroups 拉 group 表),
+        //   standalone shot(groupId=null)永远不会出现在 AIGC。
+        //   解法:publish 时为每个 standalone shot 自动建 1:1 ShotGroup,
+        //   group.number=shot.number,prompt=shot.prompt,positionIdx 顺延末位 +1
+        const standaloneShots = await tx.shot.findMany({
+          where: {
+            episodeId: ep.id,
+            deletedAt: null,
+            groupId: null,
+          },
+          orderBy: { positionIdx: 'asc' },
+        });
+        if (standaloneShots.length > 0) {
+          // P2 防御:filter deletedAt 让 positionIdx 紧凑(不带 soft-deleted 留下的空隙)
+          // 实际 partial unique `WHERE deletedAt IS NULL` 不会让 nextIdx 跟 active 冲突,
+          // 但带上 deletedAt=null 更稳健 + positionIdx 数字小用户看 UI 更顺
+          const lastGroup = await tx.shotGroup.findFirst({
+            where: { episodeId: ep.id, deletedAt: null },
+            orderBy: { positionIdx: 'desc' },
+            select: { positionIdx: true },
+          });
+          let nextIdx = (lastGroup?.positionIdx ?? 0) + 1;
+          for (const sh of standaloneShots) {
+            // single-shot group:沿用 shot 自己的 prompt/duration/number
+            const newGroup = await tx.shotGroup.create({
+              data: {
+                episodeId: ep.id,
+                number: sh.number,
+                positionIdx: nextIdx++,
+                durationS: sh.durationS,
+                prompt: sh.prompt,
+                status: 'PUBLISHED',
+                publishedAt: now,
+              },
+            });
+            await tx.shot.update({
+              where: { id: sh.id },
+              data: { groupId: newGroup.id },
+            });
+          }
+        }
         return e;
       });
 
