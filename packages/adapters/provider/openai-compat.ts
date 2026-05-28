@@ -158,6 +158,16 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
     if (req.system) messages.push({ role: 'system', content: req.system });
     messages.push({ role: 'user', content: req.prompt });
 
+    // 三十六收工 P0 复审(真相):
+    //   1) Sonnet 4.6 / Gemini 3 Flash / Haiku 4.5 via moyu 都能在 response_format=json_object 下产 JSON
+    //   2) 之前观察的 "Sonnet 4.6 无视" 是因为我们多加了 assistant prefill,Sonnet 把 prefill 当对话续接
+    //   3) prefill 仅在调用方**显式**传 jsonPrefill 时才启用(不再默认开)
+    const usePrefill = !!req.jsonPrefill;
+    const prefillContent = req.jsonPrefill ?? '';
+    if (usePrefill) {
+      messages.push({ role: 'assistant', content: prefillContent });
+    }
+
     const body: Record<string, unknown> = {
       model: modelId,
       messages,
@@ -213,7 +223,9 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
       this.wrapCallError(e);
     }
 
-    const content = resp.choices?.[0]?.message?.content ?? '';
+    // 三十六收工 P0 修:prefill 模式下 prepend prefill content 还原完整 JSON
+    const rawContent = resp.choices?.[0]?.message?.content ?? '';
+    const content = usePrefill ? prefillContent + rawContent : rawContent;
     const inputTokens = resp.usage?.prompt_tokens ?? 0;
     const outputTokens = resp.usage?.completion_tokens ?? 0;
     const costCny = this.calcCost(inputTokens, outputTokens);
@@ -232,6 +244,7 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
     });
 
     // JSON 模式:request_format=json_object 时优先 JSON.parse;否则也尝试剥 ```json 容错
+    // 三十六收工 fix:加 inner ```json``` markdown block 提取(LLM 解释 + JSON 混合常见)
     let json: unknown;
     if (req.jsonSchema) {
       try {
@@ -241,16 +254,34 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
         try {
           json = JSON.parse(cleaned);
         } catch {
-          const start = content.indexOf('{');
-          const end = content.lastIndexOf('}');
-          if (start >= 0 && end > start) {
+          // 三十六收工 fix #2:正则提取 markdown 内 ```json ... ``` block(Claude 习惯包 markdown)
+          const fenced = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+          if (fenced && fenced[1]) {
             try {
-              json = JSON.parse(content.slice(start, end + 1));
+              json = JSON.parse(fenced[1]);
             } catch {
-              /* 留给业务层处理 */
+              /* 继续 fallback */
+            }
+          }
+          if (!json) {
+            const start = content.indexOf('{');
+            const end = content.lastIndexOf('}');
+            if (start >= 0 && end > start) {
+              try {
+                json = JSON.parse(content.slice(start, end + 1));
+              } catch {
+                /* 留给业务层处理 */
+              }
             }
           }
         }
+      }
+      // 三十六收工 fix #3:解析失败时打 raw content 让运维 grep 排查
+      if (!json) {
+        console.warn(
+          `[openai-compat] modelId=${modelId} response_format=json_object but JSON.parse all-fallback failed. raw content (first 500 chars):`,
+          content.slice(0, 500),
+        );
       }
     }
 

@@ -836,8 +836,20 @@ function CatalogPickerDialog({
           )}
 
           {catalog && filtered.length > 0 && (
-            <div className="max-h-96 overflow-y-auto rounded-md border border-[hsl(var(--color-border))]">
-              {filtered.map((m) => (
+            <>
+              {/* 三十六收工 UX 改造:显式候选总数 + 已添加数,防用户误以为列表不全 */}
+              <div className="flex items-center justify-between rounded-md bg-[hsl(var(--color-secondary)/0.5)] px-3 py-2 text-xs">
+                <span className="text-[hsl(var(--color-muted-foreground))]">
+                  共 <strong className="text-[hsl(var(--color-foreground))]">{models.length}</strong> 个候选模型 ·
+                  <strong className="text-[hsl(var(--color-foreground))]"> {filtered.length}</strong> 个可添加 ·
+                  <strong className="text-[hsl(var(--color-foreground))]"> {models.length - filtered.length}</strong> 个已添加
+                </span>
+                {filtered.length > 5 && (
+                  <span className="text-[hsl(var(--color-muted-foreground))]">↓ 向下滚动查看全部</span>
+                )}
+              </div>
+              <div className="max-h-[60vh] overflow-y-auto rounded-md border border-[hsl(var(--color-border))]">
+                {filtered.map((m) => (
                 <div
                   key={m.providerIdSuffix}
                   className="flex items-center justify-between border-b border-[hsl(var(--color-border)/0.4)] px-3 py-2 last:border-b-0 hover:bg-[hsl(var(--color-secondary)/0.3)]"
@@ -873,7 +885,8 @@ function CatalogPickerDialog({
                   </Button>
                 </div>
               ))}
-            </div>
+              </div>
+            </>
           )}
 
           {createFromCatalog.error && (

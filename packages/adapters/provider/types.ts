@@ -118,6 +118,12 @@ export interface TextRequest {
   prompt: string;
   /** 结构化 JSON 输出（zod schema） */
   jsonSchema?: unknown;
+  /**
+   * 三十六收工 P0:assistant prefill 内容 — 强制模型从指定 JSON prefix 续写
+   * 对 Claude via moyu 必须用结构化 prefix 如 `{"shots":[`,短 prefill 如 `{` 会被当引号续 markdown
+   * 默认 `{`,调用方按业务 schema 显式传更长 prefix
+   */
+  jsonPrefill?: string;
   temperature?: number;
   maxTokens?: number;
   model?: string;

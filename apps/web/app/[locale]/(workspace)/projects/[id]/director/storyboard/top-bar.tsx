@@ -1,5 +1,6 @@
 'use client';
 import * as React from 'react';
+import Link from 'next/link';
 import { useRouter, useParams } from 'next/navigation';
 import {
   Loader2,
@@ -13,6 +14,7 @@ import {
   Plus,
   ChevronDown,
   Package,
+  Compass,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -62,6 +64,10 @@ export function TopBar({
   onFontSizeChange,
   onAfterAction,
 }: Props): React.ReactElement {
+  // 三十六收工 UX 改造:剧本分析按钮入口在剧本 tab(原"导演台首页"卡片入口已删)
+  // P0 修:locale fallback 改 'zh-CN' 跟项目其他地方一致(原 'zh' 跟 next-intl 路由不匹配 → 404)
+  const params = useParams<{ locale: string }>();
+  const locale = params?.locale ?? 'zh-CN';
   return (
     <div className="flex h-11 items-center justify-between border-b border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-3">
       {/* tab 切换 */}
@@ -85,6 +91,14 @@ export function TopBar({
       {/* 右侧按钮区 — tab 决定显示哪些按钮 */}
       <div className="flex items-center gap-2">
         {tab === 'shots' && episodeId && <ShotsProgress episodeId={episodeId} />}
+        {tab === 'script' && (
+          <Button asChild variant="outline" size="sm" className="h-7 gap-1 text-xs">
+            <Link href={`/${locale}/projects/${projectId}/director/analysis`}>
+              <Compass className="size-3.5" />
+              剧本分析
+            </Link>
+          </Button>
+        )}
         {tab === 'script' ? (
           <ScriptActions
             projectId={projectId}

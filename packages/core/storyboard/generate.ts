@@ -131,7 +131,14 @@ const SYSTEM_PROMPT = `你是经验丰富的短剧分镜师。任务：把单场
 - content：30 字以内
 - prompt：100-150 字
 
-不要输出 markdown 代码块，直接输出 JSON。`;
+【输出格式 — 严格遵守,违反则系统报错】
+⛔ 禁止任何 markdown 元素:不要 # 标题、不要 ## 二级标题、不要 ** 加粗、不要 - 列表、不要 | 表格、不要 \`\`\` 代码块、不要任何说明文字
+⛔ 禁止"以下是分镜表"之类的前置说明
+⛔ 禁止 JSON 之外的任何字符(空格 / 换行 OK,但不能有 markdown / 解释 / 代码块标记)
+✅ 直接从 { 开始,以 } 结尾的**纯 JSON**
+✅ 第一个字符必须是 {  最后一个字符必须是 }
+
+示例正确输出(直接复制此结构填值):{"shots":[{"index":1,"framing":"特写","angle":"平视 0°","movement":"固定","lighting":"自然光","content":"...","durationS":3,"priority":"B","prompt":"..."}]}`;
 
 // ---------------------------------------------------------------------------
 // 主函数
@@ -155,6 +162,10 @@ export async function generateStoryboard(
       maxTokens: 4096,
       temperature: 0.3,
       jsonSchema: {},
+      // 三十六收工 P0 复审:assistant prefill `{"shots":[` 反让 Sonnet/Gemini 把它当对话续接
+      // 续 "好的,继续输出分镜表..." 然后写 markdown。
+      // 真凶不是 prefill 不够长,而是 prefill 本身错了。
+      // 改为不传 prefill — 用 response_format=json_object 即可让 Sonnet 4.6 / Gemini 3 Flash / Haiku 都产 JSON。
     },
     input.ctx,
   );

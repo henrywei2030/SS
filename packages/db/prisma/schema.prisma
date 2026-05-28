@@ -397,7 +397,9 @@ model Shot {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  @@unique([episodeId, positionIdx])
+  // ⚠️ 三十六收工 P0 修:DB 用 partial unique(WHERE deletedAt IS NULL),Prisma 7 @@unique 不支持 partial。
+  // 见 migration `20260528000000_partial_unique_scenes_shots_groups_softdelete`。
+  // 此处不写 @@unique 避免 migrate dev 试图改成普通 unique 破坏 soft-delete 防御。
   @@index([episodeId])
   @@index([sceneId])
   @@index([groupId])
@@ -552,7 +554,9 @@ model Scene {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  @@unique([episodeId, positionIdx])
+  // ⚠️ 三十六收工 P0 修:DB 用 partial unique(WHERE deletedAt IS NULL),Prisma 7 @@unique 不支持 partial。
+  // 见 migration `20260528000000_partial_unique_scenes_shots_groups_softdelete`。
+  // 此处不写 @@unique 避免 migrate dev 试图改成普通 unique 破坏 soft-delete 防御。
   @@index([episodeId])
   @@index([scriptId])
   @@map("scenes")
@@ -596,7 +600,9 @@ model ShotGroup {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  @@unique([episodeId, positionIdx])
+  // ⚠️ 三十六收工 P0 修:DB 用 partial unique(WHERE deletedAt IS NULL),Prisma 7 @@unique 不支持 partial。
+  // 见 migration `20260528000000_partial_unique_scenes_shots_groups_softdelete`。
+  // 此处不写 @@unique 避免 migrate dev 试图改成普通 unique 破坏 soft-delete 防御。
   @@index([episodeId])
   @@index([status])
   @@map("shot_groups")

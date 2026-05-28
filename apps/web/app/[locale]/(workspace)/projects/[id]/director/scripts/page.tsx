@@ -16,5 +16,6 @@ export default async function ScriptsPage({
   params: Promise<{ id: string; locale: string }>;
 }): Promise<never> {
   const { id, locale } = await params;
-  redirect(`/${locale}/projects/${id}/director/storyboard`);
+  // 三十六收工 P0 修:加 ?tab=script 让老书签/外链进入"剧本管理" tab(不是默认 'shots')
+  redirect(`/${locale}/projects/${id}/director/storyboard?tab=script`);
 }

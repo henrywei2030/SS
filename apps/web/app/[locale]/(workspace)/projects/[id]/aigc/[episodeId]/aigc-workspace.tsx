@@ -12,6 +12,8 @@ import { BindAssetDialog } from './components/bind-asset-dialog';
 import { PromptDialog } from './components/prompt-dialog';
 import { ConfirmDialog } from './components/confirm-dialog';
 import { GroupDetail } from './components/group-detail';
+// 三十六收工 UX 改造:全局返回按钮
+import { BackButton } from '@/components/ui/back-button';
 
 interface Props {
   projectId: string;
@@ -155,6 +157,14 @@ export function AigcWorkspace({
        *   栏宽 220→192px / 每行 py-1.5 / 段号+镜·时长一行 / 资产+badges 一行 / hover icon-only */}
       <aside className="overflow-y-auto border-r border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))]">
         <div className="sticky top-0 z-10 border-b border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-2.5 py-1.5">
+          {/* 三十六收工 UX 改造:加返回 AIGC 集数总览按钮 */}
+          <div className="mb-1.5">
+            <BackButton
+              href={`/${locale}/projects/${projectId}/aigc`}
+              label="返回集数总览"
+              className="text-[10px]"
+            />
+          </div>
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
               <div className="text-[10px] text-[hsl(var(--color-muted-foreground))]">

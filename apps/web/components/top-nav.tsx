@@ -95,14 +95,24 @@ export function TopNav({
         <HoverNav
           label="导演"
           icon={ClapperboardIcon}
-          mainHref={projectId ? `/${locale}/projects/${projectId}/director` : undefined}
+          mainHref={
+            projectId
+              ? `/${locale}/projects/${projectId}/director/storyboard?tab=script`
+              : undefined
+          }
           items={
             projectId
               ? [
-                  { href: `/${locale}/projects/${projectId}/director`, label: '导演台首页' },
-                  { href: `/${locale}/projects/${projectId}/director/analysis`, label: '剧本分析' },
-                  { href: `/${locale}/projects/${projectId}/director/scripts`, label: '剧本管理' },
-                  { href: `/${locale}/projects/${projectId}/director/storyboard`, label: '分镜工坊' },
+                  // 三十六收工 UX 改造:导演 = storyboard 的 2 个 tab(剧本 / 分镜)
+                  //   删"导演台首页"(纯导航卡片冗余)+ "剧本分析"(改到剧本管理页内按钮)
+                  {
+                    href: `/${locale}/projects/${projectId}/director/storyboard?tab=script`,
+                    label: '剧本管理',
+                  },
+                  {
+                    href: `/${locale}/projects/${projectId}/director/storyboard?tab=shots`,
+                    label: '分镜工坊',
+                  },
                 ]
               : []
           }

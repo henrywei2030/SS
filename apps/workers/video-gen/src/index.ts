@@ -9,6 +9,11 @@
  *
  * Prisma 7 升级:显式 dotenv 加载 cwd 的 .env.local(setup:env 已建 symlink → root)。
  * 防 prisma 单例创建时 DATABASE_URL 未注入 → 触发 fail-fast 抛错。
+ *
+ * 三十六收工 fix:ESM imports 都先于 statement-level code 评估,所以这里调用 dotenv
+ *   也救不了 `import { prisma } from '@ss/db'` 已经抛错的问题(import 顺序固定)。
+ *   解法:用 tsx CLI flag `--env-file=.env.local`(Node 20.6+ 内置),package.json scripts 已改。
+ *   仅留这段 import 作 production 启动兜底(若有人手动跑 `tsx src/index.ts` 不带 flag)。
  */
 import 'dotenv/config';
 import { prisma } from '@ss/db';

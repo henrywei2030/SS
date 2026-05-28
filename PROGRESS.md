@@ -5,6 +5,101 @@
 
 ---
 
+## 2026-05-29(周五,mac-studio · 三十七次收工)— 系统真打 UI 调试 · 7 处 P0 真修(worker dotenv / Sonnet via moyu 链路 / Scene partial unique / Schema 漂移 / 路由 locale)+ UX 大改造(导演子菜单/返回按钮/bindings 分类)+ openai-compat prefill bug 复审
+
+**完成 — 跨 17 文件改 / 3 文件新 + 1 migration · typecheck 16/16 + test 11/11 · Sonnet 4.6 + Gemini 3 Flash 通过 moyu 真生分镜成功**
+
+### 触发场景
+
+三十六收工后用户说"现在启动系统去调试功能"。从 mac-studio 跑起 dev server,沿 UI 操作发现多个 P0 + UX 改造要求,边修边追,直到 storyboard.generateForEpisode 真打通 Sonnet 4.6 / Gemini 3 Flash。
+
+### Worker dotenv P0 修
+
+`pnpm start` 启动后 worker 立即抛 `[prisma] DATABASE_URL 未设置`。`import 'dotenv/config'` 默认只读 `.env`,不读 `.env.local`;改用 dotenv.config({path}) 也没救,因为 ESM `import { prisma }` 在 statement-level code 之前评估 → `@ss/db` 顶部 createPrisma() 立即抛错。**真解**:tsx CLI `--env-file=.env.local`(Node 20.6+ 内置),`package.json` `dev` / `start` 都加。worker boot 后 pulling jobs 成功。
+
+### 导演模块 UX 改造
+
+用户给截图:导演下拉 4 项太多 + 项目卡片"导演"打开是空白卡片页。改造:
+- **顶栏导演 HoverNav 只 2 项**:"剧本管理"(`/director/storyboard?tab=script`)+ "分镜工坊"(`?tab=shots`)。删"导演台首页"+ "剧本分析"
+- **项目卡 WorkbenchRow href** 改 `?tab=script` 直进剧本
+- **`/director` 改 redirect** 到 `?tab=script` 兜底
+- **storyboard top-bar 加"剧本分析"按钮**(只 tab=script 显示,Compass icon → `/director/analysis`)
+
+### BackButton 全局返回按钮组件
+
+`apps/web/components/ui/back-button.tsx` — Link-based 接显式 fallback href(不依赖 router.back 历史)。接入:
+- `/director/analysis` → "返回剧本管理"
+- `/aigc/[episodeId]` 左 sidebar → "返回集数总览"
+- `/art/audit` → "返回美术工坊"
+- `/admin/*` layout 侧栏顶已有 "返回工作台",无需重复
+
+### 模型绑定页 UI 重构
+
+用户给截图说"按导演/美术/AIGC 分类 + 字体调大 + 当前绑定跟 dropdown 同步"。重构 `bindings-table.tsx`:按 key 前缀(`binding.asset.*` / `binding.script.*` + `binding.storyboard.*` / `binding.shot.*`)分到导演 / 美术 / AIGC / 系统 4 组卡;字体 title 2xl→3xl, desc sm→base;合并"当前绑定"独立列到 dropdown(单一来源);value 不在 ProviderConfig 时红色 badge "X 不在已注册 Provider" + dropdown 内首项 disabled 显原值。`page.tsx` 字号同步放大。
+
+### Bindings + Provider DB 同步 SQL
+
+DB 实际只 4 个 Provider:Claude Sonnet 4.6 / Seedream 5.0 / Seedance 2.0 Fast / 火山合规(已停用)。catalog 含 142 模型但用户未添加。SQL 同步 4 orphan binding(claude-sonnet-4-5 / nano-banana-pro / gpt-image-2 / mammoth → 对应 active Provider)+ INSERT 4 新 Provider(Claude Haiku 4.5 / GPT-Image-2 / Seedream 4.0 / Gemini 3 Flash · 后 Gemini 重激活)。
+
+### 中转站候选 dialog UI
+
+用户给截图说"列表只看到 5 个 IMAGE,gpt-image-2 等没显"。**真因**:dialog `max-h-96 (384px)` 只显首屏 5 个,剩 4 个在 scroll 下方。改 `max-h-[60vh]` + 顶部加 "共 N 个候选 · M 可添加 · K 已添加" 统计 + "↓ 向下滚动" 提示。verified 9 个完整可见(含 Gemini 3 Pro/Flash Image / MiniMax 海螺 / Z-Image Turbo)。
+
+### 分镜生成 P0 链路修(scene unique → LLM prefill)
+
+**P0-1 Scene partial unique 缺失**:`storyboard.generateForEpisode` 报 `Invalid prisma.scene.create()` P2002 unique 违反。真因:**Scene/Shot/ShotGroup 的 `(episodeId, positionIdx)` unique 索引没加 `WHERE deletedAt IS NULL` partial filter**,soft-deleted 行仍占 slot。新 migration `20260528000000_partial_unique_scenes_shots_groups_softdelete` 3 表 DROP + CREATE partial。
+
+**P0-2 binding resolve 错**:报"Provider claude-sonnet-4-5 未配置 API Key"。真因:binding value 是裸 modelId 但 ProviderConfig.providerId 用 `moyu-` 前缀。SQL UPDATE 同步。
+
+**P0-3 Claude 4.6 via moyu "返 markdown"**(假象):initial 看到 raw content 全是 markdown,以为 Claude 4.6 在 moyu 中转下无视 response_format。加 assistant prefill `{` → Claude 把 prefill 当对话续接,续 `"以下为..."`;改 prefill `{"shots":[` → 续 `"好的,继续输出..."`;**直接绕 storyboard router curl moyu API 测试,Sonnet 4.6 baseline 真能产 JSON**!**真因**:我自己加的 prefill 默认开 → `usePrefill = !!req.jsonSchema` 对所有 jsonSchema 请求 prepend prefill,Claude/Gemini 把它当 prev 对话续。改 `usePrefill = !!req.jsonPrefill` 只调用方显式传时启用。
+
+写 `scripts/debug-moyu-sonnet-vs-gemini.mjs` 调试脚本留档,矩阵测多模型多参数组合,verified:
+- **Sonnet 4.6 + response_format=json_object** ✅ pure JSON 3 shots
+- **Gemini 3 Flash + response_format** ✅ pure JSON 3 shots(baseline 空 content,必须配 response_format)
+- **Haiku 4.5 baseline** 🟡 markdown ```json``` block(fenced extractor 救)
+
+### 真打成功 — UI 截图证据
+
+- **Sonnet 4.6**:第 1 集 8 shots / 2 groups · 51 秒 · moyu 后台真扣费记录
+- **Gemini 3 Flash**:第 1 集 4 shots / 1 group · 12.5 秒(比 Sonnet 快 4 倍 / 便宜 5 倍)· "1-3 合并组" UI 显完整剧本+提示词
+
+### 收工前 4 视角深度审查(找 3 真 P0)
+
+| Agent | 报 P0 | 真假 |
+|---|---|---|
+| UX/路由 | 2(locale 'zh' fallback / scripts redirect 漏 tab) | ✅ 真 |
+| LLM 链路 | 0 | — |
+| Prisma | 1(schema 仍 `@@unique` 跟 DB partial drift) | ✅ 真 |
+| 安全/死代码 | 0 | — |
+
+**3 真 P0 修**:
+1. `schema.prisma` Scene/Shot/ShotGroup 移除 `@@unique([episodeId, positionIdx])` 仿 AssetUsageBinding pattern + 注释指向 migration · 防下次 `prisma migrate dev` 自动撤 partial unique 破坏 soft-delete
+2. `top-bar.tsx` locale fallback `'zh'` → `'zh-CN'` 跟项目其他地方一致
+3. `/director/scripts/page.tsx` redirect 加 `?tab=script` 保老书签进对 tab
+
+### 验证
+
+- `pnpm --filter @ss/db exec prisma generate` ✓ Prisma client 重生成 OK
+- `pnpm --filter @ss/db exec prisma migrate status` ✓ "Database schema is up to date"(无 drift)
+- `pnpm turbo run typecheck --force` ✓ 16/16
+- `pnpm turbo run test --force` ✓ 11/11
+- UI 真打:Sonnet 4.6 / Gemini 3 Flash 真生分镜成功(截图 in chat)
+- moyu API 真扣费:6 次 Sonnet 4.6 = ¥1.13(浪费在 prefill bug 上,后续修复)
+
+**问题/待决策**
+- ❓ 是否把 Gemini 3 Flash 作 storyboard 默认 binding(快 4 倍 + 便宜 5 倍 vs Sonnet 4.6)
+- ❓ `scripts/debug-moyu-sonnet-vs-gemini.mjs` 留档 vs 加 .gitignore(目前 git 追踪状态)
+- ❓ Sonnet 4.6 / Gemini 测试浪费 cost ≈ ¥1.13(prefill bug 期间)— 算 audit fee
+
+**下次接着做**
+- 📌 测全部集生成(60 集批量 LLM 调用),验 rate limit / DB 锁 / cost 控制
+- 📌 AIGC 视频抽卡测试(Seedance 2.0 Fast 真接通)
+- 📌 用户决定 storyboard 默认 binding 模型
+- 📌 (留 follow-up)其他表 unique 加 partial 索引(episodes_projectId_number / scripts_episodeId_version 等)
+- 📌 (留 follow-up)openai-compat console.warn raw content 加 NODE_ENV 守卫
+
+---
+
 ## 2026-05-28(周四,mac-studio · 三十六次收工)— R1 收尾(达 ≤500 行)+ R2 完整推进 4 helper(generateVideo -132 行)+ Phase D 单测 +12 + 2 遍深审 0 真 P0
 
 **完成 — 跨 7 文件改 / 6 文件新 · typecheck 16/16 + tests 11/11 (core 60→72)· 主文件 578→402(-30%)+ generateVideo 590→458(-22%)**

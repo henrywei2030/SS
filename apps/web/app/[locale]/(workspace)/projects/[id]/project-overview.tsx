@@ -86,10 +86,10 @@ export function ProjectOverview({ projectId }: { projectId: string }): React.Rea
           </h2>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <WorkbenchRow
-              href={`/${params.locale}/projects/${projectId}/director`}
+              href={`/${params.locale}/projects/${projectId}/director/storyboard?tab=script`}
               icon={ClapperboardIcon}
               title={t('modules.workbench.director')}
-              subtitle="剧本管理 · AI 分镜 · 分镜管理"
+              subtitle="剧本管理 · 分镜工坊 · 剧本分析"
               colorVar="--color-mod-director"
             />
             <WorkbenchRow
