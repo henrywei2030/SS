@@ -5,6 +5,56 @@
 
 ---
 
+## 2026-05-29(周五,mac-mini · 三十九次收工)— mac-mini 跨周期接续(Step 2.5 全跑通)+ admin 密码重置 + 登录页 logo 放大
+
+**完成 — 1 文件代码改(logo.tsx 3 行)· web typecheck EXIT 0 · 登录 API 实测 200**
+
+### 触发场景
+
+mac-mini 上次 2026-05-22(七天前),期间远端推进到三十八收工。本次连续两轮"开工"(中途换 opus-4-8 模型)拉齐:第一轮同步到 9ff888b(34 收工),第二轮同步到 01f5e04(38 收工)。然后真打 UI 调试登录。
+
+### 开工强同步 + Step 2.5 长间隔接续诊断(全跑通)
+
+第二轮开工 reset 含 pnpm-lock + schema.prisma + 新 migration → **触发 Step 2.5**(条件 3)。6 项诊断全过:
+
+| # | 诊断 | 结果 | 动作 |
+|---|---|---|---|
+| 1 | 子目录 .env.local | ✓ 两个都在 | — |
+| 2 | Prisma client | ✓ 已生成 | — |
+| 3 | Docker daemon | ✗→✓ | `open -a Docker` |
+| 4 | infra 容器 | ✗→✓ | `pnpm infra:up` 全 healthy |
+| 5 | DB migration | ✗→✓ | `db:migrate:deploy` 补 1 个(`20260528000000_partial_unique_scenes_shots_groups_softdelete`) |
+| 6 | preflight 10 项 | ✓ | All green |
+
+外加 `pnpm install`(lock +3 行 / 820ms)。两轮共接续 8 commit(三十一~三十八),含 R1 Phase B 6 子组件 + R2 video-generation core 包 + Prisma 7 partial unique 修 + autoMerge default false。
+
+> ⚠️ 注:第一轮开工时我误用了过期的 Co-Authored-By trailer(`chore(lock)` commit a62f3d7),实际是补 apps/desktop @tauri-apps/cli 多平台 binary entries —— 远端 lock drift 修复,frozen-lockfile install 不再失败。
+
+### admin 密码重置(各机独立项)
+
+mac-mini 本地 DB 跟 mac-studio 独立,旧密码登录 401。跑 `set-admin-password.ts admin@starsalign.local admin123` 重置(脚本命中 .env.example 公开默认密码,输出 ANSI 红警提示上线前改强密码)。curl `/api/auth/login` 实测 **HTTP 200** 验证通过。**非代码改动,不入 git。**
+
+### 登录页 logo 适当放大
+
+用户要求登录界面 logo 放大一点。`LogoLockup` 全项目仅 `login-form.tsx` 一处用(grep 确认),安全改 `components/brand/logo.tsx` 的 `lg` 档:
+
+- 图标 `size-16`(64px) → `size-20`(80px,+25%)
+- 主字 StarsAlign Studio `text-[22px]` → `text-[26px]`
+- 副标语 `text-[10px]` → `text-[11px]`
+
+HMR 热更新 `✓ Compiled 277ms`,web typecheck EXIT 0。
+
+**问题/待决策**
+- ❓ 无 — 都是轻量改动 + 环境接续
+
+**下次接着做**
+- 📌 测 AIGC 视频抽卡(Seedance 2.0 Fast 真接通,mac-mini 需本地填中转站 token)
+- 📌 测全部 60 集批量生成(rate limit / DB lock / cost 控制)
+- 📌 (follow-up)publishEpisode 加空 group 清理逻辑
+- 📌 (follow-up)bindings UI 加 autoMerge 开关
+
+---
+
 ## 2026-05-29(周五,mac-studio · 三十八次收工)— autoMerge default false + publish 自动 group 化 + 3 视角深审 P2 防御修
 
 **完成 — 跨 3 文件改 · typecheck 16/16 + test 11/11 · publish v3 验证 4 standalone → 4 group**

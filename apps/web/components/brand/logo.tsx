@@ -123,9 +123,9 @@ export function LogoLockup({
   tagline = 'ALIGNING IDEAS · CRAFTING WORLDS',
   size = 'md',
 }: LogoLockupProps): React.ReactElement {
-  const markSize = size === 'lg' ? 'size-16' : size === 'md' ? 'size-12' : 'size-9';
-  const wordSize = size === 'lg' ? 'text-[22px]' : size === 'md' ? 'text-[18px]' : 'text-[14px]';
-  const taglineSize = size === 'lg' ? 'text-[10px]' : 'text-[9px]';
+  const markSize = size === 'lg' ? 'size-20' : size === 'md' ? 'size-12' : 'size-9';
+  const wordSize = size === 'lg' ? 'text-[26px]' : size === 'md' ? 'text-[18px]' : 'text-[14px]';
+  const taglineSize = size === 'lg' ? 'text-[11px]' : 'text-[9px]';
 
   if (layout === 'horizontal') {
     return (
