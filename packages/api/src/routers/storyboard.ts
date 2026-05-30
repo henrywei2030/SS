@@ -18,7 +18,7 @@ import { parseScriptText } from '@ss/core/script';
 import { EVENTS } from '@ss/shared/events';
 import { getEventBus } from '@ss/adapters/eventbus';
 // 第 18 轮 audit P1:LLM 失败错误信息脱敏(防真接 Claude 后泄漏 API URL/token)
-import { sanitizeErrorMsg, normalizePrompt } from '@ss/shared';
+import { sanitizeErrorMsg, normalizePrompt, asRecord } from '@ss/shared';
 
 import { router, protectedProcedure, rateLimit } from '../trpc.js';
 import type { Context } from '../context.js';
@@ -626,7 +626,7 @@ export const storyboardRouter = router({
       // recordPromptEdit 内部过滤：只记 framing/angle/content/prompt 等可训练字段
       for (const [field, newVal] of Object.entries(input.patch)) {
         if (newVal === undefined) continue;
-        const oldVal = (before as unknown as Record<string, unknown>)[field];
+        const oldVal = asRecord(before)?.[field];
         await recordPromptEdit(ctx, {
           targetType: 'SHOT',
           targetId: input.shotId,
@@ -992,7 +992,7 @@ export const storyboardRouter = router({
 
       for (const [field, newVal] of Object.entries(patchToWrite)) {
         if (newVal === undefined) continue;
-        const rawOld = (before as unknown as Record<string, unknown>)[field];
+        const rawOld = asRecord(before)?.[field];
         const oldVal =
           field === 'prompt' && typeof rawOld === 'string'
             ? normalizePrompt(rawOld)
@@ -1466,27 +1466,27 @@ export const storyboardRouter = router({
             errors.push(`场 ${result.dbScene.number}: ${result.warning}`);
           }
 
-          for (const s of result.shots) {
-            globalIdx += 1;
-            positionIdx += 1;
-            const created = await ctx.prisma.shot.create({
-              data: {
-                episodeId: ep.id,
-                sceneId: result.dbScene.id,
-                number: String(globalIdx),
-                framing: s.framing,
-                angle: s.angle,
-                movement: s.movement,
-                lighting: s.lighting,
-                content: s.content,
-                prompt: s.prompt,
-                durationS: s.durationS,
-                priority: s.priority,
-                positionIdx,
-              },
-            });
-            createdShotIds.push(created.id);
-          }
+          // 三十九收工 perf:N+1 串行 shot.create → createManyAndReturn(一集 N 镜单次往返,~50× 加速)
+          //   autoMerge 默认 false 后这是分镜生成主热路径。globalIdx/positionIdx 前置自增保持单调,
+          //   createManyAndReturn 返回顺序跟 data 数组一致(PostgreSQL),故 createdShotIds 顺序正确。
+          const shotData = result.shots.map((s) => ({
+            episodeId: ep.id,
+            sceneId: result.dbScene.id,
+            number: String((globalIdx += 1)),
+            framing: s.framing,
+            angle: s.angle,
+            movement: s.movement,
+            lighting: s.lighting,
+            content: s.content,
+            prompt: s.prompt,
+            durationS: s.durationS,
+            priority: s.priority,
+            positionIdx: (positionIdx += 1),
+          }));
+          const createdShots = await ctx.prisma.shot.createManyAndReturn({
+            data: shotData,
+          });
+          createdShotIds.push(...createdShots.map((c) => c.id));
 
           const finishedAt = new Date();
           await ctx.prisma.generationAttempt.update({
@@ -1725,23 +1725,24 @@ export const storyboardRouter = router({
             orderBy: { positionIdx: 'desc' },
             select: { positionIdx: true },
           });
-          let nextIdx = (lastGroup?.positionIdx ?? 0) + 1;
-          for (const sh of standaloneShots) {
-            // single-shot group:沿用 shot 自己的 prompt/duration/number
-            const newGroup = await tx.shotGroup.create({
-              data: {
-                episodeId: ep.id,
-                number: sh.number,
-                positionIdx: nextIdx++,
-                durationS: sh.durationS,
-                prompt: sh.prompt,
-                status: 'PUBLISHED',
-                publishedAt: now,
-              },
-            });
+          const baseIdx = (lastGroup?.positionIdx ?? 0) + 1;
+          // 三十九收工 perf:N 个 group.create 串行 → 1 次 createManyAndReturn(返回顺序跟 data 一致,PG)
+          //   single-shot group 沿用 shot 自己的 number/prompt/duration;shot.groupId 回填仍逐条(tx 内顺序安全)
+          const newGroups = await tx.shotGroup.createManyAndReturn({
+            data: standaloneShots.map((sh, i) => ({
+              episodeId: ep.id,
+              number: sh.number,
+              positionIdx: baseIdx + i,
+              durationS: sh.durationS,
+              prompt: sh.prompt,
+              status: 'PUBLISHED' as const,
+              publishedAt: now,
+            })),
+          });
+          for (let i = 0; i < standaloneShots.length; i++) {
             await tx.shot.update({
-              where: { id: sh.id },
-              data: { groupId: newGroup.id },
+              where: { id: standaloneShots[i]!.id },
+              data: { groupId: newGroups[i]!.id },
             });
           }
         }

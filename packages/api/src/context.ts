@@ -40,8 +40,14 @@ export async function createContext(opts: ContextOptions): Promise<Context> {
     try {
       const auth = getAuthAdapter();
       user = await auth.verifyToken(opts.authToken);
-    } catch {
-      // 无效 token 不抛错；后续 procedure 自行决定是否要求认证
+    } catch (e) {
+      // 无效 token 不抛错；后续 procedure 自行决定是否要求认证。
+      // 三十九收工:记 debug 便于排查 —— DB/网络故障 vs 单纯 token 失效都走这里,
+      // 静默吞会让系统异常被误判为"未登录",debug 日志保留可观测性(不刷 error)。
+      console.debug(
+        '[context] verifyToken failed (treated as anonymous):',
+        e instanceof Error ? e.message : e,
+      );
     }
   }
 

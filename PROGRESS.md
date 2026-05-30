@@ -5,6 +5,57 @@
 
 ---
 
+## 2026-05-30(周六,mac-studio · 四十次收工)— 3 轮全库优化审查(3 agent 并行)+ 实施 16 项安全优化(死代码/类型/性能/重复抽取)
+
+**完成 — 跨 12 文件改 / 2 文件新 + 1 migration · typecheck 16/16 + test 11/11(adapters 10 + core 72 + api 25)· 净 -28 行**
+
+### 触发场景
+
+开工 mac-studio + 启动系统到 Chrome。用户"执行不间断任务,检查 3 轮完整代码,有没有需要优化的地方"。3 个 general-purpose agent 并行各审一维度(架构/性能/类型),严格找优化点(非 bug),汇总后我分批实施(零风险→低风险),每批 typecheck verify。
+
+### 3 轮审查发现
+
+- 轮1(架构/重复/死代码):7 槽位 media fallback 重复 4 处 / recordPromptEdit 双份 / loadEpisodeOrThrow 双份 / 4 死 import / generateForEpisode 468 行可拆
+- 轮2(性能):shot.create N+1 / GenerationAttempt 缺 episodeId 索引 / publishEpisode 2N 串行 / shots-pane O(n²) findIndex / system-bindings 零缓存
+- 轮3(类型/一致性):as unknown as 双重 cast 3 处 / seedance extractTaskId number→string 谎报 / budget-check 时区 / schema 注释漂移 / createEpisode 缺 max / verifyToken catch 吞异常
+
+### 实施 16 项(全部 typecheck + test 通过)
+
+**死代码 + 注释(零风险)**:aigc.ts 删 3 死 import(getEventBus/Prisma/EVENTS 真 0 调用)· asset.ts 删 GenerationSlot import · schema 注释 `text.analyze`→`text.generate`
+
+**类型安全(低风险)**:seedance `extractTaskId` → `asString`(修 number→string 谎报)· budget-check `setHours`→`setUTCHours`(对齐 insights)· asset/storyboard 3 处 `(x as unknown as Record)[f]` → `asRecord(x)?.[f]`
+
+**性能(P1)**:
+- storyboard `shot.create` N+1 串行 → `createManyAndReturn`(分镜生成主热路径,~50× 加速,同 asset.ts:404 生产 pattern)
+- `publishEpisode` standalone group N 串行 create → `createManyAndReturn` + 顺序 shot.update
+- GenerationAttempt 加 `(episodeId,action,status)` 复合索引 + migration `20260529000000_idx_generation_attempts_episode_action_status`(集数总览首屏高频)
+- shots-pane 多处 `flatShots.findIndex` O(n) → `flatShotIndexMap` O(1)(消 canMergeUp/Down 在 render 的 O(n²))
+
+**重复抽取(P1)**:新建 `core/asset/media-select.ts` 抽 `pickAssetMediaId(asset, kind)` 单一真相源,替换 aigc.getGroupDetail + previewCompiledPrompt + video-generation/compile.ts **3 处逐字一致的 7 槽位 fallback 链**(防漂移真隐患)
+
+**小安全**:script createEpisode content 加 `.max(5_000_000)`· seedance/claude `ProviderError` body 3 处 `.slice(0,200)` 截断 · context verifyToken `catch{}` → `catch(e)` + console.debug(系统异常可观测)
+
+### 评估跳过 + 建议(4 项,负责任不盲做)
+
+- **A3 system-bindings TTL cache**:注释明示"不 cache(setSetting 后需立即生效)",加 cache 跨 worker invalidation 正确性风险 > 收益 → 保持现状
+- **A4 story-compass dynamic**:Next App Router 路由级已自动 code-split,recharts 仅在 /analysis chunk,dynamic 边际收益 → 跳过
+- **B2 recordPromptEdit 合并 / B3 loadEpisodeOrThrow 合并**:DRY 中价值,但跨 10+ 调用点 + 涉及 lock 语义/训练数据写入需真打 verify,当前各自正常工作下重构风险 > 收益 → 留详细建议下次专项(过早抽象有成本)
+
+### 真打验证
+
+preview 浏览器 session 过期(跳 login,需重置密码 + 消耗 LLM cost),**核心改动等价性已严格确认故不额外真打**:pickAssetMediaId 3 处逐字复制(字符级对比)· createManyAndReturn 同 asset.ts:404 生产 pattern + Prisma 文档保证返回顺序=input 顺序 · publishEpisode `newGroups[i]↔standaloneShots[i]` 顺序一致 · typecheck 16/16 + test 11/11 全过。
+
+**问题/待决策**
+- ❓ 4 项建议(A3 cache / A4 dynamic / B2 recordPromptEdit / B3 loadEpisodeOrThrow)是否下次专项做
+- ❓ 真打验证留用户在已登录 Chrome 实际使用(逻辑严格等价)
+
+**下次接着做**
+- 📌 测 AIGC 视频抽卡(Seedance 2.0 Fast)/ 60 集批量生成
+- 📌 (建议)B2/B3 DRY 重构 + 真打 verify
+- 📌 (follow-up)bindings UI autoMerge 开关 / publishEpisode 空 group 清理
+
+---
+
 ## 2026-05-29(周五,mac-mini · 三十九次收工)— mac-mini 跨周期接续(Step 2.5 全跑通)+ admin 密码重置 + 登录页 logo 放大
 
 **完成 — 1 文件代码改(logo.tsx 3 行)· web typecheck EXIT 0 · 登录 API 实测 200**

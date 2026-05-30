@@ -5,6 +5,7 @@ import {
   kindFromUsage,
   type VideoReference,
 } from '../storyboard/index.js';
+import { pickAssetMediaId } from '../asset/index.js';
 
 /**
  * 编译视频提示词 — 读 project style + bindings + media + 构造 refs + 调 compileShotGroupVideoPrompt
@@ -132,20 +133,7 @@ export async function compileVideoPromptForGroup(
   // W1-W5 audit P1 followup(P1-6):全 7 槽位 fallback 链
   const refs: VideoReference[] = dbBindings.map((b) => {
     const kind = kindFromUsage(b.usageType);
-    let chosen: string | null = null;
-    if (kind === 'AUDIO') chosen = b.asset.voiceMediaId;
-    else if (b.asset.type === 'CHARACTER')
-      chosen = b.asset.portraitMediaId ?? b.asset.threeViewMediaId ?? b.asset.mainMediaId;
-    else if (b.asset.type === 'SCENE')
-      chosen =
-        b.asset.sceneMainMediaId ??
-        b.asset.sceneFrontMediaId ??
-        b.asset.sceneLeftMediaId ??
-        b.asset.sceneRightMediaId ??
-        b.asset.sceneBackMediaId ??
-        b.asset.panoramaMediaId ??
-        b.asset.mainMediaId;
-    else chosen = b.asset.mainMediaId;
+    const chosen = pickAssetMediaId(b.asset, kind);
     return {
       refSlotIdx: b.refSlotIdx!,
       kind,

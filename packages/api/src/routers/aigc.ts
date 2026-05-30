@@ -11,10 +11,9 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
-import { getEventBus } from '@ss/adapters/eventbus';
 import { getVideoProvider } from '@ss/adapters/provider';
-import { Prisma } from '@ss/db';
 import { autoMatchAssets, type MatchableAsset } from '@ss/core/generation';
+import { pickAssetMediaId } from '@ss/core/asset';
 import {
   autoTagPromptWithReferences,
   compileShotGroupVideoPrompt,
@@ -32,7 +31,6 @@ import {
   compileVideoPromptForGroup,
   enqueueVideoJobOrRefund,
 } from '@ss/core/video-generation';
-import { EVENTS } from '@ss/shared/events';
 
 // 三十一收工 S3:SystemSetting 单 key 读 helper
 // 三十二收工 S3 followup:加 batch 版
@@ -410,23 +408,7 @@ export const aigcRouter = router({
       //    PROP/STYLE → main
       const bindingsWithMedia = bindings.map((b) => {
         const a = b.asset;
-        let chosenMediaId: string | null = null;
-        if (kindFromUsage(b.usageType) === 'AUDIO') {
-          chosenMediaId = a.voiceMediaId;
-        } else if (a.type === 'CHARACTER') {
-          chosenMediaId = a.portraitMediaId ?? a.threeViewMediaId ?? a.mainMediaId;
-        } else if (a.type === 'SCENE') {
-          chosenMediaId =
-            a.sceneMainMediaId ??
-            a.sceneFrontMediaId ??
-            a.sceneLeftMediaId ??
-            a.sceneRightMediaId ??
-            a.sceneBackMediaId ??
-            a.panoramaMediaId ??
-            a.mainMediaId;
-        } else {
-          chosenMediaId = a.mainMediaId;
-        }
+        const chosenMediaId = pickAssetMediaId(a, kindFromUsage(b.usageType));
         const media = chosenMediaId ? mediaMap.get(chosenMediaId) : null;
         return {
           ...b,
@@ -779,20 +761,7 @@ export const aigcRouter = router({
       // W5 audit W1:缺图也保留 reference(mediaUrl=null),由 compile 报 missingMedia
       const references: VideoReference[] = bindings.map((b) => {
         const kind = kindFromUsage(b.usageType);
-        let chosen: string | null = null;
-        if (kind === 'AUDIO') chosen = b.asset.voiceMediaId;
-        else if (b.asset.type === 'CHARACTER')
-          chosen = b.asset.portraitMediaId ?? b.asset.threeViewMediaId ?? b.asset.mainMediaId;
-        else if (b.asset.type === 'SCENE')
-          chosen =
-            b.asset.sceneMainMediaId ??
-            b.asset.sceneFrontMediaId ??
-            b.asset.sceneLeftMediaId ??
-            b.asset.sceneRightMediaId ??
-            b.asset.sceneBackMediaId ??
-            b.asset.panoramaMediaId ??
-            b.asset.mainMediaId;
-        else chosen = b.asset.mainMediaId;
+        const chosen = pickAssetMediaId(b.asset, kind);
         const url = chosen ? (mediaMap.get(chosen) ?? null) : null;
         return {
           refSlotIdx: b.refSlotIdx!,

@@ -17,13 +17,12 @@ import {
   breakdownAssets,
   type AssetDraft,
   compileAssetPrompt,
-  type GenerationSlot,
 } from '@ss/core/asset';
 import { getImageProvider } from '@ss/adapters/provider';
 import { getEventBus } from '@ss/adapters/eventbus';
 // 第 18 轮 audit P1:errMsg 入库 + throw 前脱敏,防真接 NanoBanana / GPT Image 后泄漏 URL/token
 // 第 19 轮 audit P1:加 EventBus publish(ASSET_GENERATED / ASSET_CONFIRMED),events.ts 定义但漏调
-import { sanitizeErrorMsg, EVENTS } from '@ss/shared';
+import { sanitizeErrorMsg, EVENTS, asRecord } from '@ss/shared';
 
 import { router, protectedProcedure } from '../trpc.js';
 import type { Context } from '../context.js';
@@ -505,7 +504,7 @@ export const assetRouter = router({
       // 文本字段改动入训练集
       for (const [field, newVal] of Object.entries(input.patch)) {
         if (newVal === undefined) continue;
-        const oldVal = (before as unknown as Record<string, unknown>)[field];
+        const oldVal = asRecord(before)?.[field];
         await recordAssetEdit(ctx, {
           assetId: input.assetId,
           field,

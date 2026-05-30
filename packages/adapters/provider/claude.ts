@@ -83,7 +83,7 @@ export class ClaudeTextProvider extends BaseProvider implements ITextProvider {
       });
       const text = await respBody.text();
       if (statusCode >= 400) {
-        throw new ProviderError(this.info.id, `Anthropic API ${statusCode}: ${text}`);
+        throw new ProviderError(this.info.id, `Anthropic API ${statusCode}: ${text.slice(0, 200)}`);
       }
       resp = JSON.parse(text) as AnthropicResponse;
     } catch (e) {

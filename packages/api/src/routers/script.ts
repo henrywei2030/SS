@@ -172,7 +172,7 @@ export const scriptRouter = router({
         projectId: z.string().cuid(),
         episodeNumber: z.number().int().positive(),
         title: z.string().optional(),
-        content: z.string().min(1, '剧本内容不能为空'),
+        content: z.string().min(1, '剧本内容不能为空').max(5_000_000, '剧本内容过长(上限 5MB)'),
         language: z.string().default('zh-CN'),
         source: z.enum(['UPLOAD', 'AI_GENERATED', 'IMPORTED']).default('UPLOAD'),
       }),

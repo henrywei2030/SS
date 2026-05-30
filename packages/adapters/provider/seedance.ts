@@ -321,7 +321,7 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
 
   /** 从 create task 响应中抽 task_id(兼容中转站的 task_id 和 ark 的 id) */
   private extractTaskId(json: Record<string, unknown>): string {
-    return (json.task_id as string) ?? (json.id as string) ?? '';
+    return asString(json.task_id) ?? asString(json.id) ?? '';
   }
 
   estimateCost(req: VideoRequest): number {
@@ -351,7 +351,7 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
       });
       const text = await body.text();
       if (statusCode >= 400) {
-        throw new ProviderError(this.info.id, `Create task failed (${statusCode}): ${text}`);
+        throw new ProviderError(this.info.id, `Create task failed (${statusCode}): ${text.slice(0, 200)}`);
       }
       const json = JSON.parse(text) as Record<string, unknown>;
       providerJobId = this.extractTaskId(json);
@@ -487,7 +487,7 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
     );
     const text = await body.text();
     if (statusCode >= 400) {
-      throw new ProviderError(this.info.id, `Query task failed (${statusCode}): ${text}`);
+      throw new ProviderError(this.info.id, `Query task failed (${statusCode}): ${text.slice(0, 200)}`);
     }
     const raw = JSON.parse(text) as unknown;
     return this.parseQueryResponse(raw);

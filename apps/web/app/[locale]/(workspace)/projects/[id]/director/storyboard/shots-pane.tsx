@@ -83,6 +83,14 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
     return [...all].sort((a, b) => a.positionIdx - b.positionIdx);
   }, [groups, ungrouped]);
 
+  // 三十九收工 perf:flatShots id→index Map,消除多处 findIndex 的 O(n) 扫描
+  //   canMergeUp/canMergeDownForShot 在每行 render 调用 → 原 O(n²),现 O(1) lookup
+  const flatShotIndexMap = React.useMemo(
+    () => new Map(flatShots.map((s, i) => [s.id, i] as const)),
+    [flatShots],
+  );
+  const idxOf = (id: string): number => flatShotIndexMap.get(id) ?? -1;
+
   // 用户反馈:拆分组后子镜应回到原位置,不能堆底部
   // groups 和 ungrouped 混排,组的"代表位置"取 group.shots[0].positionIdx
   // (即组内首个 shot 的位置 — 这样组始终落在组内首镜的本该位置)
@@ -169,7 +177,7 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
       return;
     }
     const anchorId = Array.from(selected)[0]!;
-    const idx = flatShots.findIndex((s) => s.id === anchorId);
+    const idx = idxOf(anchorId);
     if (idx <= 0) {
       toast.error('已是首镜,无法向上合并');
       return;
@@ -185,7 +193,7 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
       return;
     }
     const anchorId = Array.from(selected)[0]!;
-    const idx = flatShots.findIndex((s) => s.id === anchorId);
+    const idx = idxOf(anchorId);
     if (idx < 0 || idx >= flatShots.length - 1) {
       toast.error('已是末镜,无法向下合并');
       return;
@@ -197,7 +205,7 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
 
   // Phase 1.5.3 精炼 9:每行 ↑↓ 按钮直接合并(不需勾选)
   const mergeUpForShot = (shotId: string): void => {
-    const idx = flatShots.findIndex((s) => s.id === shotId);
+    const idx = idxOf(shotId);
     if (idx <= 0) {
       toast.error('已是首镜,无法向上合并');
       return;
@@ -207,7 +215,7 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
     doMergeShots([...expandToGroupShotIds(prev), ...expandToGroupShotIds(curr)]);
   };
   const mergeDownForShot = (shotId: string): void => {
-    const idx = flatShots.findIndex((s) => s.id === shotId);
+    const idx = idxOf(shotId);
     if (idx < 0 || idx >= flatShots.length - 1) {
       toast.error('已是末镜,无法向下合并');
       return;
@@ -217,11 +225,11 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
     doMergeShots([...expandToGroupShotIds(curr), ...expandToGroupShotIds(next)]);
   };
   const canMergeUpForShot = (shotId: string): boolean => {
-    const idx = flatShots.findIndex((s) => s.id === shotId);
+    const idx = idxOf(shotId);
     return idx > 0;
   };
   const canMergeDownForShot = (shotId: string): boolean => {
-    const idx = flatShots.findIndex((s) => s.id === shotId);
+    const idx = idxOf(shotId);
     return idx >= 0 && idx < flatShots.length - 1;
   };
 

@@ -913,6 +913,7 @@ model GenerationAttempt {
   @@index([shotGroupId, action, status]) // W5.4:listVideoTakes 用
   @@index([providerId, status])
   @@index([createdBy, createdAt])
+  @@index([episodeId, action, status]) // 三十九收工 perf:aigc.listEpisodes 集数总览首屏高频(episodeId IN + action=VIDEO + status=SUCCESS)
   @@map("generation_attempts")
 }
 
@@ -963,7 +964,7 @@ model CostLedgerEntry {
 
   providerId String
   modelId    String
-  action     String // 'video.generate' | 'image.generate' | 'text.analyze' | ...
+  action     String // 'video.generate' | 'image.generate' | 'text.generate' | ...
 
   inputUnits   Float
   outputUnits  Float

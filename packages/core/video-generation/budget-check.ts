@@ -24,11 +24,10 @@ export async function checkDailyVideoBudget(
 ): Promise<string | null> {
   if (args.dailyBudgetCny <= 0) return null; // 0 / 负 = 不限
 
-  // TODO(三十六收工 audit P1):setHours 是 server local timezone,DB createdAt 是 UTC
-  //   若 server 部署 UTC + user 跨时区使用,"今天"边界可能偏移几小时
-  //   原 inline 代码就有此问题(本次抽出不引入回归),修复需统一为 UTC 或传 user timezone
+  // 三十九收工 audit:用 UTC 算"今天"边界,跟 insights.ts 一致,跨 server timezone 稳定
+  //   (DB createdAt 存 UTC;原 setHours 用 server local 时区会让"今天"边界偏移几小时)
   const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  todayStart.setUTCHours(0, 0, 0, 0);
   const todaySpent = await tx.costLedgerEntry.aggregate({
     where: {
       projectId: args.projectId,
