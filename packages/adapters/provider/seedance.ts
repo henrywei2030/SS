@@ -261,7 +261,7 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
           4,
           Math.min(this.cfg.maxDuration, 15),
         );
-        const extra = (req.extra ?? {}) as Record<string, unknown>;
+        const extra = asRecord(req.extra) ?? {};
         const metadata: Record<string, unknown> = {
           content,
           duration,

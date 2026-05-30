@@ -5,6 +5,52 @@
 
 ---
 
+## 2026-05-30(周六,mac-studio · 四一次收工)— bug/安全聚焦补审 + 修 2 真 P1(provider 静默 Mock 假成功 / worker groupNumber 崩)+ P2 退费单一真相
+
+**完成 — 跨 4 文件改 · typecheck 16/16 + test 11/11(adapters 10 + core 72 + api 25)**
+
+### 触发场景
+
+四十收工(优化审查)后用户"修复找出来的漏洞,允许自行选择合适的方案,完成后再次收工"。上次是优化导向审查,可能漏真 bug → 启 1 个 general-purpose agent 做**聚焦 bug/安全/正确性深审**(区别于优化),找真漏洞后修。
+
+### bug/安全深审结论
+
+**经济链路 / 权限 / 并发 / 注入整体扎实,无 P0**:prepay/refund 单一真相源 + advisory lock + idempotent + Decimal · admin create 全 validateApiUrl · 所有 `$executeRawUnsafe` 是 `$1` 参数化 advisory lock(无注入)· SSE token HMAC + timingSafeEqual + exp + resource-match 齐全。
+
+### 修 2 真 P1
+
+**P1-1 getVideoProvider/getImageProvider 静默 fallback Mock → 假成功 + 错误退费**(`adapters/provider/index.ts`):
+配置损坏(apiKey 解密失败/inactive)时 `loadConfig().catch(()=>null)` 吞成 null → Mock 接管 → worker 写 Mock 样片标 SUCCESS + 按 unitPriceCny=0 退费,用户以为生成了真视频(真金白银错觉)。getTextProvider 不 fallback(抛错)→ 语义不一致。**方案(自选)env gate**:`NODE_ENV==='production'` 抛 ProviderError(用户去 /admin/providers 修),dev 保持 Mock 演示(平衡安全 + 开发体验)。补 `import { ProviderError } from '@ss/shared'`。
+
+**P1-2 worker groupNumber.replace 非 string 崩**(`workers/video-gen/src/processor.ts:264`):
+`groupNumber.replace(...)` 依赖 string,ShotGroup.number 是 free-form,payload 漂移传非 string 直接 throw,发生在成功路径写 MediaItem 前 → 任务 FAILED 但视频已生成无法救回。改 `String(groupNumber ?? '')` 兜底。
+
+### 修 P2 + 类型
+
+**P2-3 failPlaceholder 退费收敛单一真相源**(`routers/aigc.ts`):原内联 REFUND create(无 idempotent 守卫)→ 改用共享 `refundPrepayForAttempt`(查 PREPAY + 防双退),跟 stale-sweep/enqueue-fail 一致,消未来重构双退风险;顺带清理改后 unused 的 `prepayEntryId` 解构。
+
+**类型**:seedance `(req.extra ?? {}) as Record`(无守卫)→ `asRecord(req.extra) ?? {}`。
+
+### 评估跳过 + 报告(负责任不盲做)
+
+- admin/provider `providerId: z.string()` 无 .max:adminProcedure 限管理员 + providerId 内部业务键,超长攻击面小 → 报告建议
+- api-usage:337 / compile.ts:124 的 `as Record` cast:**有 `typeof === 'object'` 守卫**,cast 安全,改写风险 > 收益 → 跳过
+- db-explorer findMany 无 orderBy(分页稳定性,admin 工具)/ media PROJECT scope 未带 deletedAt(软删项目极小影响)→ P2 报告建议
+
+### 验证
+
+typecheck 16/16 + test 11/11 全过。P1-1 env gate dev 不触发(NODE_ENV != production),mac-studio dev Mock 保持;prod 部署时配置损坏会抛错(正确防假成功)。
+
+**问题/待决策**
+- ❓ admin/provider .max + db-explorer orderBy + media deletedAt 3 项 P2 是否下次做
+- ❓ P1-1 env gate 上线 prod 前确认所有 binding provider 真配好(否则抛错)
+
+**下次接着做**
+- 📌 测 AIGC 视频抽卡(prod env gate 后需真配 provider)/ 60 集批量生成
+- 📌 (建议)B2/B3 DRY 重构 + admin .max / db-explorer orderBy P2
+
+---
+
 ## 2026-05-30(周六,mac-studio · 四十次收工)— 3 轮全库优化审查(3 agent 并行)+ 实施 16 项安全优化(死代码/类型/性能/重复抽取)
 
 **完成 — 跨 12 文件改 / 2 文件新 + 1 migration · typecheck 16/16 + test 11/11(adapters 10 + core 72 + api 25)· 净 -28 行**

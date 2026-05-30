@@ -10,6 +10,8 @@
  *
  * 这样 API Key 完全由后台管理，env 仅作私有部署的兜底通道。
  */
+import { ProviderError } from '@ss/shared';
+
 export * from './types.js';
 export { BaseProvider } from './base.js';
 export { SeedanceProvider } from './seedance.js';
@@ -182,8 +184,17 @@ async function loadConfig(providerId: string): Promise<ResolvedConfig> {
 export async function getVideoProvider(id: string): Promise<IVideoProvider> {
   const cfg = await loadConfig(id).catch(() => null);
 
-  // W5.4:配置缺失 / 无 key / inactive → fallback Mock,让 UI 端到端可演示
+  // W5.4:配置缺失 / 无 key / inactive → dev fallback Mock,让 UI 端到端可演示
+  // 四十收工 P1:prod 不静默 Mock — 否则配置损坏时 worker 写 Mock 样片标 SUCCESS + 按
+  //   unitPriceCny=0 错误退费,用户以为生成了真视频(真金白银错觉)。prod 应抛错让用户去
+  //   /admin/providers 修配置(跟 getTextProvider 抛错语义一致)。
   if (!cfg) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new ProviderError(
+        id,
+        `视频 Provider "${id}" 配置缺失 / 无 API Key / 已停用 — 去 /admin/providers 检查(生产环境不 fallback Mock)`,
+      );
+    }
     const cacheKey = `${id}-mock-noconfig`;
     const hit = cache.video.get(id);
     if (hit && hit.cacheKey === cacheKey) return hit.instance;
@@ -230,7 +241,15 @@ export async function getImageProvider(id: string): Promise<IImageProvider> {
     return instance;
   }
 
-  // Mock 兜底(无 cfg / 无 key / inactive / 无 protocol 声明)
+  // 四十收工 P1:走到 Mock 兜底说明无真实图像 provider(无 cfg / 无 key / inactive / protocol 非 openai-compat)。
+  //   prod 不静默 Mock(假成功 + 错误退费风险),抛错让用户去 /admin/providers 修;dev 保持 Mock 演示。
+  if (process.env.NODE_ENV === 'production') {
+    throw new ProviderError(
+      id,
+      `图像 Provider "${id}" 未真实接入(配置缺失 / 无 key / protocol 非 openai-compat)— 去 /admin/providers 检查(生产环境不 fallback Mock)`,
+    );
+  }
+  // Mock 兜底(dev 演示用,picsum 占位图)
   const hit = cache.image.get(id);
   const cacheKey = `${id}-mock-${cfg?.cacheKey ?? 'noconfig'}`;
   if (hit && hit.cacheKey === cacheKey) return hit.instance;

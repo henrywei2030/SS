@@ -1126,7 +1126,7 @@ export const aigcRouter = router({
       // 模式:transaction 内 锁 + inflight check + 占位 attempt(status=QUEUED)+ PREPAY entry。
       // 锁释放后占位 attempt 仍在 DB,其他并发 inflight check 会看到 QUEUED → 拒。
       // 后续检查(gachaMax/budget/compile)失败时 update 占位为 FAILED + 写 REFUND 退还 PREPAY;通过则 worker 接管。
-      const { attempt: earlyAttempt, prepayEntryId } = await ctx.prisma.$transaction(async (tx) => {
+      const { attempt: earlyAttempt } = await ctx.prisma.$transaction(async (tx) => {
         // 三十五收工 R2 Phase A:共享 helper(原 inline lock raw → acquireAigcVideoLock)
         await acquireAigcVideoLock(tx, grp.id);
         // 2026-05-27 audit r13 P0(用户反馈):stale RUNNING 自愈
@@ -1200,28 +1200,15 @@ export const aigcRouter = router({
               finishedAt: new Date(),
             },
           });
-          // 退还全部 PREPAY(费用 = -prepayEstimateCny,负数,sum 后净额 0)
-          await tx.costLedgerEntry.create({
-            data: {
-              userId: ctx.user.id,
-              projectId: grp.episode.projectId,
-              episodeId: grp.episodeId,
-              attemptId: earlyAttempt.id,
-              providerId,
-              modelId: providerId,
-              action: 'video.generate',
-              inputUnits: 0,
-              outputUnits: 0,
-              unitPriceCny: '0',
-              costCny: prepayEstimateCny > 0 ? (-prepayEstimateCny).toFixed(4) : '0',
-              // REFUND 永远 success=true(退还动作执行成功);task 成败用 GenerationAttempt.status 表达,
-              // 这样 ledger SUM(success:true) 自然把失败 task 的 PREPAY+REFUND 抵成 0
-              success: true,
-              entryType: 'REFUND',
-              refundReason: 'video_task_precheck_failed',
-              parentEntryId: prepayEntryId,
-              billingCycle: new Date().toISOString().slice(0, 7),
-            },
+          // 四十收工 P2:用共享 refundPrepayForAttempt(查 PREPAY + idempotent 防双退),
+          //   收敛退费单一真相源(跟 stale-sweep / enqueue-fail 一致),消除未来重构引入双退风险。
+          await refundPrepayForAttempt(tx, {
+            attemptId: earlyAttempt.id,
+            userId: ctx.user.id,
+            projectId: grp.episode.projectId,
+            episodeId: grp.episodeId,
+            providerId,
+            reason: 'video_task_precheck_failed',
           });
         });
         // r11 audit:err.message 可能含 Provider URL / token / stack trace,

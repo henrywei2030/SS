@@ -261,7 +261,7 @@ export async function processVideoGenJob(
 
   // ============ 成功路径 ============
   const finishedAt = new Date();
-  const safeName = groupNumber.replace(/[^a-zA-Z0-9_-]+/g, '_');
+  const safeName = String(groupNumber ?? '').replace(/[^a-zA-Z0-9_-]+/g, '_');
   const unitPrice = provider.info.defaultUnitPriceCny.toFixed(6);
 
   // Phase 1.5 P0-1:成功时不再写 NORMAL success entry,改写 REFUND 退多扣(prepaid - actual)
