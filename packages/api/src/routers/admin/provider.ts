@@ -57,7 +57,7 @@ const providerRouter = router({
   }),
 
   get: adminProcedure
-    .input(z.object({ providerId: z.string() }))
+    .input(z.object({ providerId: z.string().max(100) }))
     .query(async ({ ctx, input }) => {
       const all = await listProviderConfigs();
       const one = all.find((p) => p.providerId === input.providerId);
@@ -175,7 +175,7 @@ const providerRouter = router({
    *   - 真实场景:推荐 setActive=false 软关闭代替 delete
    */
   delete: adminProcedure
-    .input(z.object({ providerId: z.string(), confirmDelete: z.literal(true) }))
+    .input(z.object({ providerId: z.string().max(100), confirmDelete: z.literal(true) }))
     .mutation(async ({ ctx, input }) => {
       const cfg = await ctx.prisma.providerConfig.findUnique({
         where: { providerId: input.providerId },
@@ -203,7 +203,7 @@ const providerRouter = router({
   setApiKey: adminProcedure
     .input(
       z.object({
-        providerId: z.string(),
+        providerId: z.string().max(100),
         apiKey: z.string().min(8, 'API Key 至少 8 字符'),
       }),
     )
@@ -228,7 +228,7 @@ const providerRouter = router({
     }),
 
   clearApiKey: adminProcedure
-    .input(z.object({ providerId: z.string() }))
+    .input(z.object({ providerId: z.string().max(100) }))
     .mutation(async ({ ctx, input }) => {
       await clearProviderApiKey(input.providerId, ctx.user.id);
       await logOperation(ctx, 'provider.clearApiKey', 'provider', input.providerId, null, null);
@@ -236,7 +236,7 @@ const providerRouter = router({
     }),
 
   setActive: adminProcedure
-    .input(z.object({ providerId: z.string(), isActive: z.boolean() }))
+    .input(z.object({ providerId: z.string().max(100), isActive: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
       await setProviderActive(input.providerId, input.isActive, ctx.user.id);
       await logOperation(ctx, 'provider.setActive', 'provider', input.providerId, null, {
@@ -369,7 +369,7 @@ const providerRouter = router({
   updatePricing: adminProcedure
     .input(
       z.object({
-        providerId: z.string(),
+        providerId: z.string().max(100),
         unitPriceCny: z.number().nonnegative(),
         unitName: z.string(),
         maxConcurrent: z.number().int().positive().optional(),
@@ -418,7 +418,7 @@ const providerRouter = router({
     )
     .input(
       z.object({
-        providerId: z.string(),
+        providerId: z.string().max(100),
         /** 图像/视频默认 dryRun=true(只 verify 配置,不真生成防扣钱);text 总是真调(消耗 < 50 token) */
         dryRun: z.boolean().default(true),
       }),

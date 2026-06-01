@@ -53,7 +53,7 @@ async function assertEpisodeNotGenerating(
 // ---------------------------------------------------------------------------
 
 // W7+ audit R10:assertProjectAccess 抽到 middleware/access.ts
-import { assertProjectAccess } from '../middleware/access.js';
+import { assertProjectAccess, loadEpisodeOrThrow } from '../middleware/access.js';
 
 async function loadScriptWithAccess(ctx: Context, scriptId: string) {
   if (!ctx.user) throw new TRPCError({ code: 'UNAUTHORIZED' });
@@ -543,19 +543,10 @@ export const scriptRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.user) throw new TRPCError({ code: 'UNAUTHORIZED' });
-      const ep = await ctx.prisma.episode.findFirst({
-        where: { id: input.episodeId, deletedAt: null },
+      const ep = await loadEpisodeOrThrow(ctx, input.episodeId, {
+        // 软锁守卫:生成分镜中禁止改剧本(防跨版本 shot)
+        lockMessage: '本集正在生成分镜,无法保存编辑(等生成完成或解锁后重试)',
       });
-      if (!ep) throw new TRPCError({ code: 'NOT_FOUND', message: '集不存在' });
-      await assertProjectAccess(ctx, ep.projectId);
-      // 软锁守卫:生成分镜中禁止改剧本(防跨版本 shot)
-      if (isEpisodeLockedNow(ep)) {
-        throw new TRPCError({
-          code: 'CONFLICT',
-          message: '本集正在生成分镜,无法保存编辑(等生成完成或解锁后重试)',
-        });
-      }
 
       const { script, created } = await createNextVersion(ctx, {
         projectId: ep.projectId,
@@ -596,18 +587,9 @@ export const scriptRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.user) throw new TRPCError({ code: 'UNAUTHORIZED' });
-      const ep = await ctx.prisma.episode.findFirst({
-        where: { id: input.episodeId, deletedAt: null },
+      const ep = await loadEpisodeOrThrow(ctx, input.episodeId, {
+        lockMessage: '本集正在生成分镜,无法清空剧本',
       });
-      if (!ep) throw new TRPCError({ code: 'NOT_FOUND', message: '集不存在' });
-      await assertProjectAccess(ctx, ep.projectId);
-      if (isEpisodeLockedNow(ep)) {
-        throw new TRPCError({
-          code: 'CONFLICT',
-          message: '本集正在生成分镜,无法清空剧本',
-        });
-      }
       const now = new Date();
       const result = await ctx.prisma.script.updateMany({
         where: { episodeId: ep.id, deletedAt: null },
@@ -661,12 +643,7 @@ export const scriptRouter = router({
   listVersions: protectedProcedure
     .input(z.object({ episodeId: z.string().cuid() }))
     .query(async ({ ctx, input }) => {
-      if (!ctx.user) throw new TRPCError({ code: 'UNAUTHORIZED' });
-      const ep = await ctx.prisma.episode.findFirst({
-        where: { id: input.episodeId, deletedAt: null },
-      });
-      if (!ep) throw new TRPCError({ code: 'NOT_FOUND', message: '集不存在' });
-      await assertProjectAccess(ctx, ep.projectId);
+      await loadEpisodeOrThrow(ctx, input.episodeId, { skipLockCheck: true });
 
       return ctx.prisma.script.findMany({
         where: { episodeId: input.episodeId, deletedAt: null },

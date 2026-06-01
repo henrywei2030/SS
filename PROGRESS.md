@@ -5,6 +5,47 @@
 
 ---
 
+## 2026-06-01(周一,mac-studio · 四十三次收工)— P2 三件套清理 + B3 loadEpisodeOrThrow 抽 access.ts 替 5 点 + B2 判 won't-fix + 真打 14ee9f6 资产分类 + 7 路径真打验证
+
+**完成 — 跨 7 文件改 · 净 -13 行 · typecheck 16/16 + test 11/11 + 真打 7 路径**
+
+### 触发场景
+
+开工 mac-studio,强同步拉 14ee9f6(四十二收工 mac-mini 的素材库资产分类 + 图片预览),`migrate deploy` 应用 `20260530000000_media_item_asset_category`。用户"根据你的思路继续"→ 定方向:先验证刚拉 commit 稳(typecheck/test baseline 全绿)→ 清最快收益的 P2 三件套 → 真打 14ee9f6 → B2/B3 重构。
+
+### P2 三件套(四一收工留的报告建议项,13 行 / 3 文件)
+
+- **admin/provider.ts**:7 处 `providerId: z.string()` → `.max(100)`(防超长 DoS attack surface,replace_all)
+- **admin/db-explorer.ts**:`queryTable` findMany 加 `orderBy: { id: 'desc' }`(无 orderBy 时 Prisma 按物理顺序返,翻页可能重复/漏行;白名单表全有 id PK)
+- **media.ts**:`setAssetCategory`/`toggleFavorite`/`getSignedUrl` 3 处 PROJECT scope `project.findFirst` 加 `deletedAt: null`(软删项目一致性,跟同文件 upload 对齐)
+
+### 真打验证 14ee9f6(资产分类 + 图片预览)
+
+Chrome MCP admin session 真打 /library:插 3 条 `external://picsum` IMAGE 测试记录 → ① 图片预览 `previewUrl` 三张真图渲染 ✓ ② chip 语义色(蓝人物/绿场景/灰未归类)✓ ③ 卡片底部 select 改类别(PROP)网络 200 + chip 联动 ✓ ④ 筛选条 `assetCategory=PROP`/`UNCLASSIFIED` 双路径网络 200(UNCLASSIFIED→null 转换正确)。测完删 3 测试记录 + 恢复真实视频 assetCategory=NULL。
+
+### B3 — loadEpisodeOrThrow 抽到 middleware/access.ts(单一真相源)
+
+原 aigc.ts 局部函数,script/asset 各自 inline 重复 `if(!ctx.user)+findFirst(deletedAt:null)+NOT_FOUND+assertProjectAccess` 四行套。抽到 access.ts(跟 assertProjectAccess 同源;access.ts→episode-lock.ts 单向依赖**无循环**)+ 加可选 `lockMessage` 参数让 mutation 点也能一行替换并保留定制锁消息(比"skipLockCheck+自己 check"更 DRY)。**替换 5 点**:script.listVersions / asset.listEpisodeAssets / asset.detectGaps(只读 `{skipLockCheck:true}` 完全替换)+ script.saveContent / deleteAllForEpisode(`{lockMessage}` 保留"无法保存编辑"/"无法清空剧本")。**有意不碰 3 处**(注释标 ⚠️):project.assignUser(assertProjectAdmin + include project)/ asset.bindUsage(where 带 projectId 归属)/ aigc 自身 2 处(本来就用 helper)。
+
+### B2 — 判 won't-fix(负责任不盲做)
+
+aigc.updateGroupPrompt 的 `tx.promptEdit.create`(**事务内无 try/catch**,失败回滚跟 shotGroup.update 原子)vs asset.recordAssetEdit(**非事务 fire-and-forget**,try/catch 吞异常不阻塞主操作 + TRAINABLE_FIELDS/typeof/equality 三道 guard)— 语义/事务边界/错误处理完全冲突,强行合并 helper 会破坏两边各自正确的行为。
+
+### 验证(三重)
+
+typecheck 16/16(删 `if(!ctx.user)` 守卫后仍过 → 证明这些 procedure 后续不直接用 ctx.user.id,都经 ctx 传 logOperation/createNextVersion)+ test 11/11 + **真打 7 路径**(浏览器 admin session 直调 tRPC):3 query happy 200 + not-found 404「集不存在」/ 2 mutation not-found 404 不改数据 / 2 mutation **locked → 409 定制消息**(「无法保存编辑」/「无法清空剧本」非默认 AIGC 消息)。测 lock 临时设 episode2 GENERATING,测完已恢复 NOT_STARTED。
+
+**问题/待决策**
+- ❓ 发现 14ee9f6 把四十二收工 PROGRESS 日志**错位到 line 105**(应在顶部倒序首位),本次未擅自移动他人大段日志 — 建议手动把四十二段移到顶部理顺
+- ❓ AIGC 真打 / 60 集压测需 provider 真配 + 真扣费(各机独立),mac-studio 本地 provider 是否已配待确认
+
+**下次接着做**
+- 📌 测 AIGC 视频抽卡(prod env gate 后需真配 provider)/ 60 集批量生成压测
+- 📌 (可选)理顺 PROGRESS 四十二日志错位
+- 📌 (follow-up)docs/04 加 assetCategory 字段 / AIGC 工坊视频参考资产按 category 过滤
+
+---
+
 ## 2026-05-30(周六,mac-studio · 四一次收工)— bug/安全聚焦补审 + 修 2 真 P1(provider 静默 Mock 假成功 / worker groupNumber 崩)+ P2 退费单一真相
 
 **完成 — 跨 4 文件改 · typecheck 16/16 + test 11/11(adapters 10 + core 72 + api 25)**

@@ -95,28 +95,7 @@ async function getVideoBindings(ctx: Context): Promise<{
 // 通用访问校验 — 抽到 ../middleware/access.ts(W7+ audit R10)
 // ---------------------------------------------------------------------------
 
-import { assertProjectAccess } from '../middleware/access.js';
-
-async function loadEpisodeOrThrow(
-  ctx: Context,
-  episodeId: string,
-  opts: { skipLockCheck?: boolean } = {},
-) {
-  if (!ctx.user) throw new TRPCError({ code: 'UNAUTHORIZED' });
-  const ep = await ctx.prisma.episode.findFirst({
-    where: { id: episodeId, deletedAt: null },
-  });
-  if (!ep) throw new TRPCError({ code: 'NOT_FOUND', message: '集不存在' });
-  await assertProjectAccess(ctx, ep.projectId);
-  // W1-W5 audit 三轮 L1:写操作必须先确认 episode 没在 fresh GENERATING
-  if (!opts.skipLockCheck && isEpisodeLockedNow(ep)) {
-    throw new TRPCError({
-      code: 'CONFLICT',
-      message: '本集正在生成分镜中,请等导演侧完成后再操作 AIGC 工作台',
-    });
-  }
-  return ep;
-}
+import { assertProjectAccess, loadEpisodeOrThrow } from '../middleware/access.js';
 
 /**
  * loadGroupOrThrow 选项:

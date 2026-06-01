@@ -145,6 +145,9 @@ const dbExplorerRouter = router({
           model.findMany({
             take: input.pageSize,
             skip: (input.page - 1) * input.pageSize,
+            // 四二收工 P2:无 orderBy 时 Prisma 按 DB 物理顺序返,翻页可能重复/漏行;
+            // 白名单表全有 id PK(cuid/uuid 单调,跟 createdAt 顺序大体一致),id desc 让最新数据先看到
+            orderBy: { id: 'desc' },
           }),
           model.count(),
         ]);

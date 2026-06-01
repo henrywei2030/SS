@@ -35,7 +35,7 @@ import { loadSystemSettings } from '../utils/system-bindings.js';
 // ---------------------------------------------------------------------------
 
 // W7+ audit R10:assertProjectAccess 抽到 middleware/access.ts(原 5 router 各一份)
-import { assertProjectAccess } from '../middleware/access.js';
+import { assertProjectAccess, loadEpisodeOrThrow } from '../middleware/access.js';
 
 async function loadAssetWithAccess(ctx: Context, assetId: string) {
   if (!ctx.user) throw new TRPCError({ code: 'UNAUTHORIZED' });
@@ -1492,12 +1492,7 @@ export const assetRouter = router({
   listEpisodeAssets: protectedProcedure
     .input(z.object({ episodeId: z.string().cuid() }))
     .query(async ({ ctx, input }) => {
-      if (!ctx.user) throw new TRPCError({ code: 'UNAUTHORIZED' });
-      const ep = await ctx.prisma.episode.findFirst({
-        where: { id: input.episodeId, deletedAt: null },
-      });
-      if (!ep) throw new TRPCError({ code: 'NOT_FOUND', message: '集不存在' });
-      await assertProjectAccess(ctx, ep.projectId);
+      const ep = await loadEpisodeOrThrow(ctx, input.episodeId, { skipLockCheck: true });
 
       const bindings = await ctx.prisma.assetUsageBinding.findMany({
         where: { episodeId: ep.id, deletedAt: null },
@@ -1644,12 +1639,7 @@ export const assetRouter = router({
   detectGaps: protectedProcedure
     .input(z.object({ episodeId: z.string().cuid() }))
     .query(async ({ ctx, input }) => {
-      if (!ctx.user) throw new TRPCError({ code: 'UNAUTHORIZED' });
-      const ep = await ctx.prisma.episode.findFirst({
-        where: { id: input.episodeId, deletedAt: null },
-      });
-      if (!ep) throw new TRPCError({ code: 'NOT_FOUND', message: '集不存在' });
-      await assertProjectAccess(ctx, ep.projectId);
+      const ep = await loadEpisodeOrThrow(ctx, input.episodeId, { skipLockCheck: true });
 
       const scenes = await ctx.prisma.scene.findMany({
         where: { episodeId: ep.id, deletedAt: null },

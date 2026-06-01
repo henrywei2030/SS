@@ -397,6 +397,7 @@ export const mediaRouter = router({
         const accessible = await ctx.prisma.project.findFirst({
           where: {
             id: m.projectId,
+            deletedAt: null,
             OR: [
               { ownerId: ctx.user.id },
               { members: { some: { userId: ctx.user.id } } },
@@ -430,6 +431,7 @@ export const mediaRouter = router({
         const accessible = await ctx.prisma.project.findFirst({
           where: {
             id: m.projectId,
+            deletedAt: null,
             OR: [
               { ownerId: ctx.user.id },
               { members: { some: { userId: ctx.user.id } } },
@@ -511,6 +513,7 @@ export const mediaRouter = router({
         const accessible = await ctx.prisma.project.findFirst({
           where: {
             id: m.projectId,
+            deletedAt: null,
             OR: [
               { ownerId: ctx.user.id },
               { members: { some: { userId: ctx.user.id } } },
