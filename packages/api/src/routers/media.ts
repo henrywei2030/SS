@@ -65,8 +65,8 @@ export const mediaRouter = router({
         pageSize: z.number().min(12).max(60).default(48),
         scope: SCOPE_ENUM.optional(),
         kind: KIND_ENUM.optional(),
-        // 四二收工:资产类别筛选(CHARACTER/SCENE/PROP/OTHER/UNCLASSIFIED)
-        assetCategory: z.enum(['CHARACTER', 'SCENE', 'PROP', 'OTHER', 'UNCLASSIFIED']).optional(),
+        // 四二收工:资产类别筛选(CHARACTER/SCENE/PROP/OTHER/VIDEO/UNCLASSIFIED)
+        assetCategory: z.enum(['CHARACTER', 'SCENE', 'PROP', 'OTHER', 'VIDEO', 'UNCLASSIFIED']).optional(),
         projectId: z.string().cuid().optional(),
         favorited: z.boolean().optional(),
         search: z.string().max(100).optional(),
@@ -168,7 +168,9 @@ export const mediaRouter = router({
       const itemsWithPreview = await Promise.all(
         items.map(async (m) => {
           let previewUrl: string | null = m.cdnUrl ?? null;
-          if (m.kind === 'IMAGE' && !previewUrl) {
+          // 需求2:VIDEO 也 sign previewUrl(上传视频走 minio sign / external:// 直接 strip)
+          //   AIGC 视频 cdnUrl 已填(=videoUrl)→ 上面已赋值,此处跳过
+          if ((m.kind === 'IMAGE' || m.kind === 'VIDEO') && !previewUrl) {
             if (m.storageKey.startsWith('external://')) {
               previewUrl = m.storageKey.replace(/^external:\/\//, '');
             } else if (m.storageKey.startsWith('placeholder://')) {
@@ -211,7 +213,7 @@ export const mediaRouter = router({
         mimeType: z.string().max(100).optional(),
         tags: z.array(z.string().max(40)).max(20).default([]),
         // 四二收工:资产归属类别(CHARACTER/SCENE/PROP/OTHER),null=未归类
-        assetCategory: z.enum(['CHARACTER', 'SCENE', 'PROP', 'OTHER']).optional(),
+        assetCategory: z.enum(['CHARACTER', 'SCENE', 'PROP', 'OTHER', 'VIDEO']).optional(),
         // Phase 1.5 P0-5:同步到中转站素材库(获 asset:// 引用,后续视频生成免重传)
         // 默认 false — 仅 W4 资产首图 / W5 视频参考图等"高频复用"场景显式开启
         // 需先在 SystemSetting `relay.assets.default_group_id` 配 group_id 才生效
@@ -382,7 +384,7 @@ export const mediaRouter = router({
     .input(
       z.object({
         mediaId: z.string().cuid(),
-        assetCategory: z.enum(['CHARACTER', 'SCENE', 'PROP', 'OTHER']).nullable(),
+        assetCategory: z.enum(['CHARACTER', 'SCENE', 'PROP', 'OTHER', 'VIDEO']).nullable(),
       }),
     )
     .mutation(async ({ ctx, input }) => {

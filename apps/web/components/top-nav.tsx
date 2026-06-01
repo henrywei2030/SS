@@ -47,7 +47,28 @@ export function TopNav({
   const locale = params.locale;
   // 用户反馈 r5:顶栏按钮在项目详情页仍显示 disabled(因 workspace layout 没传 currentProject prop)
   // 兜底从 URL params 取 id,确保项目级路由下按钮可用
-  const projectId = currentProject?.id ?? params.id;
+  const urlProjectId = currentProject?.id ?? params.id;
+  // 需求1:进项目后记住当前项目 — 去全局页(素材库/数据/管理 无 [id] param)时
+  //   顶栏模块按钮(导演/美术/AIGC/团队)仍可点回该项目,不再变灰 disabled
+  const [rememberedId, setRememberedId] = React.useState<string | undefined>(undefined);
+  React.useEffect(() => {
+    if (urlProjectId) {
+      try {
+        localStorage.setItem('ss:lastProjectId', urlProjectId);
+      } catch {
+        /* localStorage 不可用(隐私模式)忽略 */
+      }
+      setRememberedId(urlProjectId);
+    } else {
+      try {
+        const stored = localStorage.getItem('ss:lastProjectId');
+        if (stored) setRememberedId(stored);
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [urlProjectId]);
+  const projectId = urlProjectId ?? rememberedId;
 
   async function onLogout(): Promise<void> {
     await fetch('/api/auth/logout', { method: 'POST' });

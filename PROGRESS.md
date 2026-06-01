@@ -5,6 +5,46 @@
 
 ---
 
+## 2026-06-02(周二,mac-studio · 四十五次收工)— 素材库 4 项 UX:顶栏跨页可点 + 视频预览播放 + 视频友好命名(项目名-第N集-分镜M-第K次)+ VIDEO 资产类 + 返回按钮
+
+**完成 — 4 文件改 · +106/-11 · typecheck 16/16 + test 11/11 + Chrome 真打 4 需求全过**
+
+### 触发场景
+
+用户截图素材库反馈 4 需求 + 后续命名规则修订(加项目名前缀)。dev server 真打逐项验证。
+
+### 需求1 顶栏导航跨页可点(top-nav.tsx)
+
+全局页(素材库/数据/管理,URL 无 `[id]` param)顶栏"导演/美术/AIGC/团队"按钮原变灰 disabled。**localStorage 记住当前项目**(`ss:lastProjectId`):进项目存,全局页读兜底 `projectId = urlProjectId ?? rememberedId`。真打:素材库 hover"导演▾"弹"剧本管理/分镜工坊"子菜单可进入。
+
+### 需求2 视频预览播放(media.ts + library-view.tsx)
+
+- 后端:`previewUrl` 对 VIDEO 也签发(原仅 IMAGE;AIGC 视频 cdnUrl 已有 / 上传视频 minio sign / external:// strip)
+- 前端:视频卡片显 ▶ 播放按钮 → 点击打开 `<video controls autoPlay>` dialog(列表不预加载省资源)。真打:dialog + 播放器渲染正确
+
+### 需求3 友好命名 + VIDEO 资产类
+
+- 命名(worker processor.ts):`项目名-第N集-分镜M-第K次.mp4`(查 project.name + episode.number + 该组 attempt 计数;sanitizeName 去文件系统非法字符、中文保留)替原 `groupNumber-时间戳`。真打插测试:`test-第2集-分镜1-第1次.mp4` ✓
+- VIDEO 类别:assetCategory enum 全栈加 'VIDEO'(media.ts 3 enum + library-view chip 行/卡片下拉/上传 dialog),worker 视频沉淀自动 `assetCategory='VIDEO'` → 紫色"视频"chip + "视频"筛选命中
+
+### 需求4 素材库返回按钮(library-view.tsx)
+
+header 左上加 `<BackButton href={/${locale}/projects} label="返回项目列表" />`(全局页 → 项目列表)
+
+### 验证
+
+typecheck 16/16 + test 11/11 + Chrome MCP 真打 4 需求全过(顶栏子菜单 / video dialog / 友好命名+VIDEO chip / 返回按钮)。测试用 MediaItem 插完即清。
+
+**问题/待决策**
+- ❓ 旧视频(`1-时间戳.mp4`)命名不变,仅新生成用新格式(worker 写入侧)— 如需批量重命名旧数据另开任务
+- ❓ 视频 previewUrl 用 external moyu url(24h 过期)— 旧视频播放会失败,Phase 2 接 CDN/转存后长效
+
+**下次接着做**
+- 📌 测真 AIGC 视频抽卡(prod env gate 后需 provider 真配)看新命名 + 真播放端到端
+- 📌 60 集批量生成压测
+
+---
+
 ## 2026-06-02(周二,mac-studio · 四十四次收工)— 全库审查清理:死代码/未用 import/死文件 + 文档精简(PROGRESS -1188 / TODO -183)
 
 **完成 — 31 文件改 · 删 6 文件 · 净 -1878 行 · typecheck 16/16 + test 11/11 + 后端 noUnusedLocals 0**

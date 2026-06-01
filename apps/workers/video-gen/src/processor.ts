@@ -261,18 +261,29 @@ export async function processVideoGenJob(
 
   // ============ 成功路径 ============
   const finishedAt = new Date();
-  const safeName = String(groupNumber ?? '').replace(/[^a-zA-Z0-9_-]+/g, '_');
   const unitPrice = provider.info.defaultUnitPriceCny.toFixed(6);
 
   // Phase 1.5 P0-1:成功时不再写 NORMAL success entry,改写 REFUND 退多扣(prepaid - actual)
   // (PREPAY 已由 router 写入,此处只补充 REFUND;最终 sum = prepaid - (prepaid - actual) = actual)
   const { mediaId, updatedAttemptId } = await prisma.$transaction(async (tx) => {
+    // 需求3:友好命名「项目名-第N集-分镜M-第K次」(替原 groupNumber-时间戳)+ 视频生成物自动归"视频"资产类
+    const [proj, ep] = await Promise.all([
+      tx.project.findUnique({ where: { id: projectId }, select: { name: true } }),
+      tx.episode.findUnique({ where: { id: episodeId }, select: { number: true } }),
+    ]);
+    const takeSeq = await tx.generationAttempt.count({ where: { shotGroupId } });
+    // 文件名片段:去文件系统非法字符(中文保留),空兜底
+    const sanitizeName = (s: string): string => s.replace(/[/\\:*?"<>|]+/g, '_').trim();
+    const projPart = sanitizeName(proj?.name ?? '') || '项目';
+    const epPart = ep?.number ? `第${sanitizeName(String(ep.number))}集` : '本集';
+    const safeGroup = String(groupNumber ?? '').replace(/[^a-zA-Z0-9_-]+/g, '_') || '组';
     const media = await tx.mediaItem.create({
       data: {
         projectId,
         scope: 'PROJECT',
         kind: 'VIDEO',
-        filename: `${safeName}-${startedAt.getTime()}.mp4`,
+        filename: `${projPart}-${epPart}-分镜${safeGroup}-第${takeSeq}次.mp4`,
+        assetCategory: 'VIDEO',
         mimeType: 'video/mp4',
         sizeBytes: 0, // Phase 1 不真实下载
         storageKey: result.videoUrl.startsWith('http')

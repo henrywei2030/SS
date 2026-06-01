@@ -1,5 +1,6 @@
 'use client';
 import * as React from 'react';
+import { useParams } from 'next/navigation';
 import { toast } from 'sonner';
 import {
   Search,
@@ -12,17 +13,19 @@ import {
   X,
   Loader2,
   Sparkles,
+  Play,
 } from 'lucide-react';
 
 import { trpc } from '@/lib/trpc/client';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { BackButton } from '@/components/ui/back-button';
 
 type MediaKind = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'THREE_D' | 'OTHER';
 type MediaScope = 'PUBLIC' | 'PROJECT' | 'PERSONAL';
 type ViewMode = 'all' | 'favorites' | 'project' | 'public';
 
-// 四二收工:资产类别(跟 router 的 enum 对齐)
-type AssetCategory = 'CHARACTER' | 'SCENE' | 'PROP' | 'OTHER';
+// 四二收工:资产类别(跟 router 的 enum 对齐)· 四五收工加 VIDEO(成片归类)
+type AssetCategory = 'CHARACTER' | 'SCENE' | 'PROP' | 'OTHER' | 'VIDEO';
 type CategoryFilter = '' | AssetCategory | 'UNCLASSIFIED';
 
 const CATEGORY_LABEL: Record<AssetCategory, string> = {
@@ -30,6 +33,7 @@ const CATEGORY_LABEL: Record<AssetCategory, string> = {
   SCENE: '场景',
   PROP: '道具',
   OTHER: '其他',
+  VIDEO: '视频',
 };
 
 // chip 配色:跟 ColorBadges 系统对齐(语义色,不硬编码 tailwind 色)
@@ -38,6 +42,7 @@ const CATEGORY_CHIP_CLASS: Record<AssetCategory, string> = {
   SCENE: 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300',
   PROP: 'bg-amber-500/20 text-amber-700 dark:text-amber-300',
   OTHER: 'bg-slate-500/20 text-slate-700 dark:text-slate-300',
+  VIDEO: 'bg-purple-500/20 text-purple-700 dark:text-purple-300',
 };
 
 const KIND_ICONS: Record<MediaKind, React.ComponentType<{ className?: string }>> = {
@@ -82,6 +87,10 @@ export function LibraryView(): React.ReactElement {
   const [pageSize] = React.useState(48);
   const [uploadOpen, setUploadOpen] = React.useState(false);
   const [deleteConfirm, setDeleteConfirm] = React.useState<{ id: string; name: string } | null>(null);
+  // 需求2:视频播放 dialog
+  const [videoPreview, setVideoPreview] = React.useState<{ url: string; name: string } | null>(null);
+  const params = useParams<{ locale: string }>();
+  const locale = params.locale ?? 'zh-CN';
 
   const queryInput = React.useMemo(
     () => ({
@@ -135,6 +144,10 @@ export function LibraryView(): React.ReactElement {
     <div>
       <header className="mb-4 flex items-center justify-between">
         <div>
+          {/* 需求4:素材库返回按钮(全局页 → 返回项目列表) */}
+          <div className="mb-2">
+            <BackButton href={`/${locale}/projects`} label="返回项目列表" />
+          </div>
           <h1 className="text-2xl font-semibold">素材库</h1>
           <p className="mt-1 text-sm text-[hsl(var(--color-muted-foreground))]">
             上传/分类/搜索 · AIGC 生成物自动沉淀 · 跨项目复用
@@ -178,13 +191,14 @@ export function LibraryView(): React.ReactElement {
       {/* 四二收工:资产类别 chip 行(全部 / 人物 / 场景 / 道具 / 其他 / 未归类) */}
       <div className="mb-4 flex items-center gap-2 text-xs">
         <span className="text-[hsl(var(--color-muted-foreground))]">资产类别:</span>
-        {(['', 'CHARACTER', 'SCENE', 'PROP', 'OTHER', 'UNCLASSIFIED'] as const).map((c) => {
+        {(['', 'CHARACTER', 'SCENE', 'PROP', 'OTHER', 'VIDEO', 'UNCLASSIFIED'] as const).map((c) => {
           const labels: Record<CategoryFilter, string> = {
             '': '全部',
             CHARACTER: CATEGORY_LABEL.CHARACTER,
             SCENE: CATEGORY_LABEL.SCENE,
             PROP: CATEGORY_LABEL.PROP,
             OTHER: CATEGORY_LABEL.OTHER,
+            VIDEO: CATEGORY_LABEL.VIDEO,
             UNCLASSIFIED: '未归类',
           };
           const active = categoryFilter === c;
@@ -286,6 +300,19 @@ export function LibraryView(): React.ReactElement {
                           (e.currentTarget as HTMLImageElement).style.display = 'none';
                         }}
                       />
+                    ) : m.kind === 'VIDEO' && m.previewUrl ? (
+                      // 需求2:视频可点击播放 — 缩略区显播放按钮,点击打开 dialog(列表不预加载视频省资源)
+                      <button
+                        type="button"
+                        onClick={() => setVideoPreview({ url: m.previewUrl!, name: m.filename })}
+                        className="group/v flex h-full w-full flex-col items-center justify-center text-[hsl(var(--color-muted-foreground))] transition-colors hover:bg-black/10"
+                        title="点击播放视频"
+                      >
+                        <span className="flex size-12 items-center justify-center rounded-full bg-black/60 text-white transition-transform group-hover/v:scale-110">
+                          <Play className="size-6 fill-current" />
+                        </span>
+                        <span className="mt-2 text-[10px] uppercase">VIDEO</span>
+                      </button>
                     ) : (
                       <div className="flex h-full flex-col items-center justify-center text-[hsl(var(--color-muted-foreground))]">
                         <Icon className="size-10" />
@@ -367,6 +394,7 @@ export function LibraryView(): React.ReactElement {
                       <option value="SCENE">场景</option>
                       <option value="PROP">道具</option>
                       <option value="OTHER">其他</option>
+                      <option value="VIDEO">视频</option>
                     </select>
                   </div>
                 </div>
@@ -419,6 +447,38 @@ export function LibraryView(): React.ReactElement {
           onConfirm={() => softDelete.mutate({ mediaId: deleteConfirm.id })}
           onClose={() => setDeleteConfirm(null)}
         />
+      )}
+
+      {/* 需求2:视频播放 dialog(点缩略图播放按钮打开) */}
+      {videoPreview && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setVideoPreview(null)}
+        >
+          <div className="relative w-full max-w-3xl" onClick={(e) => e.stopPropagation()}>
+            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+            <video
+              src={videoPreview.url}
+              controls
+              autoPlay
+              className="max-h-[80vh] w-full rounded-lg bg-black"
+            />
+            <div className="mt-2 flex items-center justify-between text-xs text-white">
+              <span className="truncate" title={videoPreview.name}>
+                {videoPreview.name}
+              </span>
+              <button
+                type="button"
+                onClick={() => setVideoPreview(null)}
+                className="ml-2 shrink-0 rounded border border-white/30 px-2 py-1 hover:bg-white/10"
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -564,6 +624,7 @@ function UploadDialog({
                 ['SCENE', '场景'],
                 ['PROP', '道具'],
                 ['OTHER', '其他'],
+                ['VIDEO', '视频'],
               ] as const).map(([v, label]) => {
                 const active = assetCategory === v;
                 return (
