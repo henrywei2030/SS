@@ -21,7 +21,6 @@
  *   - `successCount/failedCount` 从 attempt 来,跟 `aigc.listGroups.videoTakes` 同源,
  *     `rejected:false` 过滤,避免废片虚高
  */
-import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
 import { Prisma } from '@ss/db';

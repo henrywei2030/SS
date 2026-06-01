@@ -62,11 +62,6 @@ export interface SeedanceConfig {
   endpointStyle?: 'ark' | 'relay';
 }
 
-interface CreateTaskResponse {
-  id: string;
-  status: string;
-}
-
 /**
  * 2026-05-27 audit r15 用户反馈根因:
  *   Seedance 2.0 真实 query response 跟 1.x ARK 完全不同(docs §15),

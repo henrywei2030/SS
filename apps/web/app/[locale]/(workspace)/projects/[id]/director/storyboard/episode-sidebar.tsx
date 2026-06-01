@@ -56,7 +56,7 @@ export function EpisodeSidebar({
   });
 
   const setLock = trpc.storyboard.setBatchLock.useMutation({
-    onSuccess: (res, vars) => {
+    onSuccess: (res) => {
       toast.success(res.batchLocked ? '已锁定 — 批量生成将跳过本集' : '已解锁 — 可参与批量生成');
       void utils.storyboard.listEpisodes.invalidate();
     },

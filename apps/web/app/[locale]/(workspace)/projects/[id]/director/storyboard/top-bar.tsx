@@ -438,7 +438,6 @@ function ShotsActions({
 
   const publish = trpc.storyboard.publishEpisode.useMutation({
     onSuccess: (res) => {
-      const aigcReady = res.groupCount > 0;
       // 用户反馈 r3:确认发布后 AIGC 模块要看到最新分镜 + prompt
       // AIGC 直接 query 活表,只需让 react-query cache 失效
       void utils.aigc.listGroups.invalidate({ episodeId: res.episodeId });

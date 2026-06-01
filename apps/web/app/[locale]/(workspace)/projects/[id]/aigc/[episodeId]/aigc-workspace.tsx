@@ -33,8 +33,7 @@ export function AigcWorkspace({
   const searchParams = useSearchParams();
 
   const utils = trpc.useUtils();
-  const { data: groups, refetch: refetchGroups } =
-    trpc.aigc.listGroups.useQuery({ episodeId });
+  const { data: groups } = trpc.aigc.listGroups.useQuery({ episodeId });
 
   // 用户反馈 r8:不再切换"选中 group",所有 group 在主区垂直堆叠同时显示
   // ?g=xxx URL 参数仅作初始 scroll 锚点(进入页面后定位到指定 group)

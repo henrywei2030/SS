@@ -17,7 +17,6 @@
 
 | 脚本 | 创建时间 | 当时目的 | 何时可删 |
 |---|---|---|---|
-| `fix-seedance-provider-config.mjs` | 二十五收工(2026-05-27) | r13 audit 发现 ProviderConfig.defaultParams 缺字段,一次性修复脚本 | **可删**(目的已达成 + DB 已修;留作 catalog 重建模板) |
 | `relay-batch-test.mjs` | 二十二收工(2026-05-25) | 中转站 107 非视频模型批量连接性测试(给新 token 用) | 长期保留(每次添加新中转站时跑一遍) |
 | `relay-real-test.mjs` | 二十二收工 | 中转站端到端真打(TEXT max_tokens=1 / IMAGE 探活) | 长期保留(同上) |
 | `test-admin-provider-crud.mjs` | 二十二收工 | admin Provider CRUD 端到端验证 | 长期保留(Provider 管理改动时回归) |

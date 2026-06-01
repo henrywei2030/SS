@@ -13,12 +13,6 @@ export class SsError extends Error {
   }
 }
 
-export class NotFoundError extends SsError {
-  constructor(resource: string, id?: string) {
-    super('NOT_FOUND', `${resource}${id ? ` ${id}` : ''} not found`, 404);
-  }
-}
-
 export class ForbiddenError extends SsError {
   constructor(reason = 'forbidden') {
     super('FORBIDDEN', reason, 403);

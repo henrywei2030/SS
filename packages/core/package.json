@@ -10,9 +10,7 @@
     "./storyboard": "./storyboard/index.ts",
     "./generation": "./generation/index.ts",
     "./video-generation": "./video-generation/index.ts",
-    "./cost": "./cost/index.ts",
     "./asset": "./asset/index.ts",
-    "./analytics": "./analytics/index.ts",
     "./script": "./script/index.ts"
   },
   "scripts": {

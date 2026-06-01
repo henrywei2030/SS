@@ -14,37 +14,10 @@
  *   - admin.user      全局用户管理
  */
 import { TRPCError } from '@trpc/server';
-import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
-import {
-  listProviderConfigs,
-  setProviderApiKey,
-  clearProviderApiKey,
-  setProviderActive,
-  getTextProvider,
-  getImageProvider,
-  getVideoProvider,
-  // Phase 1.5.1 multi-credential RelayProvider 管理(2026-05-25 升级)
-  listRelayProviders,
-  createRelayProvider,
-  updateRelayProvider,
-  setRelayProviderApiKey,
-  clearRelayProviderApiKey,
-  deleteRelayProvider,
-} from '@ss/adapters/provider';
-import { prisma } from '@ss/db';
-import {
-  sanitizeErrorMsg,
-  listCatalogSummaries,
-  findRelayModel,
-  getRelayModels,
-} from '@ss/shared';
-
-import { router, adminProcedure, rateLimit } from '../../trpc.js';
+import { router, adminProcedure } from '../../trpc.js';
 import { logOperation } from '../../middleware/audit.js';
-// 第 23 轮 audit P1:apiUrl SSRF 防御
-import { validateApiUrl } from '../../utils/url-safety.js';
 
 // ---------------------------------------------------------------------------
 // admin.user — 全局用户管理(W6 Collab Hub 波 1)
@@ -213,6 +186,5 @@ const userRouter = router({
     return { active, suspended, pending, admins, total };
   }),
 });
-
 
 export { userRouter };

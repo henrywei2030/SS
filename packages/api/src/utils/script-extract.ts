@@ -42,8 +42,6 @@ export const ACCEPTED_FILE_EXTS = Object.keys(SUPPORTED_EXTS)
  *   当前只支持 'mammoth';传其它值会抛 NOT_IMPLEMENTED,提醒接入新 parser 时这里 switch。
  *   不接通时 binding 为死配置 — admin 改了不生效。
  */
-export type DocxParser = 'mammoth';
-
 export async function extractScriptText(
   buffer: Buffer,
   filename: string,

@@ -34,7 +34,7 @@ export class MinioStorageAdapter implements StorageAdapter {
   private readonly bucket: string;
   private readonly publicBaseUrl: string;
 
-  constructor(private readonly cfg: MinioAdapterConfig) {
+  constructor(cfg: MinioAdapterConfig) {
     this.id = `minio:${cfg.bucket}`;
     this.bucket = cfg.bucket;
     this.publicBaseUrl = cfg.publicBaseUrl ?? `${cfg.endpoint}/${cfg.bucket}`;

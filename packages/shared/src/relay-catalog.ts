@@ -82,22 +82,6 @@ export function getRelayModels(
   return entry.models[kind] ?? [];
 }
 
-/** 取某中转站某类别的精选(isDefault=true)模型 */
-export function getRelayDefaultModels(
-  name: string,
-  kind: RelayModelKind,
-): RelayCatalogModel[] {
-  return getRelayModels(name, kind).filter((m) => m.isDefault);
-}
-
-/** 取某中转站某类别的候选(isDefault=false)模型 — 用于下拉添加 */
-export function getRelayCandidateModels(
-  name: string,
-  kind: RelayModelKind,
-): RelayCatalogModel[] {
-  return getRelayModels(name, kind).filter((m) => !m.isDefault);
-}
-
 /** 在 catalog 中找单个 model(by providerIdSuffix) */
 export function findRelayModel(
   name: string,
