@@ -21,6 +21,25 @@ type MediaKind = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'THREE_D' | 'OTHER';
 type MediaScope = 'PUBLIC' | 'PROJECT' | 'PERSONAL';
 type ViewMode = 'all' | 'favorites' | 'project' | 'public';
 
+// 四二收工:资产类别(跟 router 的 enum 对齐)
+type AssetCategory = 'CHARACTER' | 'SCENE' | 'PROP' | 'OTHER';
+type CategoryFilter = '' | AssetCategory | 'UNCLASSIFIED';
+
+const CATEGORY_LABEL: Record<AssetCategory, string> = {
+  CHARACTER: '人物',
+  SCENE: '场景',
+  PROP: '道具',
+  OTHER: '其他',
+};
+
+// chip 配色:跟 ColorBadges 系统对齐(语义色,不硬编码 tailwind 色)
+const CATEGORY_CHIP_CLASS: Record<AssetCategory, string> = {
+  CHARACTER: 'bg-blue-500/20 text-blue-700 dark:text-blue-300',
+  SCENE: 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300',
+  PROP: 'bg-amber-500/20 text-amber-700 dark:text-amber-300',
+  OTHER: 'bg-slate-500/20 text-slate-700 dark:text-slate-300',
+};
+
 const KIND_ICONS: Record<MediaKind, React.ComponentType<{ className?: string }>> = {
   IMAGE: ImageIcon,
   VIDEO: VideoIcon,
@@ -57,6 +76,7 @@ export function LibraryView(): React.ReactElement {
   const utils = trpc.useUtils();
   const [view, setView] = React.useState<ViewMode>('all');
   const [kindFilter, setKindFilter] = React.useState<MediaKind | ''>('');
+  const [categoryFilter, setCategoryFilter] = React.useState<CategoryFilter>(''); // 四二收工
   const [search, setSearch] = React.useState('');
   const [page, setPage] = React.useState(1);
   const [pageSize] = React.useState(48);
@@ -74,17 +94,19 @@ export function LibraryView(): React.ReactElement {
             ? ('PUBLIC' as const)
             : undefined,
       kind: (kindFilter || undefined) as MediaKind | undefined,
+      // 显式 narrow:'' 不是合法 router enum 值,转 undefined
+      assetCategory: categoryFilter === '' ? undefined : categoryFilter,
       favorited: view === 'favorites' ? true : undefined,
       search: search.trim() || undefined,
     }),
-    [view, kindFilter, search, page, pageSize],
+    [view, kindFilter, categoryFilter, search, page, pageSize],
   );
 
   const { data, isLoading, isError, error, refetch } = trpc.media.list.useQuery(queryInput);
 
   React.useEffect(() => {
     setPage(1);
-  }, [view, kindFilter, search]);
+  }, [view, kindFilter, categoryFilter, search]);
 
   const toggleFavorite = trpc.media.toggleFavorite.useMutation({
     onSuccess: () => void utils.media.list.invalidate(),
@@ -98,6 +120,15 @@ export function LibraryView(): React.ReactElement {
       setDeleteConfirm(null);
     },
     onError: (e) => toast.error(`删除失败:${e.message}`),
+  });
+
+  // 四二收工:重新归类
+  const setCategory = trpc.media.setCategory.useMutation({
+    onSuccess: () => {
+      toast.success('已归类');
+      void utils.media.list.invalidate();
+    },
+    onError: (e) => toast.error(`归类失败:${e.message}`),
   });
 
   return (
@@ -138,6 +169,36 @@ export function LibraryView(): React.ReactElement {
               }`}
             >
               {labels[v]}
+            </button>
+          );
+        })}
+        <div className="flex-1" />
+      </div>
+
+      {/* 四二收工:资产类别 chip 行(全部 / 人物 / 场景 / 道具 / 其他 / 未归类) */}
+      <div className="mb-4 flex items-center gap-2 text-xs">
+        <span className="text-[hsl(var(--color-muted-foreground))]">资产类别:</span>
+        {(['', 'CHARACTER', 'SCENE', 'PROP', 'OTHER', 'UNCLASSIFIED'] as const).map((c) => {
+          const labels: Record<CategoryFilter, string> = {
+            '': '全部',
+            CHARACTER: CATEGORY_LABEL.CHARACTER,
+            SCENE: CATEGORY_LABEL.SCENE,
+            PROP: CATEGORY_LABEL.PROP,
+            OTHER: CATEGORY_LABEL.OTHER,
+            UNCLASSIFIED: '未归类',
+          };
+          const active = categoryFilter === c;
+          return (
+            <button
+              key={c || 'all'}
+              onClick={() => setCategoryFilter(c)}
+              className={`rounded-full border px-2.5 py-1 transition-colors ${
+                active
+                  ? 'border-blue-600 bg-blue-600 text-white'
+                  : 'border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] text-[hsl(var(--color-muted-foreground))] hover:bg-[hsl(var(--color-muted))]'
+              }`}
+            >
+              {labels[c]}
             </button>
           );
         })}
@@ -213,22 +274,40 @@ export function LibraryView(): React.ReactElement {
                 >
                   {/* thumbnail */}
                   <div className="relative aspect-square bg-[hsl(var(--color-muted))]">
-                    {m.kind === 'IMAGE' && m.cdnUrl ? (
+                    {m.kind === 'IMAGE' && m.previewUrl ? (
+                      // 四二收工 P1:用后端 batch signed previewUrl(本地 dev cdnUrl 永远 null)
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={m.cdnUrl} alt={m.filename} className="h-full w-full object-cover" />
+                      <img
+                        src={m.previewUrl}
+                        alt={m.filename}
+                        className="h-full w-full object-cover"
+                        onError={(e) => {
+                          // sign URL 过期/storage 出错时 fallback 占位
+                          (e.currentTarget as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
                     ) : (
                       <div className="flex h-full flex-col items-center justify-center text-[hsl(var(--color-muted-foreground))]">
                         <Icon className="size-10" />
                         <span className="mt-2 text-[10px] uppercase">{m.kind}</span>
                       </div>
                     )}
-                    {/* AIGC 角标 */}
-                    {m.source === 'AIGC' && (
-                      <span className="absolute left-1.5 top-1.5 inline-flex items-center gap-0.5 rounded bg-purple-500/20 px-1 py-0.5 text-[9px] font-medium text-purple-700 dark:text-purple-400">
-                        <Sparkles className="size-2" />
-                        AIGC
-                      </span>
-                    )}
+                    {/* AIGC 角标 + 资产类别 chip(四二收工) */}
+                    <div className="absolute left-1.5 top-1.5 flex flex-col gap-1">
+                      {m.source === 'AIGC' && (
+                        <span className="inline-flex items-center gap-0.5 rounded bg-purple-500/20 px-1 py-0.5 text-[9px] font-medium text-purple-700 dark:text-purple-400 backdrop-blur-sm">
+                          <Sparkles className="size-2" />
+                          AIGC
+                        </span>
+                      )}
+                      {m.assetCategory && (
+                        <span
+                          className={`inline-flex items-center rounded px-1.5 py-0.5 text-[9px] font-medium backdrop-blur-sm ${CATEGORY_CHIP_CLASS[m.assetCategory as AssetCategory]}`}
+                        >
+                          {CATEGORY_LABEL[m.assetCategory as AssetCategory] ?? m.assetCategory}
+                        </span>
+                      )}
+                    </div>
                     {/* 操作浮层(hover 显示) */}
                     <div className="absolute right-1.5 top-1.5 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                       <button
@@ -269,6 +348,26 @@ export function LibraryView(): React.ReactElement {
                       <span>{formatSize(m.sizeBytes)}</span>
                       <span>{m.scope}</span>
                     </div>
+                    {/* 四二收工:类别快捷修改下拉 */}
+                    <select
+                      value={m.assetCategory ?? ''}
+                      onChange={(e) => {
+                        const v = e.target.value as AssetCategory | '';
+                        setCategory.mutate({
+                          mediaId: m.id,
+                          assetCategory: v === '' ? null : v,
+                        });
+                      }}
+                      disabled={setCategory.isPending}
+                      className="mt-1 w-full rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-1 py-0.5 text-[10px] disabled:opacity-50"
+                      title="资产类别"
+                    >
+                      <option value="">未归类</option>
+                      <option value="CHARACTER">人物</option>
+                      <option value="SCENE">场景</option>
+                      <option value="PROP">道具</option>
+                      <option value="OTHER">其他</option>
+                    </select>
                   </div>
                 </div>
               );
@@ -341,6 +440,8 @@ function UploadDialog({
   const [scope, setScope] = React.useState<MediaScope>('PROJECT');
   const [projectId, setProjectId] = React.useState<string>('');
   const [tagsInput, setTagsInput] = React.useState('');
+  // 四二收工:上传时即时归类(可空,后续可在卡片改)
+  const [assetCategory, setAssetCategory] = React.useState<AssetCategory | ''>('');
 
   // 默认选第一个项目
   React.useEffect(() => {
@@ -378,6 +479,7 @@ function UploadDialog({
           .split(',')
           .map((t) => t.trim())
           .filter(Boolean),
+        assetCategory: assetCategory || undefined,
       });
     } catch (err) {
       toast.error(`文件读取失败:${err instanceof Error ? err.message : String(err)}`);
@@ -452,6 +554,38 @@ function UploadDialog({
               </select>
             </div>
           )}
+          {/* 四二收工:资产类别(可选) */}
+          <div>
+            <label className="mb-1 block text-xs font-medium">资产类别(可选)</label>
+            <div className="flex gap-1">
+              {([
+                ['', '未归类'],
+                ['CHARACTER', '人物'],
+                ['SCENE', '场景'],
+                ['PROP', '道具'],
+                ['OTHER', '其他'],
+              ] as const).map(([v, label]) => {
+                const active = assetCategory === v;
+                return (
+                  <button
+                    key={v || 'none'}
+                    type="button"
+                    onClick={() => setAssetCategory(v as AssetCategory | '')}
+                    className={`flex-1 rounded-md border px-2 py-1.5 text-xs transition-colors ${
+                      active
+                        ? 'border-blue-600 bg-blue-600 text-white'
+                        : 'border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] hover:bg-[hsl(var(--color-muted))]'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-1 text-[10px] text-[hsl(var(--color-muted-foreground))]">
+              人物资产含人物形象、声音 · 场景资产含背景空间 · 道具资产含手持/陈设物品
+            </p>
+          </div>
           {/* tags */}
           <div>
             <label className="mb-1 block text-xs font-medium">

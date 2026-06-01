@@ -786,6 +786,11 @@ model MediaItem {
   source    MediaSource @default(UPLOAD)
   sourceRef String? // GenerationAttempt.id / Asset.id / external url
 
+  // 四二收工:资产归属类别(用户在素材库手动归类)
+  // 值:'CHARACTER'(人物形象/声音)/ 'SCENE'(场景)/ 'PROP'(道具)/ 'OTHER'(其他)
+  // 用字符串而非 Prisma enum 以避开跟 Asset.kind 的语义耦合 + 允许后续扩展
+  assetCategory String?
+
   // 软删除 + 收藏 + 多版本
   isFavorited Boolean @default(false)
   parentId    String? // 衍生关系（降噪/混音版本）
@@ -805,6 +810,7 @@ model MediaItem {
   @@index([scope, kind])
   @@index([deletedAt])
   @@index([aspectRatio, kind])
+  @@index([assetCategory]) // 四二收工:素材库按资产类别筛选
   @@map("media_items")
 }
 

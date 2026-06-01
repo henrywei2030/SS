@@ -65,6 +65,8 @@ export const mediaRouter = router({
         pageSize: z.number().min(12).max(60).default(48),
         scope: SCOPE_ENUM.optional(),
         kind: KIND_ENUM.optional(),
+        // 四二收工:资产类别筛选(CHARACTER/SCENE/PROP/OTHER/UNCLASSIFIED)
+        assetCategory: z.enum(['CHARACTER', 'SCENE', 'PROP', 'OTHER', 'UNCLASSIFIED']).optional(),
         projectId: z.string().cuid().optional(),
         favorited: z.boolean().optional(),
         search: z.string().max(100).optional(),
@@ -88,6 +90,12 @@ export const mediaRouter = router({
       const where: Record<string, unknown> = { deletedAt: null };
       if (input.kind) where.kind = input.kind;
       if (input.favorited === true) where.isFavorited = true;
+      // 四二收工:资产类别筛选(UNCLASSIFIED = null,其余按字符串精确匹配)
+      if (input.assetCategory === 'UNCLASSIFIED') {
+        where.assetCategory = null;
+      } else if (input.assetCategory) {
+        where.assetCategory = input.assetCategory;
+      }
 
       // scope 过滤(覆盖默认的访问控制)
       if (input.scope === 'PUBLIC') {
@@ -141,6 +149,7 @@ export const mediaRouter = router({
             storageKey: true,
             cdnUrl: true,
             aspectRatio: true,
+            assetCategory: true, // 四二收工
             tags: true,
             source: true,
             sourceRef: true,
@@ -152,8 +161,32 @@ export const mediaRouter = router({
         ctx.prisma.mediaItem.count({ where }),
       ]);
 
+      // 四二收工 P1:给 IMAGE kind 批量 sign preview URL(本地 dev cdnUrl 永远 null,
+      // 直接拼 storageKey 也无法跨域访问;统一走 storage adapter 的 signedUrl)
+      // PUBLIC + cdnUrl 已填的(Phase 2 CDN 接通后)沿用 cdnUrl,避免每页重复 sign。
+      const storage = getStorageAdapter();
+      const itemsWithPreview = await Promise.all(
+        items.map(async (m) => {
+          let previewUrl: string | null = m.cdnUrl ?? null;
+          if (m.kind === 'IMAGE' && !previewUrl) {
+            if (m.storageKey.startsWith('external://')) {
+              previewUrl = m.storageKey.replace(/^external:\/\//, '');
+            } else if (m.storageKey.startsWith('placeholder://')) {
+              previewUrl = null; // Mock 占位,前端显示 IMAGE icon
+            } else {
+              try {
+                previewUrl = await storage.getSignedUrl(m.storageKey, 3600);
+              } catch {
+                previewUrl = null; // sign 失败 fallback icon,不阻塞 list
+              }
+            }
+          }
+          return { ...m, previewUrl };
+        }),
+      );
+
       return {
-        items,
+        items: itemsWithPreview,
         total,
         page: input.page,
         pageSize: input.pageSize,
@@ -177,6 +210,8 @@ export const mediaRouter = router({
         projectId: z.string().cuid().optional(),
         mimeType: z.string().max(100).optional(),
         tags: z.array(z.string().max(40)).max(20).default([]),
+        // 四二收工:资产归属类别(CHARACTER/SCENE/PROP/OTHER),null=未归类
+        assetCategory: z.enum(['CHARACTER', 'SCENE', 'PROP', 'OTHER']).optional(),
         // Phase 1.5 P0-5:同步到中转站素材库(获 asset:// 引用,后续视频生成免重传)
         // 默认 false — 仅 W4 资产首图 / W5 视频参考图等"高频复用"场景显式开启
         // 需先在 SystemSetting `relay.assets.default_group_id` 配 group_id 才生效
@@ -311,6 +346,7 @@ export const mediaRouter = router({
           storageKey,
           cdnUrl: input.scope === 'PUBLIC' ? putResult.url : null,
           aspectRatio: null,
+          assetCategory: input.assetCategory ?? null, // 四二收工
           tags: input.tags,
           source: 'UPLOAD',
           // Phase 1.5 P0-5:中转站 asset URL 存 meta,aigc.generateVideo 接 relay provider 时优先用
@@ -339,6 +375,44 @@ export const mediaRouter = router({
       );
 
       return media;
+    }),
+
+  /** 四二收工:重新归类资产类别(null = 取消归类) */
+  setCategory: protectedProcedure
+    .input(
+      z.object({
+        mediaId: z.string().cuid(),
+        assetCategory: z.enum(['CHARACTER', 'SCENE', 'PROP', 'OTHER']).nullable(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const m = await ctx.prisma.mediaItem.findFirst({
+        where: { id: input.mediaId, deletedAt: null },
+        select: { id: true, projectId: true, scope: true },
+      });
+      if (!m) throw new TRPCError({ code: 'NOT_FOUND', message: 'media 不存在' });
+
+      // 权限同 toggleFavorite:PROJECT scope 需 user 是项目成员
+      if (m.scope === 'PROJECT' && m.projectId) {
+        const accessible = await ctx.prisma.project.findFirst({
+          where: {
+            id: m.projectId,
+            OR: [
+              { ownerId: ctx.user.id },
+              { members: { some: { userId: ctx.user.id } } },
+            ],
+          },
+          select: { id: true },
+        });
+        if (!accessible) throw new TRPCError({ code: 'FORBIDDEN' });
+      }
+
+      const updated = await ctx.prisma.mediaItem.update({
+        where: { id: m.id },
+        data: { assetCategory: input.assetCategory },
+        select: { id: true, assetCategory: true },
+      });
+      return updated;
     }),
 
   /** 切换收藏(true/false 自动 toggle) */

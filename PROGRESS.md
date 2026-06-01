@@ -102,6 +102,76 @@ preview 浏览器 session 过期(跳 login,需重置密码 + 消耗 LLM cost),**
 
 ---
 
+## 2026-05-30(周六,mac-mini · 四十二次收工)— 素材库图片预览修复 + 资产分类系统(人物/场景/道具/其他)
+
+**完成 — 1 新 migration · 3 文件代码改 · typecheck 16/16 · UI 真打截图实证**
+
+### 触发场景
+
+mac-mini 开工(behind 2 commit · 40/41 收工)同步 + Step 2.5 全跑通后,真打素材库测试,发现两个用户问题:
+1. 上传图片只显示 IMAGE 占位,**预览看不到**
+2. 缺资产归属分类(人物 / 场景 / 道具)
+
+顺路也测了 **Brave 浏览器跑 Claude in Chrome 插件**:Brave 已装但**没装该扩展**,当前插件连的是 Chrome(`navigator.brave: undefined` + UA `Google Chrome/148`);Brave 基于 Chromium 技术上可装,需用户去 Chrome Web Store 装扩展。
+
+### P1 图片预览修复
+
+**Root cause**:`<img src={m.cdnUrl}>` 在本地 dev 永远 null(`cdnUrl` 仅 Phase 2 CDN 接通后才填)→ 全走 IMAGE icon 占位。MinIO storage adapter 的 `getSignedUrl` 早就实现(AWS SDK presigned),只是 `media.list` 没批量返。
+
+**修复**(`packages/api/src/routers/media.ts`):list 内 batch sign — 对每个 IMAGE kind item:
+- `external://` 前缀:直接 strip 返原 URL
+- `placeholder://` 前缀:返 null 给前端显占位 icon(Mock 不 sign 防错误)
+- 其余走 `storage.getSignedUrl(storageKey, 3600)`,sign 失败 catch 后 fallback null
+
+返新字段 `previewUrl`。前端 `<img src={m.previewUrl} onError={e=>e.currentTarget.style.display='none'}>` + 失败 fallback。**真打验证**:logo.png 显示真实星系图 banner(不再 IMAGE 占位)。
+
+### P2 资产分类系统(人物 / 场景 / 道具 / 其他)
+
+**Schema**(`packages/db/prisma/schema.prisma`):MediaItem 加 `assetCategory String?` + `@@index([assetCategory])` 用于筛选。字符串而非 Prisma enum 避开跟 Asset.kind 的语义耦合 + 允许后续扩展。值约定 `CHARACTER` / `SCENE` / `PROP` / `OTHER`,null = 未归类(老数据兼容)。
+
+**Migration** `20260530000000_media_item_asset_category`:additive `ALTER TABLE ADD COLUMN` + `CREATE INDEX`(安全无脏数据风险)。
+
+**Backend 改 3 处**:
+- `list` input 加 `assetCategory: enum(CHARACTER/SCENE/PROP/OTHER/UNCLASSIFIED).optional()` 筛选(`UNCLASSIFIED` 映射到 `assetCategory: null`,其余精确匹配)+ select 加 `assetCategory: true`
+- `upload` input 加 `assetCategory: enum(...).optional()`,create data 写入(默认 null)
+- 新 `setCategory` mutation(已上传素材重新归类,支持 null = 取消归类)
+
+**Frontend 改 4 处**(`apps/web/app/[locale]/library/library-view.tsx`):
+1. 顶部 chip 行:`全部 / 人物 / 场景 / 道具 / 其他 / 未归类`(blue active state)
+2. 卡片左上 chip:有 assetCategory 时显示带语义色的标签(CHARACTER 蓝 / SCENE 绿 / PROP 黄 / OTHER 灰)
+3. 卡片底部 select:一键改类别(走 `setCategory` mutation + toast)
+4. 上传 dialog 加 5 选项 button group(默认未归类)+ 帮助文案("人物含形象、声音 · 场景含背景空间 · 道具含手持/陈设")
+
+### 踩坑 + 修
+
+**TS narrowing error**:`(categoryFilter || undefined)` 没缩窄掉 `''`(`CategoryFilter` 含 `''` 但 router enum 不含)→ 改成 `categoryFilter === '' ? undefined : categoryFilter` 显式 narrow,typecheck 通过。
+
+**Prisma client cache**:dev server 启动时跑了 db:generate 但 ESM module cache 持有老 client → list 报 `Unknown field assetCategory`。修复:kill dev + 再跑一次 db:generate + 重启 dev,新 client 加载成功。
+
+### 验证
+
+- `pnpm turbo run typecheck --force` ✓ 16/16(无 cache 真跑)
+- Chrome 真打:navigate /library → screenshot 实证 chip 行 + 真图渲染 + 未归类 select 默认值
+
+### Brave 浏览器插件测试结论(附带)
+
+- ✅ Brave 已装 `/Applications/Brave Browser.app` v148.1.90.128 在跑
+- ❌ 当前 Claude in Chrome 插件连的是 **Chrome**,不是 Brave(`isBrave: false` / `navigator.brave: undefined`)
+- 📝 要让 Brave 跑插件:用户去 Brave 打开 Chrome Web Store 装该扩展,Brave 基于 Chromium 兼容(技术上可行)
+
+**问题/待决策**
+- ❓ docs/04-data-model 是否加 `MediaItem.assetCategory` 字段说明(留 follow-up)
+- ❓ 是否给 AIGC 工坊的视频参考资产挑选时按 category 过滤(W5.7 增强,留 follow-up)
+- ❓ 资产分类系统是否要跟 W4 的 Asset.kind 联动(同名资产打通,留 Phase 2)
+
+**下次接着做**
+- 📌 测 AIGC 视频抽卡(Seedance 2.0 Fast 真接通)
+- 📌 (follow-up)`asset-category` 跟 AIGC 资产挑选联动(filter 体验)
+- 📌 (follow-up)Brave 浏览器装 Claude in Chrome 扩展验证多浏览器并行
+- 📌 测全部 60 集批量生成(rate limit / DB lock / cost 控制)
+
+---
+
 ## 2026-05-29(周五,mac-mini · 三十九次收工)— mac-mini 跨周期接续(Step 2.5 全跑通)+ admin 密码重置 + 登录页 logo 放大
 
 **完成 — 1 文件代码改(logo.tsx 3 行)· web typecheck EXIT 0 · 登录 API 实测 200**
