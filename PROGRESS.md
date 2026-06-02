@@ -5,6 +5,60 @@
 
 ---
 
+## 2026-06-02(周二,mac-mini · 四十六次收工)— 漏洞检查 + 修 1 真 P1(生产登录无限流 → 在线密码爆破)
+
+**完成 — 1 新文件 + 2 文件改 · web typecheck PASS · 真打验证限流/CSRF/正常登录三态**
+
+### 触发场景
+
+开工:同步 GitHub 到本地 + 执行漏洞检查 + 没问题后打开系统调试。同步 3 commit(四三/四四/四五收工,8 小时前,Step 2.5 不触发)。漏洞检查找到真 P1,用户选"先修再打开系统"。
+
+### 漏洞检查(依赖层 + 代码层)
+
+**依赖层** `pnpm audit`:7 个(1 critical + 6 moderate),但**全是 dev 工具或需 major 升级**,本次未动:
+- vitest UI server 任意文件读(critical,仅 `--ui` dev-only,不影响生产运行时)
+- postcss line-return(dev/build 工具链)
+- next-intl 开放重定向 + 原型污染(moderate,3.26.5 → 4.9.2 是 major 破坏性升级,需回归测试,留 follow-up)
+
+**代码层**(2 个 general-purpose agent 并行,只报真实可利用):
+- Agent A(新同步代码):media.ts previewUrl 批量 sign / worker 视频友好命名 sanitize / access.ts loadEpisodeOrThrow 抽取 → **全部干净无 P0/P1**(签发 URL 不越权 / filename 非文件系统路径不可穿越 / authz 抽取 1:1 无回归)
+- Agent B(跨切面):注入(11 处 raw SQL 全 `$1` 参数化 advisory lock)/ 经济(prepay-refund advisory lock + 幂等 + Decimal 防双花双退)/ JWT(verifyToken 从 DB 重载 isAdmin 无 stale 提权)/ SSE token(HMAC + timingSafeEqual)/ SSRF(validateApiUrl 仅 admin 触发)→ 防御到位,**找到 1 真 P1**
+
+### P1 — 生产登录无限流 + 无 CSRF(在线密码爆破)
+
+**根因**:真实登录走 REST `apps/web/app/api/auth/login/route.ts`,直接调 `auth.login()` **绕过整个 tRPC 层** → tRPC 上挂的 `auth.login` 5 次/分限流是**死代码**(无任何客户端调它)。后果:可对任意账号(含 admin)无限制爆破密码。REST route 也无 Origin 校验。
+
+**修复**(自选方案,失败计数 + 成功清零设计):
+- 新建 `apps/web/lib/auth/route-guard.ts`:
+  - `isOriginAllowed`(从 trpc route 抽出**单一真相源** — CSRF 控制不应重复实现防漂移)
+  - `checkLoginRateLimit`(只读判断)/ `recordLoginFailure`(失败计数)/ `clearLoginRateLimit`(成功清零)— in-memory IP bucket,5 次失败/60s,Phase 2 迁 Redis
+  - **失败才计数 + 成功清零**:正常用户反复登录/调试不受影响,只惩罚连续爆破
+- `login/route.ts`:入口加 ① CSRF Origin 校验 ② IP 失败限流;成功 `clearLoginRateLimit`,失败 `recordLoginFailure`
+- `trpc/[trpc]/route.ts`:`isOriginAllowed` 内联定义 → 改 import 共享版(消重复)
+
+**真打验证**(curl):5 次错密码 → 全 401,第 6 次 → **429**(限流);跨站 `Origin: evil.com` → **403**(CSRF);新 IP(X-Forwarded-For)+ 正确密码 → **200**(不误伤正常登录);轮询确认窗口过 + 成功登录清零本机 IP bucket。
+
+### 踩坑:工作目录漂移
+
+`cd apps/web` 跑 typecheck 后 Bash 工作目录未切回 → 后续 `pnpm dev` 在 apps/web 下只跑了 web 脚本(`next dev`,非 turbo),worker 没起。诊断:`pnpm worker:dev` 报脚本不存在 + `require('./package.json')` 显示单体应用 + `apps/workers/` 不存在 → 定位是 pwd 漂到 apps/web。修:`cd` 回 root,`pnpm dev` 走 turbo 正常拉起 web + worker。**教训**:`cd` 在 Bash 工具间持久化,跑完子目录命令记得切回 root,或用绝对路径。
+
+### 系统已打开
+
+web :3000 + worker :9200 + 3 容器健康,Chrome 打开 http://localhost:3000(MCP 扩展一度断连,改用系统 `open` 命令)。
+
+**问题/待决策**
+- ❓ next-intl 3→4 major 升级修开放重定向/原型污染 — 需回归测试,是否单开任务
+- ❓ in-memory 限流 Phase 2 多副本需迁 Redis(代码注释已标)
+- ❓ Agent B 报的低危项(media.getSignedUrl PERSONAL scope 缺所有权校验 — 当前 PERSONAL 不可创建故不可利用 / XFF 可伪造影响限流 key — 需可信反代覆盖 XFF / logout 无 CSRF — 危害低)是否下次补
+
+**下次接着做**
+- 📌 测真 AIGC 视频抽卡(Seedance 2.0,看新命名 + 真播放端到端)
+- 📌 (follow-up)next-intl major 升级 + 回归
+- 📌 (follow-up)media.getSignedUrl PERSONAL default-deny 兜底(Phase 2 启用前)
+- 📌 60 集批量生成压测
+
+---
+
 ## 2026-06-02(周二,mac-studio · 四十五次收工)— 素材库 4 项 UX:顶栏跨页可点 + 视频预览播放 + 视频友好命名(项目名-第N集-分镜M-第K次)+ VIDEO 资产类 + 返回按钮
 
 **完成 — 4 文件改 · +106/-11 · typecheck 16/16 + test 11/11 + Chrome 真打 4 需求全过**

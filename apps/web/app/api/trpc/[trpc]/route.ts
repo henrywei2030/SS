@@ -12,29 +12,8 @@ import { cookies, headers } from 'next/headers';
 import { appRouter, createContext } from '@ss/api';
 
 import { SESSION_COOKIE } from '@/lib/auth/session';
-
-/** 白名单 origin:本机 dev + 用户配置的 NEXT_PUBLIC_APP_URL(prod 部署域名) */
-function isOriginAllowed(origin: string | null, host: string | null): boolean {
-  if (!origin) {
-    // 无 Origin = 同站非跨域(浏览器 SSR / curl)— 放行,因为没 CSRF 风险
-    return true;
-  }
-  try {
-    const originHost = new URL(origin).host;
-    // 同源(host 跟 request Host 一致)→ 放行
-    if (host && originHost === host) return true;
-    // 显式白名单(prod)
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL;
-    if (appUrl && originHost === new URL(appUrl).host) return true;
-    // dev fallback:localhost / 127.0.0.1 任意端口
-    if (process.env.NODE_ENV === 'development') {
-      return /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(originHost);
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
+// 四六收工:isOriginAllowed 抽到 route-guard 单一真相源(登录 REST route 也复用)
+import { isOriginAllowed } from '@/lib/auth/route-guard';
 
 const handler = async (req: Request): Promise<Response> => {
   const cookieStore = await cookies();
