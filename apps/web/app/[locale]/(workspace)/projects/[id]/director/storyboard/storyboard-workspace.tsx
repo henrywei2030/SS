@@ -8,8 +8,9 @@ import { EpisodeSidebar } from './episode-sidebar';
 import { TopBar } from './top-bar';
 import { ScriptPane } from './script-pane';
 import { ShotsPane } from './shots-pane';
+import { InspirationPane } from './inspiration-pane';
 
-type Tab = 'script' | 'shots';
+type Tab = 'inspiration' | 'script' | 'shots';
 
 interface Props {
   projectId: string;
@@ -59,7 +60,13 @@ export function StoryboardWorkspace({
   const rawTab = searchParams.get('tab');
   // tab fallback 链:URL 显式 script/shots 优先,否则用 initialTab(SSR 注入),否则默认 'shots'
   const tab: Tab =
-    rawTab === 'script' ? 'script' : rawTab === 'shots' ? 'shots' : initialTab;
+    rawTab === 'inspiration'
+      ? 'inspiration'
+      : rawTab === 'script'
+        ? 'script'
+        : rawTab === 'shots'
+          ? 'shots'
+          : initialTab;
   const selectedEpisodeId =
     epFromUrl ?? initialEpisodeId ?? episodes?.[0]?.id;
 
@@ -84,23 +91,27 @@ export function StoryboardWorkspace({
 
   return (
     <div
-      className="grid h-[calc(100vh-2.75rem)] grid-cols-[260px_1fr] gap-0 overflow-hidden bg-[hsl(var(--color-background))]"
+      className={`grid h-[calc(100vh-2.75rem)] gap-0 overflow-hidden bg-[hsl(var(--color-background))] ${
+        tab === 'inspiration' ? 'grid-cols-1' : 'grid-cols-[260px_1fr]'
+      }`}
       style={{ ['--storyboard-fs' as string]: `${fontSize}px` }}
     >
-      {/* 左栏：分集列表 */}
-      <EpisodeSidebar
-        episodes={episodes ?? []}
-        selectedId={selectedEpisodeId}
-        onSelect={selectEpisode}
-        onAfterArchive={(archivedId) => {
-          // 删的是当前选中集 → 清 URL 上的 ep,让 selectedId 落到第一集
-          if (archivedId === selectedEpisodeId) {
-            const params = new URLSearchParams(window.location.search);
-            params.delete('ep');
-            router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-          }
-        }}
-      />
+      {/* 左栏：分集列表 — 灵感创作 tab 不显示(项目级,不依赖选中集) */}
+      {tab !== 'inspiration' && (
+        <EpisodeSidebar
+          episodes={episodes ?? []}
+          selectedId={selectedEpisodeId}
+          onSelect={selectEpisode}
+          onAfterArchive={(archivedId) => {
+            // 删的是当前选中集 → 清 URL 上的 ep,让 selectedId 落到第一集
+            if (archivedId === selectedEpisodeId) {
+              const params = new URLSearchParams(window.location.search);
+              params.delete('ep');
+              router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+            }
+          }}
+        />
+      )}
 
       {/* 右侧：顶部 bar + tab 内容 */}
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
@@ -115,10 +126,13 @@ export function StoryboardWorkspace({
           onAfterAction={() => void refetchEpisodes()}
         />
         <div className="min-h-0 flex-1 overflow-auto">
-          {!selectedEpisodeId ? (
+          {tab === 'inspiration' ? (
+            // 灵感创作是项目级(不依赖选中集)— 想法 → LLM 生成多集剧本草稿
+            <InspirationPane projectId={projectId} />
+          ) : !selectedEpisodeId ? (
             <EmptyEpisodeState projectId={projectId} locale={locale} />
           ) : tab === 'script' ? (
-            <ScriptPane episodeId={selectedEpisodeId} />
+            <ScriptPane episodeId={selectedEpisodeId} projectId={projectId} />
           ) : (
             <ShotsPane episodeId={selectedEpisodeId} />
           )}

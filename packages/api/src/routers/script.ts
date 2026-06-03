@@ -76,6 +76,8 @@ interface NewVersionInput {
   content: string;
   language: string;
   source: 'UPLOAD' | 'AI_GENERATED' | 'IMPORTED';
+  /** 需求2B:true 时若 current 版本已锁定则跳过(不覆盖)— 重新上传场景用,锁定集保留原内容 */
+  skipIfLocked?: boolean;
 }
 
 /**
@@ -110,7 +112,12 @@ async function createNextVersion(ctx: Context, input: NewVersionInput) {
     // 同内容已存在且仍是当前版本 → 直接返回，避免无意义新建
     const current = liveExisting.find((s) => s.isCurrent);
     if (current && current.contentHash === contentHash) {
-      return { script: current, created: false };
+      return { script: current, created: false, skippedLocked: false };
+    }
+
+    // 需求2B:重新上传时 current 已锁定 → 不覆盖,保留锁定集原内容
+    if (input.skipIfLocked && current?.lockedAt) {
+      return { script: current, created: false, skippedLocked: true };
     }
 
     // 关键:nextVersion 跨过软删的最大 version,防止 unique 撞车
@@ -139,7 +146,7 @@ async function createNextVersion(ctx: Context, input: NewVersionInput) {
       },
     });
 
-    return { script, created: true };
+    return { script, created: true, skippedLocked: false };
   });
 }
 
@@ -469,10 +476,36 @@ export const scriptRouter = router({
         scriptId: string;
         version: number;
         created: boolean;
+        skippedLocked: boolean;
         sceneCount: number;
       }> = [];
 
       for (const b of boundaries) {
+        // 需求2B:已锁定 current 的集不复活/不改 title — 重新上传时锁定集完全保留。
+        //   先查该集是否存在且 current 锁定,锁定则跳过整个 upsert + createNextVersion。
+        const existingEp = await ctx.prisma.episode.findUnique({
+          where: { projectId_number: { projectId: input.projectId, number: b.episodeNumber } },
+          select: { id: true, deletedAt: true },
+        });
+        if (existingEp && !existingEp.deletedAt) {
+          const lockedCurrent = await ctx.prisma.script.findFirst({
+            where: { episodeId: existingEp.id, isCurrent: true, deletedAt: null, lockedAt: { not: null } },
+            select: { id: true, version: true },
+          });
+          if (lockedCurrent) {
+            results.push({
+              episodeNumber: b.episodeNumber,
+              title: b.title,
+              scriptId: lockedCurrent.id,
+              version: lockedCurrent.version,
+              created: false,
+              skippedLocked: true,
+              sceneCount: b.sceneCount,
+            });
+            continue;
+          }
+        }
+
         // Phase 1.5.3 bugfix:upsert 若命中软删 Episode(deletedAt!=null),复活它
         // 否则用户删了的集再上传会更新 title 但留 deletedAt,导致 listEpisodes 看不到
         const episode = await ctx.prisma.episode.upsert({
@@ -491,13 +524,14 @@ export const scriptRouter = router({
           },
         });
 
-        const { script, created } = await createNextVersion(ctx, {
+        const { script, created, skippedLocked } = await createNextVersion(ctx, {
           projectId: input.projectId,
           episodeId: episode.id,
           title: b.title || undefined,
           content: b.content,
           language: input.language,
           source: 'UPLOAD',
+          skipIfLocked: true,
         });
 
         results.push({
@@ -506,6 +540,7 @@ export const scriptRouter = router({
           scriptId: script.id,
           version: script.version,
           created,
+          skippedLocked,
           sceneCount: b.sceneCount,
         });
       }
@@ -600,6 +635,94 @@ export const scriptRouter = router({
         deletedCount: result.count,
       });
       return { ok: true, deletedCount: result.count };
+    }),
+
+  /**
+   * 需求2A:清空全部剧本 — 软删项目所有集(分集列表)+ 各集剧本 + 级联 scenes/shots/shotGroups/bindings
+   *
+   * 保护(跳过不删):生成分镜中 / 已发布(下游 AIGC 引用) / current 剧本已锁定的集。
+   * 返回清理 + 跳过统计供前端提示。
+   */
+  deleteAllForProject: protectedProcedure
+    .input(
+      z.object({
+        projectId: z.string().cuid(),
+        confirmDelete: z.literal(true, {
+          errorMap: () => ({ message: '需显式 confirmDelete=true(防误删)' }),
+        }),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId);
+      const episodes = await ctx.prisma.episode.findMany({
+        where: { projectId: input.projectId, deletedAt: null },
+        select: {
+          id: true,
+          number: true,
+          status: true,
+          generatingStartedAt: true,
+          publishedAt: true,
+        },
+      });
+      const now = new Date();
+      let cleared = 0;
+      let skippedGenerating = 0;
+      let skippedPublished = 0;
+      let skippedLocked = 0;
+      for (const ep of episodes) {
+        if (isEpisodeLockedNow(ep)) {
+          skippedGenerating++;
+          continue;
+        }
+        if (ep.publishedAt) {
+          skippedPublished++;
+          continue;
+        }
+        const lockedCurrent = await ctx.prisma.script.findFirst({
+          where: { episodeId: ep.id, isCurrent: true, deletedAt: null, lockedAt: { not: null } },
+          select: { id: true },
+        });
+        if (lockedCurrent) {
+          skippedLocked++;
+          continue;
+        }
+        // 级联软删 — 复用 storyboard.archiveEpisode 模式(Episode + scene/shot/shotGroup/binding + script)
+        await ctx.prisma.$transaction([
+          ctx.prisma.episode.update({
+            where: { id: ep.id },
+            data: { deletedAt: now, status: 'ARCHIVED' },
+          }),
+          ctx.prisma.scene.updateMany({
+            where: { episodeId: ep.id, deletedAt: null },
+            data: { deletedAt: now },
+          }),
+          ctx.prisma.shot.updateMany({
+            where: { episodeId: ep.id, deletedAt: null },
+            data: { deletedAt: now },
+          }),
+          ctx.prisma.shotGroup.updateMany({
+            where: { episodeId: ep.id, deletedAt: null },
+            data: { deletedAt: now },
+          }),
+          ctx.prisma.assetUsageBinding.updateMany({
+            where: { episodeId: ep.id, deletedAt: null },
+            data: { deletedAt: now },
+          }),
+          ctx.prisma.script.updateMany({
+            where: { episodeId: ep.id, deletedAt: null },
+            data: { deletedAt: now, isCurrent: false },
+          }),
+        ]);
+        cleared++;
+      }
+      await logOperation(ctx, 'script.delete.all.project', 'project', input.projectId, null, {
+        cleared,
+        skippedGenerating,
+        skippedPublished,
+        skippedLocked,
+        total: episodes.length,
+      });
+      return { cleared, skippedGenerating, skippedPublished, skippedLocked, total: episodes.length };
     }),
 
   /**

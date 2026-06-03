@@ -5,6 +5,48 @@
 
 ---
 
+## 2026-06-04(周四,mac-studio · 四十七次收工)— 导演「灵感创作」子模块(想法→LLM 多集剧本)+ 布局/清空调整 + 后台节点暴露
+
+**完成 — 新表 + 新 router + 新 UI · 11 文件 · typecheck 16/16 + test 11/11 + 真打全链路 gemini-flash 真生成**
+
+### 触发场景
+
+用户分 3 批需求:① 导演加灵感创作子模块(想法→生成剧本→下载/保存/关联)② 灵感布局隐藏分集列表 + 剧本清空全部 + 重传跳锁定 ③ 后台暴露灵感的 binding/prompt 节点。dev server 真打逐项验证。
+
+### 批次1:灵感创作子模块
+
+- **数据**:`InspirationDraft` 表(projectId/title/idea/params/outline/episodes JSON/status,独立于 Script 未绑 episode)+ migration `20260604000000_inspiration_draft`(已 apply)
+- **后端**:`inspiration` router(generateOutline 调 LLM 生成多集大纲→创建 draft / generateEpisode 逐集展开 / list/get/update/delete)· LLM 链路对齐 storyboard(`binding.inspiration.generation.modelId` + loadPrompt(slug,fallback) + GenerationAttempt 成本追溯)
+- **前端**:导演 tab 加「灵感创作」(剧本左边)· `inspiration-pane`(想法+4 参数→大纲→逐集/批量展开→编辑/下载/草稿管理)· 剧本 tab 加「关联剧本」按钮→选草稿集→`script.upload(source=AI_GENERATED)`
+- **真打**:gemini-flash 真生成《代码成神:我在游戏里修BUG》12 集大纲 + 展开第1集完整剧本(【分镜】【画面】【声音】)+ 关联到第99集(集数 60→61,测后软删)
+
+### 批次2:布局 + 清空 + 重传
+
+- **需求1 灵感隐藏分集列表**:storyboard-workspace 灵感 tab grid 单栏 + 不渲染 EpisodeSidebar(真打:分集列表隐藏,布局占满)
+- **需求2A 清空全部**:`script.deleteAllForProject`(软删项目所有集 + 剧本 + 级联 scenes/shots/groups/bindings,复用 archiveEpisode 模式;**保护**已发布/锁定/生成中)+ script-pane「清空全部」按钮 + dialog(真打 UI,未真清防删 60 集)
+- **需求2B 重传跳锁定**:createNextVersion 加 `skipIfLocked` + uploadMultiEpisode 检查每集 current 锁定则跳过保留 + toast 提示;用**版本化覆盖**(新版本 isCurrent 旧版软删,bug 最少)
+
+### 批次3:后台暴露灵感节点
+
+- **模型绑定**:bindings-table `binding.inspiration.*` 归"导演"分组(真打:导演组 5 项含 inspiration,选 Gemini 3 Flash)
+- **提示词模板**:seed.ts 永久化 inspiration_outline + inspiration_episode 2 个 PromptTemplate(SCRIPT_STORYBOARD)+ binding.inspiration(value='')· 临时脚本 upsert 到 DB(真打:admin/prompts 剧本分镜组含 2 模板,正文可编辑 + 版本历史)· router fallback 与 DB 模板一致(admin 编辑 loadPrompt 优先 DB 即时生效)
+- **AI Provider**:复用现有 text provider(gemini-flash),无需新增节点
+
+### 验证
+
+typecheck 16/16 + test 11/11 + Chrome 真打全链路(灵感生成/展开/关联 + 布局/清空 dialog + admin bindings/prompts 显示)。本机 DB:migration apply + inspiration binding insert + 2 prompt upsert。
+
+**问题/待决策**
+- ❓ deleteAllForProject 未真打实际清空(避免删 60 集真实数据)— 逻辑由 typecheck + 复用 archiveEpisode 级联模式保证
+- ❓ 重传跳锁定未真打(需先锁定集 + docx 重传)— 逻辑就绪
+- ❓ 灵感 binding 本机 insert=gemini-flash,seed.ts 永久化 value=''(新设备 pull 后需 migrate deploy + admin 配 binding)
+
+**下次接着做**
+- 📌 灵感创作 prompt 后台精调 + 真打多集批量展开/全剧下载
+- 📌 测真 AIGC 视频抽卡(prod env gate 后需 provider 真配)/ 60 集压测
+
+---
+
 ## 2026-06-02(周二,mac-mini · 四十六次收工)— 漏洞检查 + 修 1 真 P1(生产登录无限流 → 在线密码爆破)
 
 **完成 — 1 新文件 + 2 文件改 · web typecheck PASS · 真打验证限流/CSRF/正常登录三态**

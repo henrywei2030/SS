@@ -15,6 +15,8 @@ import {
   ChevronDown,
   Package,
   Compass,
+  Lightbulb,
+  Link2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -47,8 +49,8 @@ interface Props {
   projectId: string;
   episodeId: string | undefined;
   episodeNumber: number | undefined;
-  tab: 'script' | 'shots';
-  onTabChange: (t: 'script' | 'shots') => void;
+  tab: 'inspiration' | 'script' | 'shots';
+  onTabChange: (t: 'inspiration' | 'script' | 'shots') => void;
   fontSize: number;
   onFontSizeChange: (delta: 1 | -1) => void;
   onAfterAction: () => void;
@@ -70,8 +72,15 @@ export function TopBar({
   const locale = params?.locale ?? 'zh-CN';
   return (
     <div className="flex h-11 items-center justify-between border-b border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-3">
-      {/* tab 切换 */}
+      {/* tab 切换 — 灵感创作在最左(想法→生成剧本的源头) */}
       <div className="flex items-center gap-1">
+        <TabButton
+          active={tab === 'inspiration'}
+          onClick={() => onTabChange('inspiration')}
+          icon={<Lightbulb className="size-3.5" />}
+        >
+          灵感创作
+        </TabButton>
         <TabButton
           active={tab === 'script'}
           onClick={() => onTabChange('script')}
@@ -105,14 +114,14 @@ export function TopBar({
             currentEpisodeNumber={episodeNumber}
             onSaved={onAfterAction}
           />
-        ) : (
+        ) : tab === 'shots' ? (
           <ShotsActions
             projectId={projectId}
             episodeId={episodeId}
             episodeNumber={episodeNumber}
             onAfterAction={onAfterAction}
           />
-        )}
+        ) : null}
         {tab === 'shots' && (
           <FontSizeControl fontSize={fontSize} onChange={onFontSizeChange} />
         )}
@@ -151,6 +160,164 @@ function TabButton({
 // ---------------------------------------------------------------------------
 // 剧本 tab 操作
 // ---------------------------------------------------------------------------
+
+// 关联剧本 — 把"灵感创作"生成的某集剧本上传为本集正式剧本(source=AI_GENERATED)
+function LinkInspirationButton({
+  projectId,
+  episodeNumber,
+  onSaved,
+}: {
+  projectId: string;
+  episodeNumber: number;
+  onSaved: () => void;
+}): React.ReactElement {
+  const [open, setOpen] = React.useState(false);
+  const [draftId, setDraftId] = React.useState('');
+  const [epNum, setEpNum] = React.useState<number | null>(null);
+  const [targetEp, setTargetEp] = React.useState<number>(episodeNumber);
+  const utils = trpc.useUtils();
+
+  const { data: drafts } = trpc.inspiration.listDrafts.useQuery({ projectId }, { enabled: open });
+  const { data: draft } = trpc.inspiration.getDraft.useQuery(
+    { draftId },
+    { enabled: open && !!draftId },
+  );
+
+  React.useEffect(() => {
+    if (open) setTargetEp(episodeNumber);
+  }, [episodeNumber, open]);
+
+  const upload = trpc.script.upload.useMutation({
+    onSuccess: (res) => {
+      toast.success(`已关联到第 ${res.episode.number} 集 V${res.script.version}`);
+      setOpen(false);
+      void utils.script.listVersions.invalidate();
+      void utils.storyboard.listEpisodes.invalidate();
+      onSaved();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const episodes = (
+    (draft?.episodes as unknown as { number: number; title: string; content: string }[]) ?? []
+  ).filter((e) => e.content);
+  const selectedEp = episodes.find((e) => e.number === epNum);
+
+  const confirm = (): void => {
+    if (!draft || !selectedEp) {
+      toast.error('请选择已展开的集');
+      return;
+    }
+    upload.mutate({
+      projectId,
+      episodeNumber: targetEp,
+      title: `${draft.title} 第${selectedEp.number}集`,
+      content: selectedEp.content,
+      source: 'AI_GENERATED',
+    });
+  };
+
+  const inputCls =
+    'w-full rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 py-1.5 text-xs';
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-7 gap-1 text-xs"
+        onClick={() => setOpen(true)}
+        title="把灵感创作生成的剧本关联(上传)为本集正式剧本"
+      >
+        <Link2 className="size-3.5" />
+        关联剧本
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>关联灵感剧本</DialogTitle>
+            <DialogDescription>
+              把「灵感创作」生成的某集剧本上传为剧本子模块的正式版本(source=AI_GENERATED)。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <div>
+              <label className="mb-1 block text-xs font-medium">选灵感草稿</label>
+              <select
+                value={draftId}
+                onChange={(e) => {
+                  setDraftId(e.target.value);
+                  setEpNum(null);
+                }}
+                className={inputCls}
+              >
+                <option value="">— 选择草稿 —</option>
+                {drafts?.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.title}
+                  </option>
+                ))}
+              </select>
+              {drafts && drafts.length === 0 && (
+                <p className="mt-1 text-[11px] text-[hsl(var(--color-muted-foreground))]">
+                  还没有灵感草稿 — 去「灵感创作」tab 生成
+                </p>
+              )}
+            </div>
+            {draftId && (
+              <div>
+                <label className="mb-1 block text-xs font-medium">选已展开的集</label>
+                {episodes.length === 0 ? (
+                  <p className="text-[11px] text-[hsl(var(--color-muted-foreground))]">
+                    该草稿还没有已展开的集 — 去「灵感创作」展开本集后再关联
+                  </p>
+                ) : (
+                  <select
+                    value={epNum ?? ''}
+                    onChange={(e) => setEpNum(Number(e.target.value))}
+                    className={inputCls}
+                  >
+                    <option value="">— 选择集 —</option>
+                    {episodes.map((e) => (
+                      <option key={e.number} value={e.number}>
+                        第{e.number}集 · {e.title}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
+            <div>
+              <label className="mb-1 block text-xs font-medium">关联到本项目第几集</label>
+              <input
+                type="number"
+                min={1}
+                value={targetEp}
+                onChange={(e) => setTargetEp(Number(e.target.value))}
+                className="w-24 rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 py-1.5 text-xs"
+              />
+            </div>
+            {selectedEp && (
+              <div className="max-h-32 overflow-auto whitespace-pre-wrap rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-muted))] p-2 text-[11px] text-[hsl(var(--color-muted-foreground))]">
+                {selectedEp.content.slice(0, 400)}
+                {selectedEp.content.length > 400 ? '…' : ''}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setOpen(false)}>
+              取消
+            </Button>
+            <Button size="sm" onClick={confirm} disabled={!selectedEp || upload.isPending}>
+              {upload.isPending && <Loader2 className="size-3.5 animate-spin" />}
+              关联为第{targetEp}集剧本
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
 
 function ScriptActions({
   projectId,
@@ -204,11 +371,13 @@ function ScriptActions({
   const uploadMulti = trpc.script.uploadMultiEpisode.useMutation({
     onSuccess: (res) => {
       const created = res.episodes.filter((e) => e.created).length;
-      const unchanged = res.episodeCount - created;
+      // 需求2B:锁定集被跳过(保留原内容),提示用户
+      const skippedLocked = res.episodes.filter((e) => e.skippedLocked).length;
+      const unchanged = res.episodeCount - created - skippedLocked;
       toast.success(
-        `多集上传完成:${res.episodeCount} 集解析 · ${created} 集新版本${
-          unchanged > 0 ? ` · ${unchanged} 集内容未变化` : ''
-        }`,
+        `多集上传完成:${res.episodeCount} 集解析 · ${created} 集更新${
+          skippedLocked > 0 ? ` · ${skippedLocked} 集锁定保留` : ''
+        }${unchanged > 0 ? ` · ${unchanged} 集内容未变化` : ''}`,
       );
       setPendingFile(null);
       setPreview(null);
@@ -292,6 +461,12 @@ function ScriptActions({
         )}
         上传剧本
       </Button>
+
+      <LinkInspirationButton
+        projectId={projectId}
+        episodeNumber={episodeNumber}
+        onSaved={onSaved}
+      />
 
       <Dialog open={preview !== null} onOpenChange={(o) => !o && cancelUpload()}>
         <DialogContent className="max-w-lg">

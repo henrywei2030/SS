@@ -60,7 +60,8 @@ function groupBindings(items: BindingItem[]): BindingGroup[] {
       groups.art!.push(item);
     } else if (
       item.key.startsWith('binding.script.') ||
-      item.key.startsWith('binding.storyboard.')
+      item.key.startsWith('binding.storyboard.') ||
+      item.key.startsWith('binding.inspiration.')
     ) {
       groups.director!.push(item);
     } else if (item.key.startsWith('binding.shot.')) {

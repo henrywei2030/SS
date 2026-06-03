@@ -6,7 +6,7 @@
 
 ---
 
-## 一、表分类速览(28 张表 / 9 个领域)
+## 一、表分类速览(29 张表 / 9 个领域)
 
 > 2026-05-22 (深夜) 更新:
 > - W3 加 3 表 — `scenes`(剧本场号)/ `shot_groups`(合并组)/ `prompt_edits`(AI→人改训练集源)
@@ -16,6 +16,9 @@
 > - GenerationAttempt 加 candidateForSlot + rejected/rejectedAt/rejectedBy
 > - ScriptAnalysis 加 scope (EPISODE/PROJECT) + scriptId nullable + projectId + perEpisodeStats + comparisonJson(W6 整剧批量分析预留)
 > - PromptEditTarget enum 加 ASSET(资产文本字段改动训练集)
+>
+> 2026-06-04(四十七收工)更新:
+> - **`inspiration_drafts`** 加 1 表 — 导演「灵感创作」子模块:想法 → LLM 生成多集剧本草稿(outline + episodes JSONB,独立于 Script 未绑 episode);经剧本「关联剧本」→ `script.upload(AI_GENERATED)` 转正。migration `20260604000000_inspiration_draft`。配套 binding `binding.inspiration.generation.modelId` + prompt slug `inspiration_outline`/`inspiration_episode`(seed 永久化)。
 >
 > 2026-05-23 (八收工) 更新(W1-W5 跨模块 audit P0):
 > - **`asset_usage_bindings`** 唯一约束由 `@@unique([assetId, episodeId, sceneId, shotId, usageType])` → **partial functional unique index**(`COALESCE(sceneId,'') + COALESCE(shotId,'') + WHERE deletedAt IS NULL`),修 PG 中 NULL≠NULL 致并发双插。schema 里 `@@unique` 注释化,真索引在 migration `20260523103000_audit_p0_assetusage_partial_unique`。

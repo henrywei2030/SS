@@ -52,6 +52,7 @@ model User {
   opLogs          OperationLog[]
   invitationsSent Invitation[]        @relation("InvitationInviter")
   promptEdits     PromptEdit[]
+  inspirationDrafts InspirationDraft[]
 
   @@index([deletedAt])
   @@map("users")
@@ -94,6 +95,7 @@ model Project {
   costs    CostLedgerEntry[]
   opLogs   OperationLog[]
   invites  Invitation[]
+  inspirationDrafts InspirationDraft[]
   style    StyleProfile?     @relation(fields: [styleId], references: [id])
 
   createdAt DateTime  @default(now())
@@ -200,6 +202,31 @@ model Script {
   @@index([projectId])
   @@index([episodeId, isCurrent])
   @@map("scripts")
+}
+
+/// 灵感创作草稿 — 想法 → LLM 生成多集剧本(大纲 + 各集),独立于 Script(未绑 episode)
+/// 通过剧本子模块"关联剧本"按钮 → script.upload(source=AI_GENERATED) 转正为某集正式剧本
+model InspirationDraft {
+  id        String  @id @default(cuid())
+  projectId String
+  title     String  @default("未命名灵感") // 剧名(LLM 生成或用户填)
+  idea      String  @db.Text // 用户输入的想法 / 灵感
+  params    Json    @default("{}") // {genre, targetEpisodes, lengthHint, tone}
+  outline   Json? // [{number, title, synopsis}] 多集大纲
+  episodes  Json    @default("[]") // [{number, title, content}] 各集已展开剧本
+  status    String  @default("DRAFT") // DRAFT / OUTLINE_DONE / DONE
+  modelId   String?
+  createdBy String
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  creator User    @relation(fields: [createdBy], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([projectId, deletedAt])
+  @@map("inspiration_drafts")
 }
 
 enum ScriptSource {

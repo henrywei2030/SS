@@ -219,6 +219,27 @@ async function main() {
         '你是经验丰富的短剧编剧 + 制作人。任务:为一集剧本输出 8 维评分(hook/suspense/twist/climax/conflict/dialogue/pace/urgency 各 0-10)+ overall + summary + highlights + issues + curve(每集 8-15 点)+ productionPlan(每镜 priority S/A/B/C)。输出严格 JSON,不要 markdown 包裹。',
       varsJson: {},
     },
+    {
+      // 四八收工:灵感创作子模块 prompt — admin 可在 /admin/prompts 编辑优化(与 router 内置 fallback 一致)
+      category: PromptCategory.SCRIPT_STORYBOARD,
+      slug: 'inspiration_outline',
+      versionTag: 'v1',
+      name: '灵感创作 · 分集大纲',
+      description: '想法/灵感 → 多集短剧分集大纲(JSON:title + episodes[number/title/synopsis])',
+      content:
+        '你是资深短剧编剧。根据用户提供的"想法/灵感"和可选参数,产出一部多集竖屏短剧的分集大纲。\n要求:\n- 剧名简洁有钩子;每集标题 + 一句话梗概(冲突/反转/悬念)\n- 集数:若用户给了目标集数就严格按它,否则默认 12 集\n- 节奏紧凑,每集留钩子,符合短剧"强冲突/快反转"特征\n只输出 JSON,不要任何解释或 markdown,格式:\n{"title":"剧名","episodes":[{"number":1,"title":"集标题","synopsis":"本集梗概"}]}',
+      varsJson: {},
+    },
+    {
+      category: PromptCategory.SCRIPT_STORYBOARD,
+      slug: 'inspiration_episode',
+      versionTag: 'v1',
+      name: '灵感创作 · 单集展开',
+      description: '剧名 + 本集大纲 → 该集完整剧本(分镜结构 画面/声音,纯文本)',
+      content:
+        '你是资深短剧编剧。根据剧名、整体想法和"本集大纲",把这一集展开为可直接拍摄的完整剧本。\n要求:\n- 用"分镜"组织:每个分镜含【画面】(场景+动作描述)、【声音】(台词/旁白/OS)\n- 台词口语化、有张力,符合短剧风格;每集 6-12 个分镜\n- 只写本集内容,不要写其他集\n输出纯文本剧本(不要 JSON),开头用"第N集:集标题"。',
+      varsJson: {},
+    },
   ];
 
   for (const t of templates) {
@@ -355,6 +376,13 @@ async function main() {
       value: 'mammoth',
       category: 'model_binding',
       description: 'docx 解析引擎(mammoth | docx2md)— 这是库选择不是 provider,保留默认值',
+    },
+    {
+      // 四八收工:灵感创作 LLM 绑定 — admin 在 /admin/bindings 选模型
+      key: 'binding.inspiration.generation.modelId',
+      value: '',
+      category: 'model_binding',
+      description: '灵感创作(想法→多集剧本大纲/展开)使用的 LLM modelId(必须 admin 显式选,任意 active text provider)',
     },
 
     // ----- 分镜业务参数 -----

@@ -8,6 +8,7 @@ import { authRouter } from './routers/auth.js';
 import { meRouter } from './routers/me.js';
 import { projectRouter } from './routers/project.js';
 import { scriptRouter } from './routers/script.js';
+import { inspirationRouter } from './routers/inspiration.js';
 import { storyboardRouter } from './routers/storyboard.js';
 import { assetRouter } from './routers/asset.js';
 import { aigcRouter } from './routers/aigc.js';
@@ -21,6 +22,7 @@ export const appRouter = router({
   me: meRouter,
   project: projectRouter,
   script: scriptRouter,
+  inspiration: inspirationRouter,
   storyboard: storyboardRouter,
   asset: assetRouter,
   aigc: aigcRouter,

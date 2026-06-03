@@ -17,9 +17,74 @@ import {
 
 interface Props {
   episodeId: string;
+  projectId: string;
 }
 
-export function ScriptPane({ episodeId }: Props): React.ReactElement {
+// 需求2A:清空全部剧本(项目级)— 软删所有集 + 各集剧本,自动保护已发布/锁定/生成中的集
+function ClearAllProjectButton({ projectId }: { projectId: string }): React.ReactElement {
+  const [open, setOpen] = React.useState(false);
+  const utils = trpc.useUtils();
+  const clear = trpc.script.deleteAllForProject.useMutation({
+    onSuccess: (res) => {
+      const skipped = res.skippedGenerating + res.skippedPublished + res.skippedLocked;
+      toast.success(
+        `已清空 ${res.cleared} 集剧本${skipped > 0 ? ` · ${skipped} 集保留(已发布/锁定/生成中)` : ''}`,
+      );
+      setOpen(false);
+      void utils.script.listVersions.invalidate();
+      void utils.storyboard.listEpisodes.invalidate();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => setOpen(true)}
+        className="h-7 gap-1 text-xs text-red-600 hover:bg-red-500/10 hover:text-red-600"
+        title="清空整个剧本子模块(所有集 + 分集列表),自动保护已发布/锁定/生成中的集"
+      >
+        <Trash2 className="size-3" />
+        清空全部
+      </Button>
+      <Dialog open={open} onOpenChange={(o) => !o && !clear.isPending && setOpen(false)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>清空全部剧本?</DialogTitle>
+            <DialogDescription>
+              软删本项目<b>所有集</b>的剧本 + 分集列表(级联清场景/分镜)。
+              <br />
+              已发布 / 锁定 / 正在生成的集会自动保留。
+              <br />
+              数据库 deletedAt 标记可手动恢复。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setOpen(false)} disabled={clear.isPending}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => clear.mutate({ projectId, confirmDelete: true })}
+              disabled={clear.isPending}
+            >
+              {clear.isPending ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="size-3.5" />
+              )}
+              确认清空全部
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+export function ScriptPane({ episodeId, projectId }: Props): React.ReactElement {
   const { data: versions, isLoading, refetch } = trpc.script.listVersions.useQuery({ episodeId });
   const current = versions?.find((v) => v.isCurrent);
   const [selectedId, setSelectedId] = React.useState<string | undefined>();
@@ -59,10 +124,12 @@ export function ScriptPane({ episodeId }: Props): React.ReactElement {
 
   if (!versions || versions.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center p-12">
+      <div className="flex h-full flex-col items-center justify-center gap-4 p-12">
         <div className="max-w-md text-center text-sm text-[hsl(var(--color-muted-foreground))]">
           本集还没有剧本。点击顶部"上传剧本"按钮导入剧本文件。
         </div>
+        {/* 需求2A:本集无剧本时也能清空全部(清其他集) */}
+        <ClearAllProjectButton projectId={projectId} />
       </div>
     );
   }
@@ -83,16 +150,19 @@ export function ScriptPane({ episodeId }: Props): React.ReactElement {
             />
           ))}
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setShowDeleteAll(true)}
-          className="h-7 gap-1 text-xs text-red-500 hover:bg-red-500/10 hover:text-red-500"
-          title="清空本集所有剧本版本(集本身保留)"
-        >
-          <Trash2 className="size-3" />
-          清空剧本
-        </Button>
+        <div className="flex shrink-0 items-center gap-1">
+          <ClearAllProjectButton projectId={projectId} />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowDeleteAll(true)}
+            className="h-7 gap-1 text-xs text-red-500 hover:bg-red-500/10 hover:text-red-500"
+            title="清空本集所有剧本版本(集本身保留)"
+          >
+            <Trash2 className="size-3" />
+            清空本集
+          </Button>
+        </div>
       </div>
 
       {/* 剧本内容 */}
