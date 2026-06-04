@@ -203,6 +203,9 @@ export const scriptRouter = router({
         },
         update: {
           ...(input.title && { title: input.title }),
+          // 对齐 uploadMultiEpisode 复活:清空(软删)后重新上传同一集须复活,否则分集列表查不到 → 0 集
+          deletedAt: null,
+          status: 'NOT_STARTED',
         },
       });
 
@@ -239,7 +242,7 @@ export const scriptRouter = router({
     .input(
       z.object({
         draftId: z.string().cuid(),
-        episodeNumbers: z.array(z.number().int().positive()).min(1, '至少选一集'),
+        episodeNumbers: z.array(z.number().int().positive()).min(1, '至少选一集').max(200, '一次最多 200 集'),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -260,17 +263,23 @@ export const scriptRouter = router({
 
       const results: { number: number; version: number; created: boolean; skipped?: boolean }[] = [];
       for (const ep of selected) {
-        // 生成中的集跳过(防覆盖正在抽卡的集)
+        // 生成中的集跳过(防覆盖正在抽卡的集)。只把"生成中"锁冲突(CONFLICT)当跳过;
+        // 其余异常(DB 抖动等)向上抛,不静默误判为"已跳过"而丢失真实错误
         try {
           await assertEpisodeNotGenerating(ctx, draft.projectId, ep.number);
-        } catch {
-          results.push({ number: ep.number, version: 0, created: false, skipped: true });
-          continue;
+        } catch (e) {
+          if (e instanceof TRPCError && e.code === 'CONFLICT') {
+            results.push({ number: ep.number, version: 0, created: false, skipped: true });
+            continue;
+          }
+          throw e;
         }
         const episode = await ctx.prisma.episode.upsert({
           where: { projectId_number: { projectId: draft.projectId, number: ep.number } },
           create: { projectId: draft.projectId, number: ep.number, title: ep.title },
-          update: { title: ep.title },
+          // 关键(对齐 uploadMultiEpisode 的 Phase 1.5.3 复活):命中软删 Episode(清空全部后)时
+          //   必须复活 deletedAt=null,否则"关联成功"但分集列表(where deletedAt:null)查不到 → 0 集
+          update: { title: ep.title, deletedAt: null, status: 'NOT_STARTED' },
         });
         const { script, created } = await createNextVersion(ctx, {
           projectId: draft.projectId,
@@ -374,6 +383,9 @@ export const scriptRouter = router({
         },
         update: {
           ...(input.title && { title: input.title }),
+          // 对齐 uploadMultiEpisode 复活:清空(软删)后重新上传同一集须复活,否则分集列表查不到 → 0 集
+          deletedAt: null,
+          status: 'NOT_STARTED',
         },
       });
 

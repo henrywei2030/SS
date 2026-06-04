@@ -547,6 +547,14 @@ async function main() {
       category: 'general',
       description: '单项目单日视频生成预算上限(元),超限拒绝新抽卡(BUDGET_BLOCKED)',
     },
+    {
+      // 漏洞审查:文本生成每日预算守卫(inspiration.ts checkTextBudget 读)。默认 0=不限,
+      //   各机可在系统设置调;db:sync 增量补缺(不覆盖各机值)
+      key: 'text.generate.dailyBudgetCny',
+      value: '0',
+      category: 'general',
+      description: '单项目单日文本生成(大纲/分镜/灵感展开等 LLM)预算上限(元),0=不限,超限拒新请求(TOO_MANY_REQUESTS)',
+    },
   ];
   for (const s of systemSettings) {
     await prisma.systemSetting.upsert({

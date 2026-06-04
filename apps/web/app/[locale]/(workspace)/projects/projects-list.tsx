@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Plus, FolderClosed, Search } from 'lucide-react';
+import { Plus, FolderClosed, Search, Pencil } from 'lucide-react';
 import * as React from 'react';
 
 import { trpc } from '@/lib/trpc/client';
@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
-import { CreateProjectDialog } from './create-project-dialog';
+import { CreateProjectDialog, type EditableProject } from './create-project-dialog';
 import { cn } from '@/lib/utils';
 
 export function ProjectsList(): React.ReactElement {
@@ -19,6 +19,7 @@ export function ProjectsList(): React.ReactElement {
   const params = useParams<{ locale: string }>();
   const [search, setSearch] = React.useState('');
   const [open, setOpen] = React.useState(false);
+  const [editProject, setEditProject] = React.useState<EditableProject | null>(null);
 
   const { data, isLoading, refetch } = trpc.project.list.useQuery({
     search: search || undefined,
@@ -54,13 +55,14 @@ export function ProjectsList(): React.ReactElement {
       ) : data && data.length > 0 ? (
         <div className="overflow-hidden rounded-lg border border-[hsl(var(--color-border))]">
           {/* Table header */}
-          <div className="grid grid-cols-[1fr_120px_100px_140px_160px_80px] gap-3 border-b border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-3 py-2 text-[11px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
+          <div className="grid grid-cols-[1fr_120px_100px_140px_160px_80px_44px] gap-3 border-b border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-3 py-2 text-[11px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
             <div>Name</div>
             <div>Type</div>
             <div>Aspect</div>
             <div>Updated</div>
             <div>Team</div>
             <div className="text-right">Stats</div>
+            <div />
           </div>
 
           {/* Table rows */}
@@ -69,7 +71,7 @@ export function ProjectsList(): React.ReactElement {
               <Link
                 key={p.id}
                 href={`/${params.locale}/projects/${p.id}`}
-                className="grid grid-cols-[1fr_120px_100px_140px_160px_80px] items-center gap-3 px-3 py-2.5 transition-colors hover:bg-[hsl(var(--color-card))] focus:bg-[hsl(var(--color-card))] focus:outline-none"
+                className="group grid grid-cols-[1fr_120px_100px_140px_160px_80px_44px] items-center gap-3 px-3 py-2.5 transition-colors hover:bg-[hsl(var(--color-card))] focus:bg-[hsl(var(--color-card))] focus:outline-none"
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <div className="size-1.5 shrink-0 rounded-full bg-[hsl(var(--color-success))]" />
@@ -113,6 +115,24 @@ export function ProjectsList(): React.ReactElement {
                   <span className="opacity-30">·</span>
                   <span title="资产">{p._count.assets}A</span>
                 </div>
+                <button
+                  type="button"
+                  title="编辑项目"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setEditProject({
+                      id: p.id,
+                      name: p.name,
+                      type: p.type,
+                      aspect: p.aspect,
+                      description: p.description,
+                    });
+                  }}
+                  className="flex size-7 items-center justify-center rounded-md text-[hsl(var(--color-muted-foreground))] opacity-0 transition hover:bg-[hsl(var(--color-secondary))] hover:text-[hsl(var(--color-foreground))] focus:opacity-100 focus:outline-none group-hover:opacity-100"
+                >
+                  <Pencil className="size-3.5" />
+                </button>
               </Link>
             ))}
           </div>
@@ -129,6 +149,17 @@ export function ProjectsList(): React.ReactElement {
           setOpen(false);
         }}
       />
+      <CreateProjectDialog
+        open={!!editProject}
+        project={editProject}
+        onOpenChange={(v) => {
+          if (!v) setEditProject(null);
+        }}
+        onCreated={() => {
+          void refetch();
+          setEditProject(null);
+        }}
+      />
     </div>
   );
 }
@@ -140,7 +171,7 @@ function ProjectListSkeleton(): React.ReactElement {
         {Array.from({ length: 4 }).map((_, i) => (
           <div
             key={i}
-            className="grid grid-cols-[1fr_120px_100px_140px_160px_80px] items-center gap-3 px-3 py-2.5"
+            className="grid grid-cols-[1fr_120px_100px_140px_160px_80px_44px] items-center gap-3 px-3 py-2.5"
           >
             <Skeleton className="h-4 w-2/3" />
             <Skeleton className="h-4 w-16" />
@@ -148,6 +179,7 @@ function ProjectListSkeleton(): React.ReactElement {
             <Skeleton className="h-4 w-20" />
             <Skeleton className="h-4 w-24" />
             <Skeleton className="h-4 w-12 ml-auto" />
+            <Skeleton className="h-4 w-6" />
           </div>
         ))}
       </div>

@@ -59,8 +59,14 @@ export function sanitizeErrorMsg(err: unknown, maxLen = 200): string {
   const raw = err instanceof Error ? err.message : String(err);
   return raw
     .replace(/https?:\/\/[^\s]+/g, '[URL]')
+    // 漏洞审查加固:补 token 类盲区 — 原 4 条规则漏带连字符 key(sk-proj-…)/ JWT / 裸 IP:port
+    //   (这些含 - _ . 会打断 base64 规则的连续段;JWT 每段 <40 字符也漏网)
+    .replace(/\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]+/g, '[JWT]')
+    .replace(/\bBearer\s+[A-Za-z0-9._-]{8,}/gi, 'Bearer [TOKEN]')
+    .replace(/\b(?:sk|pk|rk|ak|tok|secret|api[_-]?key)[-_][A-Za-z0-9_-]{8,}/gi, '[KEY]')
     .replace(/\b[a-f0-9]{32,}\b/gi, '[HASH]')
     .replace(/\b[A-Za-z0-9+/=]{40,}={0,2}\b/g, '[B64]')
+    .replace(/\b\d{1,3}(?:\.\d{1,3}){3}(?::\d{1,5})?\b/g, '[IP]')
     .replace(/(\/[^\s/]+){3,}/g, '[PATH]')
     .slice(0, maxLen)
     .trim();

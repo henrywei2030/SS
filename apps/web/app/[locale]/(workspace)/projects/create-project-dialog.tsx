@@ -18,36 +18,75 @@ import { Label } from '@/components/ui/label';
 import { ASPECT_RATIOS } from '@ss/shared/constants';
 
 const PROJECT_TYPES = ['AI_REAL', 'ANIM_3D', 'ANIM_2D', 'POSTER'] as const;
+type ProjectType = (typeof PROJECT_TYPES)[number];
+type AspectRatio = (typeof ASPECT_RATIOS)[number];
+
+/** 编辑模式传入的项目最小字段(列表行提供) */
+export interface EditableProject {
+  id: string;
+  name: string;
+  type: string;
+  aspect: string;
+  description?: string | null;
+}
 
 export function CreateProjectDialog({
   open,
   onOpenChange,
   onCreated,
+  project,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onCreated: () => void;
+  /** 传入 = 「编辑」模式(预填 + 调 project.update);不传 = 「创建」模式 */
+  project?: EditableProject | null;
 }): React.ReactElement {
   const t = useTranslations();
-  const create = trpc.project.create.useMutation({
-    onSuccess: () => onCreated(),
-  });
+  const isEdit = !!project;
+  const create = trpc.project.create.useMutation({ onSuccess: () => onCreated() });
+  const update = trpc.project.update.useMutation({ onSuccess: () => onCreated() });
+  const pending = isEdit ? update.isPending : create.isPending;
+  const errorMsg = (isEdit ? update.error : create.error)?.message;
 
   const [name, setName] = React.useState('');
-  const [type, setType] = React.useState<(typeof PROJECT_TYPES)[number]>('AI_REAL');
-  const [aspect, setAspect] = React.useState<(typeof ASPECT_RATIOS)[number]>('9:16');
+  const [type, setType] = React.useState<ProjectType>('AI_REAL');
+  const [aspect, setAspect] = React.useState<AspectRatio>('9:16');
   const [description, setDescription] = React.useState('');
+
+  // 打开时同步表单:编辑模式预填当前值,创建模式重置为默认(原创建对话框每次打开清空)
+  React.useEffect(() => {
+    if (!open) return;
+    setName(project?.name ?? '');
+    setType((project?.type as ProjectType) ?? 'AI_REAL');
+    setAspect((project?.aspect as AspectRatio) ?? '9:16');
+    setDescription(project?.description ?? '');
+  }, [open, project]);
 
   function onSubmit(e: React.FormEvent): void {
     e.preventDefault();
-    create.mutate({ name, type, aspect, description: description || undefined });
+    // 编辑模式传实际值(空串 = 清空原简介);创建模式空串转 undefined(不设)。
+    //   编辑时若也走 `|| undefined`,清空会丢字段 → Prisma 不更新 → 旧简介残留。
+    const data = {
+      name,
+      type,
+      aspect,
+      description: isEdit ? description : description || undefined,
+    };
+    if (isEdit && project) {
+      update.mutate({ id: project.id, data });
+    } else {
+      create.mutate(data);
+    }
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t('modules.missionControl.newProject')}</DialogTitle>
+          <DialogTitle>
+            {isEdit ? '编辑项目 / Edit' : t('modules.missionControl.newProject')}
+          </DialogTitle>
           <DialogDescription>{t('app.tagline')}</DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit} className="flex flex-col gap-4">
@@ -100,16 +139,16 @@ export function CreateProjectDialog({
               className="rounded-lg border border-[hsl(var(--color-border))] bg-[hsl(var(--color-input))] px-3 py-2 text-sm"
             />
           </div>
-          {create.error && (
-            <p className="text-sm text-[hsl(var(--color-destructive))]">{create.error.message}</p>
+          {errorMsg && (
+            <p className="text-sm text-[hsl(var(--color-destructive))]">{errorMsg}</p>
           )}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               {t('actions.cancel')}
             </Button>
-            <Button type="submit" disabled={create.isPending || !name}>
-              {create.isPending && <Loader2 className="size-4 animate-spin" />}
-              {t('actions.create')}
+            <Button type="submit" disabled={pending || !name}>
+              {pending && <Loader2 className="size-4 animate-spin" />}
+              {isEdit ? '保存 / Save' : t('actions.create')}
             </Button>
           </DialogFooter>
         </form>

@@ -5,6 +5,42 @@
 
 ---
 
+## 2026-06-04(周四,mac-mini · 五一次收工)— 前两轮(五十/四九)漏洞两遍审查 + 4 项加固 + 项目编辑功能(列表行入口)+ 关联剧本导入 0 集根因修 + 灵感/项目编辑/关联 Chrome 真打
+
+**完成 — 6 文件改 · typecheck 20/20 + test 全绿 · 大量 Chrome 真打**
+
+### 一、前两轮修改漏洞两遍审查(无 P0/P1)+ 4 项加固
+
+开工指令"回顾前两轮(五十 `5ab6e43` + 四九 `6372d8a`)全面检查两遍漏洞"。第一遍亲自精读 8 文件 diff,第二遍 2 个独立 agent 交叉验证(访问控制/经济/并发 + 注入/泄露/密钥/XSS/DoS),三方收敛:**IDOR/经济/密钥/ReDoS/XSS 逐项排除,无 P0/P1**。用户选全修 4 项加固:
+- **脱敏加固** `shared/errors.ts`:`sanitizeErrorMsg` 补 JWT / Bearer / 前缀式 key(`sk-proj-…`)/ 裸 `IP:port` 规则(原 4 条漏带连字符 key —— `-_.` 打断 base64 段)。真实函数实测 9 case + 120 万字符 ReDoS 10ms 线性
+- **新代码小卫生** `script.ts`:`linkInspirationEpisodes` 的 `episodeNumbers` 补 `.max(200)`;catch 只接 TRPCError CONFLICT 其余 rethrow(防 DB 抖动误判跳过)
+- **并发锁收口** `inspiration.ts`:`generateEpisode` + `generateAllEpisodes` 的 `draft.episodes` read-modify-write 套 `pg_advisory_xact_lock('insp_draft:'||id)` 事务(对齐 `createNextVersion` 范式),**LLM 锁外跑**、锁内重读最新 episodes 再合并,防并发覆盖丢集(pre-existing 模式一并收口)
+- **text 链路 budget guard** `inspiration.ts`+`seed.ts`:`checkTextBudget`(对齐 `checkDailyVideoBudget` 的 Decimal 范式,查今日 `text.generate` 累计)+ 3 入口前置检查 + 新 setting `text.generate.dailyBudgetCny`(默认 0=不限,不误伤现有使用)
+
+### 二、系统 Chrome 启动 + 灵感创作真打
+
+`pnpm dev` 起 web(:3000 Ready 1.4s)+ worker(:9200)+ infra healthy,Chrome 打开 localhost:3000。进「亮剑」灵感创作真打:第1集 screenplay 渲染完全正确(`1-1 夜 内 机房`/人物/△/`陆鸣（焦急）：`/`（OS）`),全部展开 `pending=0` 无报错、12 集完整、后端全 200 —— 并发锁 + budget guard 未破坏链路
+
+### 三、项目编辑功能(新实现 · 列表行入口)
+
+用户:项目名称/参数要可修改。后端 `project.update` 早就绪,前端缺入口。改造 `create-project-dialog` 为**创建/编辑双模式**(复用表单)+ `projects-list` 每行 hover 出编辑按钮(`preventDefault`+`stopPropagation` 阻止行导航)。真打全过:预填正确、保存生效(列表实时刷新+updatedAt)。**真打中发现并修 bug**:`description: description || undefined` 致编辑模式清空简介无效(空串变 undefined 被 Prisma 忽略)→ 改成编辑模式传实际值
+
+### 四、关联剧本导入 0 集 bug 根因修(用户报)
+
+现象:剧本管理清空全部后重新关联,toast「已关联 12 集」但分集列表 **0 集**。**根因**:`linkInspirationEpisodes` 的 `episode.upsert` update 分支只改 title、**漏复活 `deletedAt:null`** → 命中软删 Episode(清空=软删)不复活 → 列表 `where deletedAt:null` 查不到。`uploadMultiEpisode` 早有此复活(Phase 1.5.3),我加 link 时漏抄。**修** `script.ts` 3 处对齐(link + 单集 content/docx upload,后两个 pre-existing 同隐患)加 `deletedAt:null, status:'NOT_STARTED'`。真打:0 集 → 关联 12 集 → 列表正确显示 12 集
+
+**问题/待决策**
+- ❓ **漏洞审查盲区**:关联 0 集复活 bug 是前两遍"全面检查漏洞"漏掉的 —— 当时只盯传统安全维度(authz/经济/并发/注入),且轻信"复用 upload 逻辑"没逐行对比。教训:审查声称"复用"的代码须逐行核对复用完整性 + 覆盖功能正确性(非仅安全)
+- ❓ budget guard 默认 0(不限),机制就位但需配 `text.generate.dailyBudgetCny` 非零才生效
+- ❓ 亮剑 `description` 真打从 null 写成 ''(UI 等价,都不显示),`updatedAt` 变今天
+
+**下次接着做**
+- 📌 端到端:新关联的 12 集 → 分镜工坊 3 并发生成(验证 link 复活 + 截断已修)
+- 📌 (可选)项目编辑表单加更多字段(风格/预算/排期 — schema 已支持,仅创建对话框未暴露)
+- 📌 (可选)budget guard 默认值设非零启用保护
+
+---
+
 ## 2026-06-04(周四,mac-mini · 五十次收工)— 灵感全部展开(分块+进度条)+ 关联剧本多集导入 + 分镜失败根因深诊 + 灵感/分镜 prompt 重做(产正式剧本)+ 子模块更名 + 分镜 3 并发 B站式 UI
 
 **完成 — 9 文件改 + 4 新文件 · typecheck 16/16 · 大量 Chrome 真打 + 直接 moyu API 诊断 · 跨多轮迭代**

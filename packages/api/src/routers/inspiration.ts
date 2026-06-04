@@ -215,6 +215,29 @@ async function resolveModelId(prisma: Context['prisma'], override?: string | nul
   return modelId;
 }
 
+/**
+ * 漏洞审查 audit:文本生成每日预算守卫(对齐 video 链路 checkDailyVideoBudget)。
+ *   查今日该 project 的 text.generate 累计成本,≥ 上限则拒新请求(返回 null=通过 / 不限)。
+ *   setting `text.generate.dailyBudgetCny`(默认 0=不限)各机可在系统设置调整。
+ */
+async function checkTextBudget(prisma: Context['prisma'], projectId: string): Promise<string | null> {
+  const raw = await loadSystemSetting(prisma, 'text.generate.dailyBudgetCny');
+  const limit = Number(raw ?? 0);
+  if (!Number.isFinite(limit) || limit <= 0) return null; // 0 / 未配 / 非法 = 不限
+  // UTC 0 点为"今天"边界,跟 checkDailyVideoBudget / insights 一致(DB createdAt 存 UTC)
+  const todayStart = new Date();
+  todayStart.setUTCHours(0, 0, 0, 0);
+  const spent = await prisma.costLedgerEntry.aggregate({
+    where: { projectId, action: 'text.generate', success: true, createdAt: { gte: todayStart } },
+    _sum: { costCny: true },
+  });
+  const spentDec = new Prisma.Decimal(spent._sum.costCny ?? 0);
+  if (spentDec.gte(new Prisma.Decimal(limit))) {
+    return `今日文本生成预算已用 ${spentDec.toFixed(2)}¥ / 上限 ${limit}¥,请明日再试或调高 text.generate.dailyBudgetCny`;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -231,6 +254,8 @@ export const inspirationRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId);
+      const budgetDeny = await checkTextBudget(ctx.prisma, input.projectId);
+      if (budgetDeny) throw new TRPCError({ code: 'TOO_MANY_REQUESTS', message: budgetDeny });
       // 需求1b:灵感草稿上限 50
       const draftCount = await ctx.prisma.inspirationDraft.count({
         where: { projectId: input.projectId, deletedAt: null },
@@ -333,6 +358,8 @@ export const inspirationRouter = router({
       });
       if (!draft) throw new TRPCError({ code: 'NOT_FOUND', message: '灵感草稿不存在' });
       await assertProjectAccess(ctx, draft.projectId);
+      const budgetDeny = await checkTextBudget(ctx.prisma, draft.projectId);
+      if (budgetDeny) throw new TRPCError({ code: 'TOO_MANY_REQUESTS', message: budgetDeny });
 
       const outline = (draft.outline as unknown as OutlineEp[]) ?? [];
       const epOutline = outline.find((e) => e.number === input.episodeNumber);
@@ -386,19 +413,30 @@ export const inspirationRouter = router({
       }
 
       const content = result.text?.trim() || '';
-      const episodes = ((draft.episodes as unknown as DraftEp[]) ?? []).filter(
-        (e) => e.number !== input.episodeNumber,
-      );
-      episodes.push({ number: input.episodeNumber, title: epOutline.title, content });
-      episodes.sort((a, b) => a.number - b.number);
-      const allDone = outline.every((o) => episodes.some((e) => e.number === o.number && e.content));
-
-      const updated = await ctx.prisma.inspirationDraft.update({
-        where: { id: draft.id },
-        data: {
-          episodes: episodes as unknown as Prisma.InputJsonValue,
-          status: allDone ? 'DONE' : 'OUTLINE_DONE',
-        },
+      // 并发锁收口:LLM 在锁外跑;"读最新 episodes → 合并本集 → 落库"放进 advisory-lock 事务,
+      //   锁内重读最新快照(LLM 调用期间别的 generate* 请求可能已写入其它集),避免老快照覆盖丢集
+      const updated = await ctx.prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(
+          `SELECT pg_advisory_xact_lock(hashtext('insp_draft:' || $1)::bigint)`,
+          draft.id,
+        );
+        const fresh = await tx.inspirationDraft.findUnique({
+          where: { id: draft.id },
+          select: { episodes: true },
+        });
+        const episodes = ((fresh?.episodes as unknown as DraftEp[]) ?? []).filter(
+          (e) => e.number !== input.episodeNumber,
+        );
+        episodes.push({ number: input.episodeNumber, title: epOutline.title, content });
+        episodes.sort((a, b) => a.number - b.number);
+        const allDone = outline.every((o) => episodes.some((e) => e.number === o.number && e.content));
+        return tx.inspirationDraft.update({
+          where: { id: draft.id },
+          data: {
+            episodes: episodes as unknown as Prisma.InputJsonValue,
+            status: allDone ? 'DONE' : 'OUTLINE_DONE',
+          },
+        });
       });
       await ctx.prisma.generationAttempt.update({
         where: { id: attempt.id },
@@ -431,6 +469,8 @@ export const inspirationRouter = router({
       });
       if (!draft) throw new TRPCError({ code: 'NOT_FOUND', message: '灵感草稿不存在' });
       await assertProjectAccess(ctx, draft.projectId);
+      const budgetDeny = await checkTextBudget(ctx.prisma, draft.projectId);
+      if (budgetDeny) throw new TRPCError({ code: 'TOO_MANY_REQUESTS', message: budgetDeny });
 
       const outline = (draft.outline as unknown as OutlineEp[]) ?? [];
       const existing = (draft.episodes as unknown as DraftEp[]) ?? [];
@@ -495,25 +535,38 @@ export const inspirationRouter = router({
         });
       }
 
-      // 解析本块 → 合并 → 立即落库
+      // 解析本块 → 锁内重读最新 episodes → 合并 → 落库(并发安全,见 generateEpisode 同款 advisory-lock 注释)
       const parsed = parseEpisodesBatch(result.text ?? '');
-      const byNum = new Map(existing.map((e) => [e.number, e] as const));
       let chunkAdded = 0;
-      for (const o of chunk) {
-        const body = parsed.get(o.number);
-        if (body?.trim()) {
-          byNum.set(o.number, { number: o.number, title: o.title, content: body.trim() });
-          chunkAdded += 1;
+      await ctx.prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(
+          `SELECT pg_advisory_xact_lock(hashtext('insp_draft:' || $1)::bigint)`,
+          draft.id,
+        );
+        const fresh = await tx.inspirationDraft.findUnique({
+          where: { id: draft.id },
+          select: { episodes: true },
+        });
+        const byNum = new Map(
+          ((fresh?.episodes as unknown as DraftEp[]) ?? []).map((e) => [e.number, e] as const),
+        );
+        chunkAdded = 0;
+        for (const o of chunk) {
+          const body = parsed.get(o.number);
+          if (body?.trim()) {
+            byNum.set(o.number, { number: o.number, title: o.title, content: body.trim() });
+            chunkAdded += 1;
+          }
         }
-      }
-      const episodes = [...byNum.values()].sort((a, b) => a.number - b.number);
-      const allDone = outline.every((o) => episodes.some((e) => e.number === o.number && e.content));
-      await ctx.prisma.inspirationDraft.update({
-        where: { id: draft.id },
-        data: {
-          episodes: episodes as unknown as Prisma.InputJsonValue,
-          status: allDone ? 'DONE' : 'OUTLINE_DONE',
-        },
+        const episodes = [...byNum.values()].sort((a, b) => a.number - b.number);
+        const allDone = outline.every((o) => episodes.some((e) => e.number === o.number && e.content));
+        await tx.inspirationDraft.update({
+          where: { id: draft.id },
+          data: {
+            episodes: episodes as unknown as Prisma.InputJsonValue,
+            status: allDone ? 'DONE' : 'OUTLINE_DONE',
+          },
+        });
       });
       await ctx.prisma.generationAttempt.update({
         where: { id: attempt.id },
