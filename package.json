@@ -26,6 +26,7 @@
     "db:studio": "pnpm --filter @ss/db studio",
     "db:seed": "pnpm --filter @ss/db seed",
     "db:sync": "pnpm --filter @ss/db sync",
+    "db:sync:prompts": "pnpm --filter @ss/db sync:prompts",
     "db:reset": "pnpm --filter @ss/db reset",
     "infra:up": "docker compose -f infra/docker-compose.yml up -d",
     "infra:down": "docker compose -f infra/docker-compose.yml down",

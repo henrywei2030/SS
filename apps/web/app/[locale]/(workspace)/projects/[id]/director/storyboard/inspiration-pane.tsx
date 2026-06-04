@@ -314,13 +314,15 @@ function DraftDetail({
   const { data: draft, isLoading } = trpc.inspiration.getDraft.useQuery({ draftId });
   const [activeEp, setActiveEp] = React.useState<number | null>(null);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
-  // 四九收工:区分"全部展开"vs 单集展开 — 否则共用 genEp.isPending 导致所有按钮一起转圈
-  const [allRunning, setAllRunning] = React.useState(false);
+  // 四九收工:全部展开进度(前端循环驱动分块,实时进度条防卡死误判)
+  const [batchProgress, setBatchProgress] = React.useState<{ done: number; total: number } | null>(null);
 
   const genEp = trpc.inspiration.generateEpisode.useMutation({
     onSuccess: () => onChanged(),
     onError: (e) => toast.error(`展开失败:${e.message}`),
   });
+  // 全部展开 = 分块统筹(每块 3 集,连贯 + 省 token),跳过已展开;前端循环调用
+  const genAllEp = trpc.inspiration.generateAllEpisodes.useMutation();
   const del = trpc.inspiration.deleteDraft.useMutation({
     onSuccess: () => {
       toast.success('已删除');
@@ -351,24 +353,41 @@ function DraftDetail({
     downloadText(`${draft.title}.txt`, parts.join('\n'));
   };
 
-  const generateAll = async (): Promise<void> => {
-    setAllRunning(true);
-    try {
-      for (const o of outline) {
-        if (!epByNum.get(o.number)?.content) {
-          await genEp.mutateAsync({ draftId, episodeNumber: o.number });
-        }
-      }
-      toast.success('已展开全部集');
-    } finally {
-      setAllRunning(false);
-    }
-  };
-
   // 四九收工:某一集是否正在生成(spinner 精确到该集,不再全部一起转)
   // genEp.variables 在 mutation in-flight 时保存当前传的 episodeNumber
   const isGenningEp = (n: number): boolean =>
     genEp.isPending && genEp.variables?.episodeNumber === n;
+  const batchRunning = batchProgress != null;
+  // 任一生成进行中 → 禁用所有展开按钮(防并发)
+  const anyGenning = genEp.isPending || genAllEp.isPending || batchRunning;
+
+  // 四九收工:全部展开 = 前端循环驱动分块。每块完成更新进度条 + 刷新出新集,
+  // 让慢模型(sonnet ~6min)也看得见进度,不会误以为系统卡死。
+  const runAllEpisodes = async (): Promise<void> => {
+    const startPending = outline.filter((o) => !epByNum.get(o.number)?.content).length;
+    if (startPending === 0) {
+      toast.success('全部集已展开,无需重复');
+      return;
+    }
+    setBatchProgress({ done: 0, total: startPending });
+    let done = 0;
+    try {
+      // 循环续跑,直到后端报 remaining=0 或本块 0 产出(防卡死)
+      for (let guard = 0; guard < startPending + 2; guard++) {
+        const r = await genAllEp.mutateAsync({ draftId });
+        done += r.generated;
+        setBatchProgress({ done, total: startPending });
+        onChanged(); // 刷新:本块新集立即显示
+        if (r.remaining === 0 || r.generated === 0) break;
+      }
+      if (done >= startPending) toast.success(`已展开全部 ${done} 集`);
+      else toast.warning(`已展开 ${done}/${startPending} 集,剩余可再点"全部展开"补齐(已展开会跳过)`);
+    } catch (e) {
+      toast.error(`全部展开中断:${e instanceof Error ? e.message : String(e)}(已展开的已保存,可再点补齐)`);
+    } finally {
+      setBatchProgress(null);
+    }
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -387,12 +406,13 @@ function DraftDetail({
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button
-            onClick={() => void generateAll()}
-            disabled={genEp.isPending || generatedCount === outline.length}
+            onClick={() => void runAllEpisodes()}
+            disabled={anyGenning || generatedCount === outline.length}
+            title="分批统筹生成未展开集(每批带完整大纲保连贯 + 省 token),已展开自动跳过"
             className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--color-border))] px-2.5 py-1.5 text-xs hover:bg-[hsl(var(--color-muted))] disabled:opacity-50"
           >
-            {allRunning ? <Loader2 className="size-3.5 animate-spin" /> : <Wand2 className="size-3.5" />}
-            全部展开
+            {batchRunning ? <Loader2 className="size-3.5 animate-spin" /> : <Wand2 className="size-3.5" />}
+            {batchRunning ? `生成中 ${batchProgress.done}/${batchProgress.total}…` : '全部展开'}
           </button>
           <button
             onClick={downloadAll}
@@ -403,13 +423,37 @@ function DraftDetail({
           </button>
           <button
             onClick={() => setDeleteOpen(true)}
-            className="inline-flex items-center gap-1 rounded-md border border-red-500/40 px-2.5 py-1.5 text-xs text-red-600 hover:bg-red-500/10 dark:text-red-400"
+            disabled={batchRunning}
+            className="inline-flex items-center gap-1 rounded-md border border-red-500/40 px-2.5 py-1.5 text-xs text-red-600 hover:bg-red-500/10 disabled:opacity-50 dark:text-red-400"
           >
             <Trash2 className="size-3.5" />
             删除
           </button>
         </div>
       </div>
+
+      {/* 四九收工:全部展开进度条 + 动画(慢模型 ~分钟级,让用户看见在动而非卡死) */}
+      {batchRunning && (
+        <div className="border-b border-[hsl(var(--color-border))] bg-blue-500/5 px-4 py-2.5">
+          <div className="mb-1.5 flex items-center justify-between text-xs">
+            <span className="flex items-center gap-1.5 font-medium text-blue-700 dark:text-blue-300">
+              <Loader2 className="size-3.5 animate-spin" />
+              正在分批统筹生成剧本… 已完成 {batchProgress.done}/{batchProgress.total} 集
+            </span>
+            <span className="text-[hsl(var(--color-muted-foreground))]">
+              分批统筹生成 · 模型较慢请耐心等(已完成的实时显示在左侧)
+            </span>
+          </div>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-[hsl(var(--color-muted))]">
+            <div
+              className="h-full rounded-full bg-blue-600 transition-all duration-500"
+              style={{
+                width: `${batchProgress.total > 0 ? Math.round((batchProgress.done / batchProgress.total) * 100) : 0}%`,
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* 主体:大纲列表 + 选中集内容 */}
       <div className="flex min-h-0 flex-1">
@@ -448,7 +492,7 @@ function DraftDetail({
                 </button>
                 <button
                   onClick={() => genEp.mutate({ draftId, episodeNumber: o.number })}
-                  disabled={genEp.isPending}
+                  disabled={anyGenning}
                   className="mt-1.5 inline-flex items-center gap-1 rounded border border-[hsl(var(--color-border))] px-1.5 py-0.5 text-[10px] hover:bg-[hsl(var(--color-muted))] disabled:opacity-50"
                 >
                   {isGenningEp(o.number) ? <Loader2 className="size-2.5 animate-spin" /> : <Sparkles className="size-2.5" />}
@@ -479,7 +523,7 @@ function DraftDetail({
               <p>第{activeEp}集尚未展开</p>
               <button
                 onClick={() => genEp.mutate({ draftId, episodeNumber: activeEp })}
-                disabled={genEp.isPending}
+                disabled={anyGenning}
                 className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               >
                 {isGenningEp(activeEp) ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}

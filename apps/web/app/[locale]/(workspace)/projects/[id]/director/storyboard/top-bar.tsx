@@ -17,6 +17,7 @@ import {
   Compass,
   Lightbulb,
   Link2,
+  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -88,14 +89,14 @@ export function TopBar({
           onClick={() => onTabChange('script')}
           icon={<FileText className="size-3.5" />}
         >
-          剧本
+          剧本管理
         </TabButton>
         <TabButton
           active={tab === 'shots'}
           onClick={() => onTabChange('shots')}
           icon={<ListChecks className="size-3.5" />}
         >
-          分镜
+          分镜工坊
         </TabButton>
       </div>
 
@@ -166,17 +167,15 @@ function TabButton({
 // 关联剧本 — 把"灵感创作"生成的某集剧本上传为本集正式剧本(source=AI_GENERATED)
 function LinkInspirationButton({
   projectId,
-  episodeNumber,
   onSaved,
 }: {
   projectId: string;
-  episodeNumber: number;
+  episodeNumber: number; // 保留 prop(caller 传),多集导入不再需要单一目标集
   onSaved: () => void;
 }): React.ReactElement {
   const [open, setOpen] = React.useState(false);
   const [draftId, setDraftId] = React.useState('');
-  const [epNum, setEpNum] = React.useState<number | null>(null);
-  const [targetEp, setTargetEp] = React.useState<number>(episodeNumber);
+  const [selectedNums, setSelectedNums] = React.useState<Set<number>>(new Set());
   const utils = trpc.useUtils();
 
   // 需求1e:只列顶置草稿(用户标记最满意的才能关联到剧本)
@@ -189,13 +188,25 @@ function LinkInspirationButton({
     { enabled: open && !!draftId },
   );
 
-  React.useEffect(() => {
-    if (open) setTargetEp(episodeNumber);
-  }, [episodeNumber, open]);
+  const episodes = (
+    (draft?.episodes as unknown as { number: number; title: string; content: string }[]) ?? []
+  ).filter((e) => e.content);
 
-  const upload = trpc.script.upload.useMutation({
+  // 四九收工:草稿加载后默认全选所有已展开集(默认全部导入)
+  React.useEffect(() => {
+    if (draft) setSelectedNums(new Set(episodes.map((e) => e.number)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftId, draft]);
+
+  const link = trpc.script.linkInspirationEpisodes.useMutation({
     onSuccess: (res) => {
-      toast.success(`已关联到第 ${res.episode.number} 集 V${res.script.version}`);
+      // 报"已关联集数"= total - skipped(含新建 + 内容未变已是最新的,都算关联成功)
+      const linked = res.total - res.skipped;
+      toast.success(
+        `已关联 ${linked} 集剧本${res.created < linked ? `(${res.created} 集更新版本 · 其余已是最新)` : ''}${
+          res.skipped > 0 ? ` · ${res.skipped} 集生成中跳过` : ''
+        }`,
+      );
       setOpen(false);
       void utils.script.listVersions.invalidate();
       void utils.storyboard.listEpisodes.invalidate();
@@ -204,23 +215,23 @@ function LinkInspirationButton({
     onError: (e) => toast.error(e.message),
   });
 
-  const episodes = (
-    (draft?.episodes as unknown as { number: number; title: string; content: string }[]) ?? []
-  ).filter((e) => e.content);
-  const selectedEp = episodes.find((e) => e.number === epNum);
+  const toggle = (n: number): void =>
+    setSelectedNums((s) => {
+      const next = new Set(s);
+      if (next.has(n)) next.delete(n);
+      else next.add(n);
+      return next;
+    });
+  const allSelected = episodes.length > 0 && selectedNums.size === episodes.length;
+  const toggleAll = (): void =>
+    setSelectedNums(allSelected ? new Set() : new Set(episodes.map((e) => e.number)));
 
   const confirm = (): void => {
-    if (!draft || !selectedEp) {
-      toast.error('请选择已展开的集');
+    if (selectedNums.size === 0) {
+      toast.error('请至少选一集');
       return;
     }
-    upload.mutate({
-      projectId,
-      episodeNumber: targetEp,
-      title: `${draft.title} 第${selectedEp.number}集`,
-      content: selectedEp.content,
-      source: 'AI_GENERATED',
-    });
+    link.mutate({ draftId, episodeNumbers: [...selectedNums] });
   };
 
   const inputCls =
@@ -233,7 +244,7 @@ function LinkInspirationButton({
         variant="outline"
         className="h-7 gap-1 text-xs"
         onClick={() => setOpen(true)}
-        title="把灵感创作生成的剧本关联(上传)为本集正式剧本"
+        title="把灵感创作生成的剧本导入为正式剧本(默认全部集,灵感第N集→本项目第N集)"
       >
         <Link2 className="size-3.5" />
         关联剧本
@@ -243,7 +254,8 @@ function LinkInspirationButton({
           <DialogHeader>
             <DialogTitle>关联灵感剧本</DialogTitle>
             <DialogDescription>
-              把「灵感创作」生成的某集剧本上传为剧本子模块的正式版本(source=AI_GENERATED)。
+              把「灵感创作」生成的剧本导入为剧本子模块的正式版本(source=AI_GENERATED)。
+              默认全部集,灵感第 N 集 → 本项目第 N 集,效果跟上传剧本一致。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 text-sm">
@@ -251,10 +263,7 @@ function LinkInspirationButton({
               <label className="mb-1 block text-xs font-medium">选灵感草稿</label>
               <select
                 value={draftId}
-                onChange={(e) => {
-                  setDraftId(e.target.value);
-                  setEpNum(null);
-                }}
+                onChange={(e) => setDraftId(e.target.value)}
                 className={inputCls}
               >
                 <option value="">— 选择草稿 —</option>
@@ -272,41 +281,44 @@ function LinkInspirationButton({
             </div>
             {draftId && (
               <div>
-                <label className="mb-1 block text-xs font-medium">选已展开的集</label>
+                <div className="mb-1 flex items-center justify-between">
+                  <label className="text-xs font-medium">
+                    选择导入的集(默认全部 · 已选 {selectedNums.size}/{episodes.length})
+                  </label>
+                  {episodes.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={toggleAll}
+                      className="text-[11px] text-[hsl(var(--color-accent))] hover:underline"
+                    >
+                      {allSelected ? '全不选' : '全选'}
+                    </button>
+                  )}
+                </div>
                 {episodes.length === 0 ? (
                   <p className="text-[11px] text-[hsl(var(--color-muted-foreground))]">
-                    该草稿还没有已展开的集 — 去「灵感创作」展开本集后再关联
+                    该草稿还没有已展开的集 — 去「灵感创作」展开本集 / 全部展开后再关联
                   </p>
                 ) : (
-                  <select
-                    value={epNum ?? ''}
-                    onChange={(e) => setEpNum(Number(e.target.value))}
-                    className={inputCls}
-                  >
-                    <option value="">— 选择集 —</option>
+                  <div className="max-h-56 space-y-0.5 overflow-auto rounded border border-[hsl(var(--color-border))] p-1">
                     {episodes.map((e) => (
-                      <option key={e.number} value={e.number}>
-                        第{e.number}集 · {e.title}
-                      </option>
+                      <label
+                        key={e.number}
+                        className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-[hsl(var(--color-muted))]"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedNums.has(e.number)}
+                          onChange={() => toggle(e.number)}
+                          className="size-3.5"
+                        />
+                        <span className="truncate">
+                          第{e.number}集 · {e.title}
+                        </span>
+                      </label>
                     ))}
-                  </select>
+                  </div>
                 )}
-              </div>
-            )}
-            <div>
-              <label className="mb-1 block text-xs font-medium">关联到本项目第几集</label>
-              <input
-                type="number"
-                min={1}
-                value={targetEp}
-                onChange={(e) => setTargetEp(Number(e.target.value))}
-                className="w-24 rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 py-1.5 text-xs"
-              />
-            </div>
-            {selectedEp && (
-              <div className="max-h-32 overflow-auto whitespace-pre-wrap rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-muted))] p-2 text-[11px] text-[hsl(var(--color-muted-foreground))]">
-                {selectedEp.content.slice(0, 400)}
-                {selectedEp.content.length > 400 ? '…' : ''}
               </div>
             )}
           </div>
@@ -314,9 +326,9 @@ function LinkInspirationButton({
             <Button variant="outline" size="sm" onClick={() => setOpen(false)}>
               取消
             </Button>
-            <Button size="sm" onClick={confirm} disabled={!selectedEp || upload.isPending}>
-              {upload.isPending && <Loader2 className="size-3.5 animate-spin" />}
-              关联为第{targetEp}集剧本
+            <Button size="sm" onClick={confirm} disabled={selectedNums.size === 0 || link.isPending}>
+              {link.isPending && <Loader2 className="size-3.5 animate-spin" />}
+              关联 {selectedNums.size} 集剧本
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -573,16 +585,21 @@ function ShotsActions({
 }): React.ReactElement {
   const utils = trpc.useUtils();
 
-  // 全集生成进度状态
+  // 全集生成进度状态(四九收工:3 并发 + 可中断 + 每集状态)
   const [batchOpen, setBatchOpen] = React.useState(false);
   const [batchRunning, setBatchRunning] = React.useState(false);
-  const [batchProgress, setBatchProgress] = React.useState<{
-    current: number;
-    total: number;
-    currentLabel: string;
-    succeeded: number;
-    failed: Array<{ episodeNumber: number; error: string }>;
-  }>({ current: 0, total: 0, currentLabel: '', succeeded: 0, failed: [] });
+  const cancelRef = React.useRef(false);
+  type EpStat = {
+    episodeNumber: number;
+    episodeId: string;
+    title?: string | null;
+    status: 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
+    error?: string;
+  };
+  const [batchEps, setBatchEps] = React.useState<EpStat[]>([]);
+  const batchStarted = batchEps.length > 0;
+  const doneCount = batchEps.filter((e) => e.status === 'done').length;
+  const failedEps = batchEps.filter((e) => e.status === 'failed');
 
   const eligibleQuery = trpc.storyboard.listEligibleForGeneration.useQuery(
     { projectId },
@@ -712,43 +729,65 @@ function ShotsActions({
 
   const disabled = !episodeId;
 
+  const BATCH_CONCURRENCY = 3;
+
+  const setEpStat = (episodeId: string, status: EpStat['status'], error?: string): void =>
+    setBatchEps((prev) =>
+      prev.map((e) => (e.episodeId === episodeId ? { ...e, status, error } : e)),
+    );
+
   const runBatch = async (): Promise<void> => {
     const eligible = eligibleQuery.data ?? [];
     if (eligible.length === 0) return;
+    cancelRef.current = false;
     setBatchRunning(true);
-    setBatchProgress({
-      current: 0,
-      total: eligible.length,
-      currentLabel: '',
-      succeeded: 0,
-      failed: [],
-    });
-    for (let i = 0; i < eligible.length; i++) {
-      const ep = eligible[i];
-      if (!ep) continue;
-      setBatchProgress((p) => ({
-        ...p,
-        current: i + 1,
-        currentLabel: `第 ${ep.episodeNumber} 集${ep.title ? ` · ${ep.title}` : ''}`,
-      }));
-      try {
-        await generate.mutateAsync({ episodeId: ep.episodeId, replaceExisting: true });
-        setBatchProgress((p) => ({ ...p, succeeded: p.succeeded + 1 }));
-      } catch (e) {
-        setBatchProgress((p) => ({
-          ...p,
-          failed: [
-            ...p.failed,
-            {
-              episodeNumber: ep.episodeNumber,
-              error: e instanceof Error ? e.message : String(e),
-            },
-          ],
-        }));
+    setBatchEps(
+      eligible.map((e) => ({
+        episodeNumber: e.episodeNumber,
+        episodeId: e.episodeId,
+        title: e.title,
+        status: 'pending' as const,
+      })),
+    );
+
+    // 四九收工:3 并发 worker pool — 每个 worker 抢下一个未处理集,直到队列空或被取消
+    let idx = 0;
+    const worker = async (): Promise<void> => {
+      while (true) {
+        if (cancelRef.current) return;
+        const myIdx = idx++;
+        if (myIdx >= eligible.length) return;
+        const ep = eligible[myIdx];
+        if (!ep) continue;
+        setEpStat(ep.episodeId, 'running');
+        try {
+          await generate.mutateAsync({ episodeId: ep.episodeId, replaceExisting: true });
+          setEpStat(ep.episodeId, cancelRef.current ? 'cancelled' : 'done');
+        } catch (e) {
+          setEpStat(ep.episodeId, 'failed', e instanceof Error ? e.message : String(e));
+        }
       }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(BATCH_CONCURRENCY, eligible.length) }, () => worker()),
+    );
+    // 取消后:还没跑的 pending 标 cancelled
+    if (cancelRef.current) {
+      setBatchEps((prev) =>
+        prev.map((e) => (e.status === 'pending' ? { ...e, status: 'cancelled' } : e)),
+      );
     }
     setBatchRunning(false);
     onAfterAction();
+  };
+
+  const cancelBatch = (): void => {
+    cancelRef.current = true; // 不再启动新集;in-flight 的集跑完即停(后端已落库)
+  };
+
+  const resetBatch = (): void => {
+    setBatchEps([]);
+    setBatchOpen(false);
   };
 
   return (
@@ -790,28 +829,31 @@ function ShotsActions({
       <Dialog
         open={batchOpen}
         onOpenChange={(o) => {
-          if (!o && batchRunning) return; // running 中不允许关
-          setBatchOpen(o);
+          if (!o && batchRunning) return; // running 中点遮罩不关(用"中断生成"按钮)
+          if (!o) resetBatch();
+          else setBatchOpen(o);
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>
               {batchRunning
-                ? `生成中… ${batchProgress.current}/${batchProgress.total}`
-                : batchProgress.total > 0
+                ? `分镜生成中 · ${doneCount + failedEps.length}/${batchEps.length}`
+                : batchStarted
                   ? '生成结果'
-                  : '为全部集生成分镜'}
+                  : '为全部集生成分镜(3 集并发)'}
             </DialogTitle>
             <DialogDescription>
               {batchRunning
-                ? batchProgress.currentLabel
-                : batchProgress.total > 0
-                  ? `成功 ${batchProgress.succeeded} 集 · 失败 ${batchProgress.failed.length} 集`
-                  : '只列出"有剧本 + 未锁"的集。生成串行进行,失败的集会跳过(不影响其它)。'}
+                ? `3 集并发 · 已完成 ${doneCount} · 失败 ${failedEps.length} · 进行中 ${batchEps.filter((e) => e.status === 'running').length}`
+                : batchStarted
+                  ? `成功 ${doneCount} 集 · 失败 ${failedEps.length} 集${batchEps.some((e) => e.status === 'cancelled') ? ` · 中断 ${batchEps.filter((e) => e.status === 'cancelled').length} 集` : ''}`
+                  : '只列"有剧本 + 未锁"的集 · 3 集同时生成 · 失败/中断的集互不影响,可再次生成补齐'}
             </DialogDescription>
           </DialogHeader>
-          {!batchRunning && batchProgress.total === 0 && (
+
+          {/* 未开始:可生成集列表 */}
+          {!batchStarted && (
             <div className="max-h-64 space-y-1 overflow-y-auto text-sm">
               {eligibleQuery.isLoading ? (
                 <div className="flex items-center gap-2 text-[hsl(var(--color-muted-foreground))]">
@@ -839,34 +881,81 @@ function ShotsActions({
               )}
             </div>
           )}
-          {(batchRunning || batchProgress.total > 0) && batchProgress.failed.length > 0 && (
-            <div className="max-h-32 space-y-1 overflow-y-auto rounded border border-red-500/40 p-2 text-xs">
-              {batchProgress.failed.map((f) => (
-                <div key={f.episodeNumber} className="text-red-500">
-                  第 {f.episodeNumber} 集: {f.error}
+
+          {/* 已开始:B站式进度 — 进度条 + 流光动画 + 每集状态 chip */}
+          {batchStarted && (
+            <div className="space-y-3">
+              <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-[hsl(var(--color-muted))]">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-pink-500 to-blue-500 transition-all duration-500"
+                  style={{
+                    width: `${batchEps.length > 0 ? Math.round(((doneCount + failedEps.length) / batchEps.length) * 100) : 0}%`,
+                  }}
+                />
+                {batchRunning && (
+                  <div className="absolute inset-0 animate-pulse bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+                )}
+              </div>
+              {batchRunning && (
+                <div className="flex items-center justify-center gap-2 py-1 text-xs text-[hsl(var(--color-muted-foreground))]">
+                  <Loader2 className="size-4 animate-spin text-pink-500" />
+                  <span className="animate-pulse">3 集并发统筹生成中,请稍候…</span>
                 </div>
-              ))}
+              )}
+              <div className="flex max-h-44 flex-wrap gap-1.5 overflow-y-auto">
+                {batchEps.map((e) => {
+                  const cls =
+                    e.status === 'done'
+                      ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                      : e.status === 'failed'
+                        ? 'border-red-500/50 bg-red-500/15 text-red-600 dark:text-red-400'
+                        : e.status === 'running'
+                          ? 'border-blue-500/60 bg-blue-500/15 text-blue-700 dark:text-blue-300'
+                          : e.status === 'cancelled'
+                            ? 'border-[hsl(var(--color-border))] bg-[hsl(var(--color-muted))] text-[hsl(var(--color-muted-foreground))] line-through'
+                            : 'border-[hsl(var(--color-border))] text-[hsl(var(--color-muted-foreground))]';
+                  return (
+                    <span
+                      key={e.episodeId}
+                      className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] ${cls}`}
+                      title={e.error ?? e.title ?? ''}
+                    >
+                      {e.status === 'running' ? (
+                        <Loader2 className="size-2.5 animate-spin" />
+                      ) : e.status === 'done' ? (
+                        '✓'
+                      ) : e.status === 'failed' ? (
+                        '✗'
+                      ) : e.status === 'cancelled' ? (
+                        '⊘'
+                      ) : (
+                        '○'
+                      )}
+                      第{e.episodeNumber}集
+                    </span>
+                  );
+                })}
+              </div>
+              {failedEps.length > 0 && !batchRunning && (
+                <div className="max-h-24 space-y-0.5 overflow-y-auto rounded border border-red-500/40 p-2 text-[11px]">
+                  {failedEps.map((f) => (
+                    <div key={f.episodeId} className="text-red-500">
+                      第 {f.episodeNumber} 集: {f.error}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
+
           <DialogFooter>
             {batchRunning ? (
-              <Button variant="outline" size="sm" disabled>
-                运行中…
+              <Button variant="outline" size="sm" onClick={cancelBatch} className="text-red-600">
+                <X className="size-3.5" />
+                中断生成(进行中的集跑完即停)
               </Button>
-            ) : batchProgress.total > 0 ? (
-              <Button
-                size="sm"
-                onClick={() => {
-                  setBatchOpen(false);
-                  setBatchProgress({
-                    current: 0,
-                    total: 0,
-                    currentLabel: '',
-                    succeeded: 0,
-                    failed: [],
-                  });
-                }}
-              >
+            ) : batchStarted ? (
+              <Button size="sm" onClick={resetBatch}>
                 关闭
               </Button>
             ) : (
@@ -880,7 +969,7 @@ function ShotsActions({
                   disabled={(eligibleQuery.data ?? []).length === 0 || eligibleQuery.isLoading}
                 >
                   <Sparkles className="size-3.5" />
-                  开始生成({(eligibleQuery.data ?? []).length} 集)
+                  开始生成({(eligibleQuery.data ?? []).length} 集 · 3 并发)
                 </Button>
               </>
             )}

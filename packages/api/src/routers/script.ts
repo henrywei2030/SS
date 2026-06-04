@@ -229,6 +229,72 @@ export const scriptRouter = router({
     }),
 
   /**
+   * 四九收工:关联灵感剧本(多集)— 把灵感草稿的多集一次性导入为正式剧本
+   *   - 默认全部导入,也可只选部分集;每集 source=AI_GENERATED
+   *   - 灵感第 N 集 → 本项目第 N 集(1:1,跟多集上传一致)
+   *   - 复用 upload 同款逻辑:upsert Episode + createNextVersion(内容哈希去重 + setCurrent)
+   *   - 生成中的集自动跳过(防覆盖),返回每集结果供前端汇报
+   */
+  linkInspirationEpisodes: protectedProcedure
+    .input(
+      z.object({
+        draftId: z.string().cuid(),
+        episodeNumbers: z.array(z.number().int().positive()).min(1, '至少选一集'),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const draft = await ctx.prisma.inspirationDraft.findFirst({
+        where: { id: input.draftId, deletedAt: null },
+      });
+      if (!draft) throw new TRPCError({ code: 'NOT_FOUND', message: '灵感草稿不存在' });
+      await assertProjectAccess(ctx, draft.projectId);
+
+      const allEps =
+        (draft.episodes as unknown as { number: number; title: string; content: string }[]) ?? [];
+      const selected = allEps.filter(
+        (e) => e.content?.trim() && input.episodeNumbers.includes(e.number),
+      );
+      if (selected.length === 0) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '所选集均无内容(去灵感创作先展开)' });
+      }
+
+      const results: { number: number; version: number; created: boolean; skipped?: boolean }[] = [];
+      for (const ep of selected) {
+        // 生成中的集跳过(防覆盖正在抽卡的集)
+        try {
+          await assertEpisodeNotGenerating(ctx, draft.projectId, ep.number);
+        } catch {
+          results.push({ number: ep.number, version: 0, created: false, skipped: true });
+          continue;
+        }
+        const episode = await ctx.prisma.episode.upsert({
+          where: { projectId_number: { projectId: draft.projectId, number: ep.number } },
+          create: { projectId: draft.projectId, number: ep.number, title: ep.title },
+          update: { title: ep.title },
+        });
+        const { script, created } = await createNextVersion(ctx, {
+          projectId: draft.projectId,
+          episodeId: episode.id,
+          title: `${draft.title} 第${ep.number}集:${ep.title}`,
+          content: ep.content,
+          language: 'zh-CN',
+          source: 'AI_GENERATED',
+        });
+        results.push({ number: ep.number, version: script.version, created });
+      }
+      await logOperation(ctx, 'script.linkInspiration', 'inspirationDraft', draft.id, null, {
+        draftId: draft.id,
+        episodes: selected.map((e) => e.number),
+      });
+      return {
+        linked: results,
+        created: results.filter((r) => r.created).length,
+        skipped: results.filter((r) => r.skipped).length,
+        total: selected.length,
+      };
+    }),
+
+  /**
    * 上传剧本文件 — 通用入口，支持 docx / txt / md / rtf / html
    *
    * 调用方传 base64 字符串 + filename（用于扩展名识别）。

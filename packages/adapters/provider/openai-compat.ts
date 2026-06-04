@@ -47,8 +47,10 @@ const sharedDispatcher = new Agent({
   // 症状:curl 连 moyu 0.2s 就通,但 undici 默认 10s connect 偶发 Connect Timeout Error
   // → 剧本分析/分镜/灵感创作等所有走 moyu 的文本 LLM 间歇性失败
   connect: { timeout: 60_000 },
-  bodyTimeout: 300_000, // 跟 generate() 内 fetch 一致 · LLM 长响应留余
-  headersTimeout: 180_000, // 跟 r23 timeout bump 一致 · moyu 中转 + Anthropic 队列拥堵兜底
+  // 四九收工:headers/body 提到 300s — 非流式 LLM 大输出(灵感全部展开分块多集 / 慢模型
+  // 如 moyu sonnet ~40 tok/s)要全生成完才返 headers,180s 不够(实测 3 集 sonnet 撞 182s)
+  bodyTimeout: 300_000,
+  headersTimeout: 300_000,
 });
 
 // 单次设置 process 级 dispatcher · 所有 undici.request 默认走这个 Agent
@@ -194,10 +196,11 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
           // 透传上游 trace id(若 ctx 有 requestId,Phase 2 加)
         },
         body: JSON.stringify(body),
-        // Phase 1.5.3:Sonnet 4.5 详细 prompt + 大响应偶尔慢,bump 到 180s
-        // 原 60s headersTimeout 在 moyu 中转 + Anthropic 队列拥挤时常超("Headers Timeout Error")
+        // 四九收工:headers/body 提到 300s(原 180s)。非流式 LLM 大输出要全生成完才返
+        // headers;慢模型(moyu sonnet ~40 tok/s)分块多集实测撞 182s。这是 per-request
+        // 覆盖,优先级高于 sharedDispatcher,故这里也必须 bump。
         bodyTimeout: 300_000,
-        headersTimeout: 180_000,
+        headersTimeout: 300_000,
       });
       const text = await respBody.text();
       if (statusCode >= 400) {

@@ -5,6 +5,59 @@
 
 ---
 
+## 2026-06-04(周四,mac-mini · 五十次收工)— 灵感全部展开(分块+进度条)+ 关联剧本多集导入 + 分镜失败根因深诊 + 灵感/分镜 prompt 重做(产正式剧本)+ 子模块更名 + 分镜 3 并发 B站式 UI
+
+**完成 — 9 文件改 + 4 新文件 · typecheck 16/16 · 大量 Chrome 真打 + 直接 moyu API 诊断 · 跨多轮迭代**
+
+### 一、灵感"全部展开"(分块批量 + 进度条)
+
+需求:全部展开应一次统筹生成(连贯 + 省 token),不是每集一请求 + 跳过已展开。**演进 3 版**:
+- v1 单请求生成全部 → moyu sonnet 慢(43 tok/s),8 集 ~196s 撞 headersTimeout(180s)失败
+- v2 后端分块(chunk=4)→ 仍 ~182s 超时
+- **v3 终版**:chunk=2(每块 ~133-164s)+ headersTimeout 180→300s(`openai-compat.ts` 的 **per-request 覆盖**才是真凶,line 202)+ **前端循环驱动分块 + 实时进度条/动画**(慢模型 ~6min 不误判卡死)。实测 4→12 集全成,4 块 151/133/158/164s 全过,连贯性保住
+
+### 二、关联剧本多集导入
+
+需求:关联剧本默认全部导入(也可单/多选),形式同上传。重写 `LinkInspirationButton`:checkbox 多选(默认全选)+ 新后端 `script.linkInspirationEpisodes`(复用 upload 的 upsert Episode + createNextVersion,灵感第N集→本项目第N集,幂等内容哈希去重,生成中跳过)。真打:0→12 集导入,跟上传一样
+
+### 三、分镜生成失败根因深诊(用户建议直接打 moyu API)
+
+分镜批量报"场 1-1: LLM 未返回 JSON"。**直接打 moyu API 隔离**(`scripts/test-moyu-*.mjs`):
+- sonnet/opus/gemini 都能用,sonnet 慢(43 tok/s)、gemini 快(156 tok/s)
+- sonnet 带 response_format **也忽略它**、把 JSON 包 ```markdown```(解析器能剥)
+- **真根因链**:灵感旧 prompt 产"分镜"格式(无 集-场 场头)→ 解析器 0 场 → fallback 整集塞 1 巨型场 → LLM 大输出超 maxTokens 4096 截断 → JSON 残缺 → "未返回 JSON"。12 集同格式全败
+
+### 四、灵感 + 分镜 prompt 重做(核心修复 · 研究短剧行业写法)
+
+WebSearch 短剧剧本/分镜结构 + 抓 parse.ts 精确格式后重写:
+- **灵感产"正式剧本"**(非分镜):`inspiration_episode` + `inspiration_episodes_batch` + router fallback 全改 screenplay 格式(`集号-场号 时段 内外 地点` 场头 + 人物 + △动作 + 角色（情绪）：台词 + OS旁白)+ 短剧写法(三幕/冲突反转/钩子/台词短)。**真打验证**:重新展开第1集 → 输出 "1-1 夜 内 服务器机房 / 人物：陆鸣 / △... / 陆鸣（焦急）：..." 完全匹配解析器 ✓
+- **分镜 prompt 优化**:DB 的 storyboard_main 原是简短版(无 JSON shape/防 markdown)→ 强更成详细版(严格 JSON + 进阶提示词公式 景别+运镜+主体+动作+场景+氛围+光影)+ maxTokens 4096→16000 防截断
+- **db:sync:prompts 机制**:seed 加 `SEED_FORCE_PROMPTS`,只强更 prompt 正文(不碰 binding/用户数据)→ prompt 改进可跨机传播。`pnpm db:sync:prompts` 命令
+
+### 五、子模块更名 + 分镜批量 3 并发 + B站式动画
+
+- **更名**:storyboard tab "剧本"→"剧本管理"、"分镜"→"分镜工坊",跟顶栏导演子菜单一致
+- **分镜批量 3 并发**:`runBatch` 串行 `for{await}` → 3 worker pool(`BATCH_CONCURRENCY=3`)+ **可中断**(`cancelRef`,close 真停;in-flight 跑完即止,原 bug 是 onOpenChange 禁关 + 无 abort)
+- **B站式过场动画**:进度条(pink→blue 渐变 + 流光 pulse)+ 每集状态 chip(○待/spinner跑/✓成/✗败/⊘中断)+ "3 集并发统筹生成中"动画。真打:UI 显示正确
+
+### 顺带
+
+- undici headersTimeout 修(per-request 覆盖 line 202 漏改,这次补)
+- 灵感 spinner 精确化 / 进度条 / 导演菜单加灵感创作(早几轮已做,本会话累积)
+
+**问题/待决策**
+- ❓ 旧 代码之声 草稿的 12 集是旧"分镜"格式(只重新展开了第1集成新格式)— 用户要用新链路需重新生成 draft 或逐集重展开
+- ❓ moyu sonnet 偶发 Connect Timeout(60s 都连不上)— 网络抖动非代码,重试即好;长期可考虑 gemini-flash(快4倍/便宜15倍)
+- ❓ db:sync(普通)是增量不覆盖 prompt;db:sync:prompts 才强更 — 改进 prompt 后要记得用后者
+
+**下次接着做**
+- 📌 端到端真打:新灵感剧本 → 关联 → 分镜工坊 3 并发生成(验证截断已修 + 分镜成功)
+- 📌 清理 代码之声 旧格式草稿 / 重新生成
+- 📌 测分镜 3 并发的 B站式动画 + 中断真打
+- 📌 (follow-up)3 个 test-moyu-* 诊断脚本是否保留
+
+---
+
 ## 2026-06-04(周四,mac-mini · 四十九次收工)— DB 跨机统一(db:sync 增量同步)+ 灵感创作真打通(配置+undici修)+ 直连→中转清理 + 展开本集 bug 实测 + 导演菜单
 
 **完成 — 7 文件改 + 2 新文件 · typecheck 16/16 · 多处 Chrome 真打 + DB 实测验证**

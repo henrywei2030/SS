@@ -15,9 +15,13 @@ async function main() {
   //   编辑过的 prompt 正文 / 已配的密钥;providers 整段跳过(各机可能已删/改)。
   //   无此 flag(pnpm db:seed)= 全量初始化(新机首次,覆盖式),行为不变。
   const ADDITIVE = process.env.SEED_ADDITIVE === '1';
+  // 四九收工:增量模式下额外强更 prompt 正文(prompt 是可改进的默认值,改进应能传播)。
+  //   仅影响 prompt_templates 的 content/name/description,不碰 binding 值 / 各机配置。
+  //   ⚠️ 会覆盖 admin 在 /admin/prompts 手动编辑过的正文 —— 故需显式开启(db:sync:prompts)。
+  const FORCE_PROMPTS = process.env.SEED_FORCE_PROMPTS === '1';
   console.log(
     ADDITIVE
-      ? '🔄 StarsAlign Studio · DB 增量同步(只补缺失,不覆盖各机配置)\n'
+      ? `🔄 StarsAlign Studio · DB 增量同步(只补缺失,不覆盖各机配置${FORCE_PROMPTS ? ' · prompt 正文强更' : ''})\n`
       : '🌱 StarsAlign Studio · 星垣工坊 · 种子数据初始化(全量)\n',
   );
 
@@ -209,8 +213,37 @@ async function main() {
       slug: 'storyboard_main',
       versionTag: 'v1',
       name: '剧本分镜生成',
-      description: '基于剧本生成线性分镜的提示词',
-      content: '你是经验丰富的导演。任务：将剧本拆解为线性分镜。\n\n要求：\n1. 每个镜头标注：景别、机位角度、镜头内容、视频提示词\n2. 镜头时长按 1-15 秒拆分（默认 5 秒），便于视频模型生成\n3. 优先级 S/A/B/C：爽点/反转=S，冲突高潮=A，叙事推进=B，过渡=C\n4. 引用人物/场景/道具时使用 @资产名 占位符',
+      description: '单场剧本 → 分镜列表(严格 JSON · 景别/运镜/光影 · 进阶提示词公式)',
+      content: `你是经验丰富的短剧分镜师。任务：把单场剧本拆解为视频生成可用的分镜列表。
+
+【输入】你会收到一场剧本（含场号、时段、内外、地点、人物、动作行/对白/旁白）+ 4 大预设值清单(framing/angle/movement/lighting)
+
+【输出严格 JSON】
+{"shots":[{"index":1,"framing":"特写|近景|中景|全景","angle":"平视 0°|俯视 30°|仰视 15°|侧拍 45°","movement":"固定|推|拉|摇|移|跟|升降|甩","lighting":"自然光|硬光|柔光|逆光|侧光|低调|高调|冷调|暖调","content":"30 字内画面内容","durationS":3,"priority":"S|A|B|C","prompt":"完整视频提示词"}]}
+
+【拆镜原则】
+1. 每个对白/旁白单独成镜（除非两句台词紧贴同一动作）
+2. 每个动作行（△ 起头）单独成镜
+3. 重要表情、道具特写单独成镜
+4. 默认镜头时长 1-3 秒；爽点/反转给 3-5 秒
+5. 短剧结构感:钩子(开场强冲突)→发展→反转/高潮→收尾;priority 爽点反转 S、冲突高潮 A、叙事推进 B、过渡 C
+
+【framing/angle/movement/lighting 选值】
+- 4 个字段都必须从【可选预设】清单里挑;清单没有的值用空字符串 "" 不要瞎编
+- movement / lighting 允许 ""(固定镜 + 自然光是默认)
+
+【提示词写作 — 进阶公式：景别 + 运镜 + 主体(细节) + 动作(速率) + 场景(层次) + 氛围 + 光影】
+- 起手:景别 + 角度 + 主体;主体带关键细节(外貌/服装/表情)
+- 动作写清速率(缓缓/猛地/急促);场景写层次(前景···背景)
+- 含:环境、光影、氛围、运镜;台词放末尾 "角色名：台词";OS 旁白 "角色名（OS）：旁白"
+- 引用人物用 @ 前缀(系统自动替换人物特征)— 例:@陆鸣 猛地起身
+
+【字数】content ≤30 字;prompt 100-150 字
+
+【输出格式 — 严格遵守,违反则系统报错】
+⛔ 禁止任何 markdown(# 标题 / ** 加粗 / - 列表 / | 表格 / \`\`\` 代码块)、禁止"以下是分镜表"之类说明文字
+✅ 直接从 { 开始、以 } 结尾的纯 JSON;第一个字符必须是 {、最后一个必须是 }
+示例:{"shots":[{"index":1,"framing":"特写","angle":"平视 0°","movement":"固定","lighting":"自然光","content":"...","durationS":3,"priority":"B","prompt":"..."}]}`,
       varsJson: { maxDurationS: { type: 'number', default: 15 } },
     },
     {
@@ -249,9 +282,20 @@ async function main() {
       slug: 'inspiration_episode',
       versionTag: 'v1',
       name: '灵感创作 · 单集展开',
-      description: '剧名 + 本集大纲 → 该集完整剧本(分镜结构 画面/声音,纯文本)',
+      description: '剧名 + 本集大纲 → 该集正式剧本(screenplay:集-场 场头 + 动作 + 台词,对齐解析器)',
       content:
-        '你是资深短剧编剧。根据剧名、整体想法和"本集大纲",把这一集展开为可直接拍摄的完整剧本。\n要求:\n- 用"分镜"组织:每个分镜含【画面】(场景+动作描述)、【声音】(台词/旁白/OS)\n- 台词口语化、有张力,符合短剧风格;每集 6-12 个分镜\n- 只写本集内容,不要写其他集\n输出纯文本剧本(不要 JSON),开头用"第N集:集标题"。',
+        '你是资深竖屏微短剧编剧。把"本集大纲"展开为一集可直接拍摄的正式剧本。\n\n【剧本格式】严格按此结构(每场之间空一行):\n<集号>-<场号> <时段> <内外> <地点>\n人物：本场出场角色(顿号分隔)\n△动作/场景描述(以 △ 起头,只写镜头能拍到的画面:动作/神态/环境,不写心理)\n角色名（情绪）：台词\n角色名（OS）：内心独白 / 旁白\n(空一行后继续下一场)\n\n【格式细则】\n- 场头:集号-场号 时段(日/夜/晨/黄昏) 内外(内/外) 地点 —— 如第 N 集第 1 场写 "N-1 夜 内 出租屋"\n- 一集拆 4-7 个场,每场聚焦一个动作 / 冲突单元;△ 行只写画面,台词短平快\n\n【竖屏微短剧写法】\n- 开篇 3 秒抓人:第 1 场用强冲突画面 + 悬念钩住\n- 三幕节奏:铺垫 → 冲突升级 → 反转 / 爽点;台词尽量一句 ≤20 字、有爆发力、贴人设\n- 结尾留钩子(悬念 / 反转),引导追下一集\n\n只输出剧本正文,不要任何解释 / markdown / 标题符号,从第一个场头开始。',
+      varsJson: {},
+    },
+    {
+      // 四九收工:全部展开 — 多集统筹,同样产正式剧本(对齐解析器)
+      category: PromptCategory.SCRIPT_STORYBOARD,
+      slug: 'inspiration_episodes_batch',
+      versionTag: 'v1',
+      name: '灵感创作 · 全部展开(批量统筹)',
+      description: '完整大纲 + 待展开集 → 多集正式剧本(===第N集=== 分隔 · 集-场 screenplay 格式)',
+      content:
+        '你是资深竖屏微短剧编剧。把【待展开集】全部展开为可直接拍摄的正式剧本。\n\n【输出结构】每集用单独一行 "===第N集===" 开头分隔(N=集号):\n===第5集===\n<本集剧本(按下方剧本格式)>\n===第6集===\n<...>\n\n【剧本格式】严格按此结构(每场之间空一行):\n<集号>-<场号> <时段> <内外> <地点>\n人物：本场出场角色(顿号分隔)\n△动作/场景描述(△ 起头,只写画面:动作/神态/环境,不写心理)\n角色名（情绪）：台词\n角色名（OS）：内心独白 / 旁白\n\n【格式细则】\n- 场头集号=该集集号(第 5 集的场头是 5-1、5-2…);时段 日/夜/晨/黄昏,内外 内/外\n- 每集 4-7 场,每场一个动作/冲突单元;△ 行只写画面,台词短平快(≤20字)、留钩子\n- 多集统筹:前后呼应、伏笔回收、人物弧光连贯,符合短剧"强冲突/快反转"\n\n严格只展开"待展开集"列表里的集。只输出剧本正文 + ===第N集=== 分隔,不要 JSON / markdown / 额外解释。',
       varsJson: {},
     },
   ];
@@ -260,7 +304,12 @@ async function main() {
     await prisma.promptTemplate.upsert({
       where: { slug_versionTag: { slug: t.slug, versionTag: t.versionTag } },
       create: t as never,
-      update: ADDITIVE ? {} : (t as never), // 增量:保留 admin 在 /admin/prompts 手动编辑的正文
+      // 增量默认保留 admin 手编正文;FORCE_PROMPTS 时强更 content/name/description(改进传播)
+      update: ADDITIVE
+        ? FORCE_PROMPTS
+          ? ({ content: t.content, name: t.name, description: t.description } as never)
+          : {}
+        : (t as never),
     });
   }
   console.log(`    ✓ ${templates.length} 个 Prompt 模板`);
