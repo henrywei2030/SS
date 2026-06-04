@@ -16,6 +16,7 @@
     "migrate:deploy": "prisma migrate deploy",
     "studio": "prisma studio",
     "seed": "tsx prisma/seed.ts",
+    "sync": "tsx prisma/seed-sync.ts",
     "reset": "node ../../scripts/db-reset-guard.mjs",
     "format": "prisma format",
     "typecheck": "tsc --noEmit"

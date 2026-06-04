@@ -43,6 +43,10 @@ const sharedDispatcher = new Agent({
   keepAliveMaxTimeout: 60_000,
   connections: 32,
   pipelining: 1,
+  // 四九收工 P0:TCP connect 60s — 默认 10s 不够,moyu 中转偶发抖动(跟 seedance.ts r15 修复对齐)
+  // 症状:curl 连 moyu 0.2s 就通,但 undici 默认 10s connect 偶发 Connect Timeout Error
+  // → 剧本分析/分镜/灵感创作等所有走 moyu 的文本 LLM 间歇性失败
+  connect: { timeout: 60_000 },
   bodyTimeout: 300_000, // 跟 generate() 内 fetch 一致 · LLM 长响应留余
   headersTimeout: 180_000, // 跟 r23 timeout bump 一致 · moyu 中转 + Anthropic 队列拥堵兜底
 });

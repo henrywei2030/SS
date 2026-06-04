@@ -34,6 +34,8 @@
 2. `pnpm setup:env` —— 自动生成 `.env.local`(JWT_SECRET / APP_MASTER_KEY 等密钥)
 3. `pnpm db:migrate:deploy && pnpm db:seed` —— 首次 DB 初始化(需 Docker 已起,或先跑 `pnpm infra:up`)
 
+> ⚠️ `db:seed`(全量覆盖)**仅新机空库首次用**。**已有数据的设备**日常同步只用 **`pnpm db:sync`**(增量补缺,不覆盖各机 binding/密钥/手动编辑)—— 四九收工新增,见 [开工 Step 3](#1-我说开工时强同步模式--2026-05-24-升级)。跑 `db:seed` 会把各机 binding 值冲回直连默认,务必别在老机上跑。
+
 详细环境搭建分平台:
 - macOS → [docs/HOME-SETUP.md](docs/HOME-SETUP.md)
 - Windows → [docs/SETUP-WINDOWS.md](docs/SETUP-WINDOWS.md)
@@ -117,11 +119,11 @@ git rev-list --left-right --count main...origin/main  # 输出格式: "<ahead>\t
 **触发条件**(满足任一即走):
 1. Step 2 提取的 **behind ≥ 20**(本地大量落后远端 → 跨周期接续)
 2. 上次提交时间距今 **≥ 5 天**:跑 `git log -1 --format=%cr origin/main` 输出含 "days ago" 或 "weeks ago" 或 "months ago" 即触发(等价于 `git log -1 --format=%ct origin/main` 跟 `date +%s` 比较差 ≥ 432000)
-3. Step 2 已做了 `git reset --hard`,且 reset 改动里含 `pnpm-lock.yaml` / `prisma/schema.prisma` / `prisma/migrations/` / `.env.example` 中**任一**(跑 `git diff --name-only HEAD@{1} HEAD` 提取,Step 3 也用同一命令,但这里前置一次)
+3. Step 2 已做了 `git reset --hard`,且 reset 改动里含 `pnpm-lock.yaml` / `prisma/schema.prisma` / `prisma/migrations/` / `prisma/seed.ts` / `.env.example` 中**任一**(跑 `git diff --name-only HEAD@{1} HEAD` 提取,Step 3 也用同一命令,但这里前置一次)
 
 若**全部不满足** → 直接跳到 Step 4,Step 3 仍跑(它只做 .env.example / CLAUDE.md 变化提示,跟 Step 2.5 不重复)。
 
-**强制 6 项诊断**(原 7 项 #1 与 Step 3 重复已合并去掉):
+**强制 7 项诊断**(四九收工:加回 #7 DB seed 同步):
 
 | # | 检查项 | 诊断命令(跨平台) | 触发行为 |
 |---|---|---|---|
@@ -131,8 +133,11 @@ git rev-list --left-right --count main...origin/main  # 输出格式: "<ahead>\t
 | 4 | infra 容器健康 | `docker ps --filter name=ss- --format "{{.Names}} {{.Status}}"`(filter 值不用引号包,跨 zsh/PowerShell 兼容) | 不全 healthy → `pnpm infra:up` |
 | 5 | DB migration 同步 | `pnpm --filter @ss/db exec prisma migrate status`(用 Prisma 自身的 migrate status,**自动读 DATABASE_URL,不 hardcode 数据库名 / 用户名**) | 输出含 "have not yet been applied" → **必跑** `pnpm db:migrate:deploy` |
 | 6 | preflight 全绿 | `pnpm preflight` | 总是跑,8 项全绿才放心 |
+| 7 | **DB seed 数据同步** | seed.ts 在 reset 改动里(`git diff --name-only HEAD@{1} HEAD \| grep seed`)| 命中 → **必跑** `pnpm db:sync`(四九收工 · 增量补缺 prompt/binding KEY,**不覆盖各机值**;别跑 `db:seed`) |
 
-**汇报格式**:跑完输出"长间隔接续诊断报告"清单,列每项当前状态 + 建议下一步。安全项(setup:env / db:generate / preflight)直接批量跑;`pnpm install` / `migrate:deploy` 涉及 deps / DB 变更,各自跑前给用户确认。
+**汇报格式**:跑完输出"长间隔接续诊断报告"清单,列每项当前状态 + 建议下一步。安全项(setup:env / db:generate / **db:sync** / preflight)直接批量跑;`pnpm install` / `migrate:deploy` 涉及 deps / DB schema 变更,各自跑前给用户确认。
+
+> `db:sync` 归"安全批量跑"档 —— 它增量补缺、不覆盖各机配置、不重建删过的 provider,无副作用(四九收工已实测验证)。
 
 **注意**:`pnpm install` **不在** Step 2.5 自检里 — 该项已由 Step 3 的"pnpm-lock 改了 → 提示 pnpm install"覆盖(Step 2.5 跑前 Step 3 已进了一遍,或者两个 step 都触发时只算一次)。
 
@@ -145,6 +150,10 @@ git rev-list --left-right --count main...origin/main  # 输出格式: "<ahead>\t
 跑 `git diff --name-only HEAD@{1} HEAD`(reset 前 vs 现在),针对结果**自动提示**:
 - `package.json` 或 `pnpm-lock.yaml` 改了 → 提示跑 `pnpm install`(不自动跑,等我点头)
 - `packages/db/prisma/schema.prisma` 或 `migrations/*` 改了 → 提示跑 `pnpm --filter @ss/db exec prisma migrate deploy`(注意:多设备同步用 `deploy` 不是 `dev`)
+- **`packages/db/prisma/seed.ts` 或 `seed-sync.ts` 改了 → 提示跑 `pnpm db:sync`(四九收工新增 · DB 跨机统一)**:
+  - 别的设备新增了 prompt 模板 / binding KEY / 风格,本机 DB 不会随 git 自动补 → `db:sync` 增量补缺
+  - **安全保证**:`db:sync` 只 insert-if-missing,**绝不覆盖**各机独立的 binding 值 / 手动编辑过的 prompt 正文 / 已配密钥,**跳过 providers**(不会重建你删过的直连)
+  - 跟 `db:seed`(全量覆盖,仅新机首次)区别开:日常多设备同步一律用 `db:sync`,**不要**跑 `db:seed`(它会把 binding 值冲回默认)
 - `.env.example` 改了 → 提示对比 `.env.local` 看是否需要补字段
 - `CLAUDE.md` 改了 → 提示重新阅读规范
 
@@ -183,6 +192,7 @@ git rev-list --left-right --count main...origin/main  # 输出格式: "<ahead>\t
 - 路线图或完成度变化 → 更新 `docs/03-roadmap-and-progress.md`
 - Schema 或字段变化 → 更新 `docs/04-data-model.md`
 - 关键技术决策 → 在 `docs/05-tech-decisions.md` 追加新 ADR 条目
+- **新增了结构性 DB 数据(prompt 模板 slug / binding KEY / 默认风格)→ 必须同步写进 `packages/db/prisma/seed.ts`**(四九收工 DB 统一闭环):只有进了 seed.ts,别的设备开工 `db:sync` 才能补到。**只在本机 DB 手动 insert(如临时脚本)而不落 seed.ts = 别的机器永远缺这条**——这正是本次 mac-mini 缺灵感配置的根因。
 - 三方仓库 license 借鉴 → 更新 `docs/05a-third-party-licenses.md`
 - 主题 / UI 系统变化 → 更新 `docs/THEMING.md`
 - 设备 / 跨平台流程变化 → 更新 `docs/HOME-SETUP.md` / `docs/SETUP-WINDOWS.md`
@@ -307,13 +317,18 @@ git log -1 --oneline    # 跟 GitHub 网页最新 commit 对齐
 
 ### 跨设备数据矩阵(谁同步、谁独立)
 
+> **核心心智(四九收工厘清)**:DB 数据分两层 —— **结构层**(prompt 模板 slug / binding KEY 存不存在 / 风格 / schema)是 git 真相,靠 `migrate deploy`(schema)+ `db:sync`(seed 数据)补齐;**配置层**(binding 绑哪个模型 / 密钥 / 密码 / 手动编辑的 prompt 正文)各机独立,**绝不跨机覆盖**。`db:sync` 严格只动结构层。
+
 | 类型 | 共享 / 独立 | 怎么同步 |
 |---|---|---|
 | 源代码 / docs / TODO / PROGRESS | ✅ 共享 | `git pull` / `push` |
 | Claude Project 知识库 | ✅ 共享 | claude.ai 云端 |
+| DB schema(表 / 字段 / 索引) | ✅ 共享 | `pnpm db:migrate:deploy`(migration 入 git) |
+| **prompt 模板 slug / binding KEY / 风格**(结构) | ✅ 共享 | **`pnpm db:sync`(增量补缺,不覆盖值)** ← seed.ts 入 git |
 | `.env.local` 密钥 | ❌ 独立 | 各机 `pnpm setup:env` 自动生成 |
-| PostgreSQL 数据 | ❌ 独立 | 各跑本地 Docker(Phase 1 接受) |
-| API Key 加密值 | ❌ 独立 | 各机后台 `/admin/providers` 单独填 |
+| **binding 绑哪个模型(值)** | ❌ 独立 | 各机 `/admin/bindings` 配(`db:sync` 不动) |
+| **手动编辑的 prompt 正文** | ❌ 独立 | 各机 `/admin/prompts` 改(`db:sync` 不动) |
+| provider 配置 / API Key 加密值 | ❌ 独立 | 各机 `/admin/providers` 填(`db:sync` 跳过) |
 | admin 密码 | ❌ 独立 | 各机 `set-admin-password.ts` 设一次 |
 | 生成的视频 / 图片 | ❌ 独立 | 各自 MinIO 卷 |
 

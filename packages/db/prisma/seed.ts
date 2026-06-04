@@ -10,7 +10,16 @@ import { prisma } from '../src/index.js';
 import { StyleKind, PromptCategory, ProviderKind } from '../src/generated/prisma/client.js';
 
 async function main() {
-  console.log('🌱 StarsAlign Studio · 星垣工坊 · 种子数据初始化\n');
+  // 四九收工:DB 跨机统一 —— SEED_ADDITIVE=1(pnpm db:sync)只补缺失的结构数据
+  //   (风格 / prompt 模板 / 系统设置 KEY),绝不覆盖各机独立的 binding 值 / 手动
+  //   编辑过的 prompt 正文 / 已配的密钥;providers 整段跳过(各机可能已删/改)。
+  //   无此 flag(pnpm db:seed)= 全量初始化(新机首次,覆盖式),行为不变。
+  const ADDITIVE = process.env.SEED_ADDITIVE === '1';
+  console.log(
+    ADDITIVE
+      ? '🔄 StarsAlign Studio · DB 增量同步(只补缺失,不覆盖各机配置)\n'
+      : '🌱 StarsAlign Studio · 星垣工坊 · 种子数据初始化(全量)\n',
+  );
 
   // ---------- 1. 默认风格 ----------
   console.log('  → 创建默认风格 StyleProfile');
@@ -51,7 +60,7 @@ async function main() {
     await prisma.styleProfile.upsert({
       where: { slug: s.slug },
       create: s,
-      update: s,
+      update: ADDITIVE ? {} : s, // 增量:已存在不动(保留用户改过的风格)
     });
   }
   console.log(`    ✓ ${styles.length} 个风格`);
@@ -151,14 +160,19 @@ async function main() {
     // ==========================================================================
   ];
 
-  for (const p of providers) {
-    await prisma.providerConfig.upsert({
-      where: { providerId: p.providerId },
-      create: p as never,
-      update: p as never,
-    });
+  if (ADDITIVE) {
+    // 增量模式:provider 配置 + 密钥各机独立(用户可能已删直连/改中转),整段跳过
+    console.log(`    ⏭  增量模式跳过 ${providers.length} 个默认 Provider(各机独立,不动)`);
+  } else {
+    for (const p of providers) {
+      await prisma.providerConfig.upsert({
+        where: { providerId: p.providerId },
+        create: p as never,
+        update: p as never,
+      });
+    }
+    console.log(`    ✓ ${providers.length} 个 Provider`);
   }
-  console.log(`    ✓ ${providers.length} 个 Provider`);
 
   // ---------- 2.5 默认 RelayProvider 占位(Phase 1.5.1) ----------
   // 用户启动后会在 /admin/providers UI 看到一个空的 "moyu" 中转站 placeholder
@@ -246,7 +260,7 @@ async function main() {
     await prisma.promptTemplate.upsert({
       where: { slug_versionTag: { slug: t.slug, versionTag: t.versionTag } },
       create: t as never,
-      update: t as never,
+      update: ADDITIVE ? {} : (t as never), // 增量:保留 admin 在 /admin/prompts 手动编辑的正文
     });
   }
   console.log(`    ✓ ${templates.length} 个 Prompt 模板`);
@@ -489,7 +503,8 @@ async function main() {
     await prisma.systemSetting.upsert({
       where: { key: s.key },
       create: s,
-      update: { value: s.value, description: s.description, category: s.category },
+      // 增量:已存在的 KEY 不动(保留各机 binding 值 / 已配参数);只补新增的 KEY
+      update: ADDITIVE ? {} : { value: s.value, description: s.description, category: s.category },
     });
   }
   console.log(`    ✓ ${systemSettings.length} 条系统设置`);

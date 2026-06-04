@@ -5,6 +5,77 @@
 
 ---
 
+## 2026-06-04(周四,mac-mini · 四十九次收工)— DB 跨机统一(db:sync 增量同步)+ 灵感创作真打通(配置+undici修)+ 直连→中转清理 + 展开本集 bug 实测 + 导演菜单
+
+**完成 — 7 文件改 + 2 新文件 · typecheck 16/16 · 多处 Chrome 真打 + DB 实测验证**
+
+### 触发场景
+
+开工同步四七/四八收工(灵感创作子模块)后真打,用户发现两个"数据没同步"问题 → 深挖出 mac-mini DB 是旧 seed + 直连/中转架构混乱 + undici 超时 bug,连环修。最后用户点题:**完善收工文件,解决每次开工/收工的 DB 统一问题**。
+
+### 一、灵感创作配置(三遍检查 → 定向修)
+
+**三遍检查根因**:
+- Issue 1:mac-mini DB 旧 seed,缺 3 prompt(script_analysis_main/inspiration_outline/inspiration_episode)+ inspiration binding KEY
+- Issue 2:9 个 binding **全指向 7 个直连死 provider**(无 key),唯一能用的 `moyu-claude-opus-4-6`(走中转)没被引用 → 整个 LLM 链路跑不通
+- **关键发现**:seed 的 `systemSetting.upsert` 是 `update:{value}` **会覆盖** binding → 不能跑全量 `db:seed`,得定向脚本
+
+**配置脚本** `scripts/config-inspiration-relay.mjs`(复制 createFromCatalog 逻辑):建 2 个 moyu 中转 provider(gpt-image-2 / doubao-seedance-2-0)+ 补 3 prompt + 改 10 binding 指向中转(TEXT→opus / IMAGE→gpt-image / VIDEO→seedance)。决策点用户拍:TEXT 复用现有 opus,IMAGE/VIDEO 用 gpt-image-2+seedance-2.0。
+
+### 二、undici Connect Timeout P0(真 bug,惠及所有机器)
+
+灵感生成首测 `Connect Timeout Error (10000ms)`,但 curl 连 moyu 0.2s 就通 → 非网络问题。根因:`openai-compat.ts` 的 undici `sharedDispatcher` **缺 `connect` 超时配置**(用默认 10s),而 `seedance.ts` 早加了 `connect:60s` 修 moyu 抖动 —— **TEXT 路径漏了**,影响所有走 moyu 的文本 LLM(剧本分析/分镜/灵感)。修:加 `connect:{timeout:60_000}`。重测灵感 **82s 成功**,真 LLM 生成《代码之声》12 集大纲。
+
+### 三、直连→中转架构清理(Issue 2 收尾)
+
+验证中转链路工作后,删 6 个直连死 provider(seedance/seedance-fast/gpt-image-2/nano-banana/doubao/claude-sonnet,均无 key 无引用)。保留 volcengine-compliance(moyu 无合规替代 + 仍被引用)。provider_configs 10→4(3 中转 active + 1 合规)。FK 检查确认无级联风险。
+
+### 四、prompt 可编辑确认 + 演示编辑(用户问)
+
+读 `loadPromptTemplate`:运行时**优先读 DB 编辑版**(isActive 最新),**无缓存改完即生效**,DB 空才用代码 fallback。读 admin/prompt router:保存先归档旧版进 `prompt_template_versions`(带 changeLog),可一键回滚。Chrome 实测编辑灵感大纲 prompt(加"每集结尾留钩子")→ 保存 → 历史版本 0→1 → DB 确认正文更新 + 版本归档。**用户选保留这条编辑**。
+
+### 五、导演菜单加灵感创作为第一项
+
+`top-nav.tsx`:导演 HoverNav items 加"灵感创作"(tab=inspiration)为首,mainHref 也指向它。hover 验证:灵感创作 → 剧本管理 → 分镜工坊。
+
+### 六、"展开本集"bug 实测(UI 假象,非 token 浪费)
+
+用户疑点第1集展开会触发其他集 + 全部展开一起跑,多花 token。**代码分析 + Chrome 实测双重确认**:`genEp` 是**单个共享 mutation**,所有按钮读同一 `genEp.isPending` → 全转圈(视觉误导),但 `mutate` 只传点击那集的 episodeNumber。**实测铁证**:点第2集 → 日志只 +1 请求,DB 只 2 集有内容(非 12)。**结论:不吞吐其他集,token 成本=1 集**。优化(保守版,5 处改 inspiration-pane):加 `allRunning` 状态分离全部展开 + spinner 精确到 `genEp.variables?.episodeNumber` → 真打验证只点的那集转"展开中…"。
+
+### 七、★ DB 跨机统一方案(本次主 deliverable)
+
+**根因**:DB 数据分两层 —— **结构层**(prompt slug / binding KEY / 风格 / schema)是 git 真相,**配置层**(binding 值 / 密钥 / 密码 / 手动编辑正文)各机独立。开工 `git pull` 只同步代码,seed.ts 里的结构数据不会自动补到本地 DB → mac-mini 缺灵感配置的根因。全量 `db:seed` 又会覆盖配置层(把 binding 冲回直连)。
+
+**方案 — `pnpm db:sync` 增量同步**:
+- `seed.ts` 加 `SEED_ADDITIVE` 模式:styles/prompt/systemSetting 用 `update:{}`(insert-if-missing,不覆盖)· providers 整段跳过(各机独立,不重建删过的)
+- 新 `seed-sync.ts` wrapper(设 env 再 import seed,跨平台避免 Windows PowerShell prefix 失效)
+- `package.json` x2 加 `db:sync` 命令
+- **实测验证**:跑 db:sync 后 —— binding 值/prompt 编辑/providers 数全**未变**,系统设置 26→27(补了 1 个缺失),确认"补缺不覆盖不重建"达标
+
+**CLAUDE.md 完善**(5 处):
+- 开工 Step 3 加 `seed.ts 改了 → db:sync` 规则(强调别跑 db:seed)
+- Step 2.5 触发条件加 seed.ts + 加第 7 项 db:sync 诊断
+- 跨设备数据矩阵重写:厘清结构层(db:sync 同步)vs 配置层(各机独立)
+- 首次接入说明区分 db:seed(新机全量)vs db:sync(老机增量)
+- 收工 Step 3 加闭环:新增结构性 DB 数据**必须落 seed.ts**(只在本机手动 insert = 别机永远缺,正是本次根因)
+
+### 验证
+
+typecheck 16/16(web 多次 + db)· Chrome 真打(灵感端到端 82s / spinner 精确 / 导演菜单 / prompt 编辑)· DB 实测(db:sync 增量安全 / binding 迁移 / 删直连)
+
+**问题/待决策**
+- ❓ `config-inspiration-relay.mjs` 一次性脚本:db:sync 已泛化其 prompt/binding 部分,provider 创建仍是 mac-mini 专用,留作记录
+- ❓ 其他设备(mac-studio/win-laptop)若也有旧 seed,开工跑 db:sync 即可补齐(本次 seed.ts 改动会触发提示)
+- ❓ volcengine-compliance 唯一直连保留 — 是否 Phase 2 也删(合规无中转替代)
+
+**下次接着做**
+- 📌 灵感创作单集展开端到端(展开本集 → 关联剧本 → 分镜)
+- 📌 其他设备开工验证 db:sync 增量同步真跑通
+- 📌 测真 AIGC 视频抽卡(seedance via moyu 新建的中转 provider)
+- 📌 (follow-up)config-inspiration-relay 脚本是否清理
+
+---
+
 ## 2026-06-04(周四,mac-studio · 四十八次收工)— 灵感创作迭代(新建 bug 修/顶置/50 限制)+ 剧本覆盖语义反转 + 分镜 Word/TXT 导出
 
 **完成 — 6 文件 + 1 migration · typecheck 16/16 + test 11/11 + 关键项真打**

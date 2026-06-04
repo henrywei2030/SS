@@ -314,6 +314,8 @@ function DraftDetail({
   const { data: draft, isLoading } = trpc.inspiration.getDraft.useQuery({ draftId });
   const [activeEp, setActiveEp] = React.useState<number | null>(null);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
+  // 四九收工:区分"全部展开"vs 单集展开 — 否则共用 genEp.isPending 导致所有按钮一起转圈
+  const [allRunning, setAllRunning] = React.useState(false);
 
   const genEp = trpc.inspiration.generateEpisode.useMutation({
     onSuccess: () => onChanged(),
@@ -350,13 +352,23 @@ function DraftDetail({
   };
 
   const generateAll = async (): Promise<void> => {
-    for (const o of outline) {
-      if (!epByNum.get(o.number)?.content) {
-        await genEp.mutateAsync({ draftId, episodeNumber: o.number });
+    setAllRunning(true);
+    try {
+      for (const o of outline) {
+        if (!epByNum.get(o.number)?.content) {
+          await genEp.mutateAsync({ draftId, episodeNumber: o.number });
+        }
       }
+      toast.success('已展开全部集');
+    } finally {
+      setAllRunning(false);
     }
-    toast.success('已展开全部集');
   };
+
+  // 四九收工:某一集是否正在生成(spinner 精确到该集,不再全部一起转)
+  // genEp.variables 在 mutation in-flight 时保存当前传的 episodeNumber
+  const isGenningEp = (n: number): boolean =>
+    genEp.isPending && genEp.variables?.episodeNumber === n;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -379,7 +391,7 @@ function DraftDetail({
             disabled={genEp.isPending || generatedCount === outline.length}
             className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--color-border))] px-2.5 py-1.5 text-xs hover:bg-[hsl(var(--color-muted))] disabled:opacity-50"
           >
-            {genEp.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Wand2 className="size-3.5" />}
+            {allRunning ? <Loader2 className="size-3.5 animate-spin" /> : <Wand2 className="size-3.5" />}
             全部展开
           </button>
           <button
@@ -439,8 +451,8 @@ function DraftDetail({
                   disabled={genEp.isPending}
                   className="mt-1.5 inline-flex items-center gap-1 rounded border border-[hsl(var(--color-border))] px-1.5 py-0.5 text-[10px] hover:bg-[hsl(var(--color-muted))] disabled:opacity-50"
                 >
-                  {genEp.isPending ? <Loader2 className="size-2.5 animate-spin" /> : <Sparkles className="size-2.5" />}
-                  {done ? '重新展开' : '展开本集'}
+                  {isGenningEp(o.number) ? <Loader2 className="size-2.5 animate-spin" /> : <Sparkles className="size-2.5" />}
+                  {isGenningEp(o.number) ? '展开中…' : done ? '重新展开' : '展开本集'}
                 </button>
               </div>
             );
@@ -470,8 +482,8 @@ function DraftDetail({
                 disabled={genEp.isPending}
                 className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               >
-                {genEp.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-                展开本集剧本
+                {isGenningEp(activeEp) ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+                {isGenningEp(activeEp) ? '展开中…' : '展开本集剧本'}
               </button>
             </div>
           )}

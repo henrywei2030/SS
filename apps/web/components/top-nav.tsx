@@ -118,14 +118,18 @@ export function TopNav({
           icon={ClapperboardIcon}
           mainHref={
             projectId
-              ? `/${locale}/projects/${projectId}/director/storyboard?tab=script`
+              ? `/${locale}/projects/${projectId}/director/storyboard?tab=inspiration`
               : undefined
           }
           items={
             projectId
               ? [
-                  // 三十六收工 UX 改造:导演 = storyboard 的 2 个 tab(剧本 / 分镜)
-                  //   删"导演台首页"(纯导航卡片冗余)+ "剧本分析"(改到剧本管理页内按钮)
+                  // 三十六收工 UX 改造:导演 = storyboard 的 tab(灵感 / 剧本 / 分镜)
+                  //   四九收工:灵感创作提到第一顺位(想法 → 多集剧本是创作起点)
+                  {
+                    href: `/${locale}/projects/${projectId}/director/storyboard?tab=inspiration`,
+                    label: '灵感创作',
+                  },
                   {
                     href: `/${locale}/projects/${projectId}/director/storyboard?tab=script`,
                     label: '剧本管理',
