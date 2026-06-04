@@ -316,7 +316,10 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
 
   /** 从 create task 响应中抽 task_id(兼容中转站的 task_id 和 ark 的 id) */
   private extractTaskId(json: Record<string, unknown>): string {
-    return asString(json.task_id) ?? asString(json.id) ?? '';
+    // 全盘审查 #11:部分中转站(one-api 衍生)返数字 task_id,asString 只接受 string 会返 ''
+    //   → 误判 Missing task_id 抛错。改为兼容 string|number(对齐 relay-asset.ts 的 String(id))
+    const tid = json.task_id ?? json.id;
+    return typeof tid === 'string' || typeof tid === 'number' ? String(tid) : '';
   }
 
   estimateCost(req: VideoRequest): number {

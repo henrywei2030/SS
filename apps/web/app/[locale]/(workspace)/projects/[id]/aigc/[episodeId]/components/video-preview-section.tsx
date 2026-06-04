@@ -114,9 +114,29 @@ export function VideoPreviewSection({
     },
     [groupDetail, takes, groupId],
   );
-  // W5.5 D5:SSE 实时进度(对当前正在跑的 attempt 订阅)
-  const progress = useAigcProgress(autoSelectAttemptId);
   const utils = trpc.useUtils();
+
+  // 2026-05-27 用户反馈:rejected take 视为"已删除",列表 + 主预览候选都 filter 掉
+  const visibleTakes = React.useMemo(
+    () => (takes ?? []).filter((t) => !t.rejected),
+    [takes],
+  );
+
+  // 2026-05-27 用户反馈:动态进度条 — 基于 RUNNING take.createdAt + 预期时长估算
+  // 真 SSE percent 优先,没有用时间估算(Seedance 2.0 fast ≈ 3min, std ≈ 6min)
+  const inflightTake = React.useMemo(
+    () =>
+      visibleTakes.find(
+        (t) => t.status === 'RUNNING' || t.status === 'QUEUED',
+      ),
+    [visibleTakes],
+  );
+
+  // W5.5 D5 + 全盘审查 #9:SSE 实时进度订阅「正在跑的 take」而非 autoSelectAttemptId。
+  //   原订阅 autoSelectAttemptId,但 autoSelect 在 take 一出现(RUNNING)就被 onAutoSelectConsumed
+  //   置 null → SSE EventSource 提前卸载、实时 percent 断流(只剩 5s 轮询)。改订阅 inflightTake.id 后,
+  //   SSE 生命周期与 RUNNING/QUEUED 对齐,生成结束(终态后 inflightTake 消失)才卸载。
+  const progress = useAigcProgress(inflightTake?.id ?? null);
 
   // 三十三收工 R1 Phase A2:4 个跟随 capabilities effect 抽到 useVideoSettings hook
   const {
@@ -144,22 +164,6 @@ export function VideoPreviewSection({
       }
     }
   }, [progress.kind, groupId, utils, groupDetail]);
-
-  // 2026-05-27 用户反馈:rejected take 视为"已删除",列表 + 主预览候选都 filter 掉
-  const visibleTakes = React.useMemo(
-    () => (takes ?? []).filter((t) => !t.rejected),
-    [takes],
-  );
-
-  // 2026-05-27 用户反馈:动态进度条 — 基于 RUNNING take.createdAt + 预期时长估算
-  // 真 SSE percent 优先,没有用时间估算(Seedance 2.0 fast ≈ 3min, std ≈ 6min)
-  const inflightTake = React.useMemo(
-    () =>
-      visibleTakes.find(
-        (t) => t.status === 'RUNNING' || t.status === 'QUEUED',
-      ),
-    [visibleTakes],
-  );
   // 二十九收工 S1:1s timer 抽到 <InflightProgressPanel> 子组件,
   // 父组件不再因 nowTick state 全量 re-render(原 1949 行组件每秒刷新)
   // expected duration:2.0 fast 3 分钟 / 2.0 std 6 分钟(从 capabilities.providerId 区分)

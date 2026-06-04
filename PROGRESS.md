@@ -5,6 +5,46 @@
 
 ---
 
+## 2026-06-04(周四,mac-studio · 五三次收工)— 三遍全盘代码审查 + 修复全部 20 项逻辑优化/调整(7 真 bug + 5 加固 + 8 整洁)
+
+**完成 — 19 文件改(含 1 新建 parse-llm-json.ts)· typecheck 16/16 + test 107 全过 · sanitizeErrorMsg 功能+ReDoS 实测**
+
+开工指令"全盘检查代码逻辑优化/调整,检查三遍"。**三遍法**:① 4 agent 按包广度扫(api/web/core+adapters+worker/shared+db)出 24 候选 → ② 对抗复核校准严重度 + 端到端跨边界补漏(发现 worker boot sweep 漏 QUEUED)→ ③ 亲自 ground-truth 核心项。无 P0。用户拍板"全部 20 项"全修,分梯队 + 每批 typecheck 验证。
+
+### 🔴 梯队一 真 bug(7)
+- **#1 worker boot sweep 漏扫 QUEUED**(`video-gen/index.ts`):占位 attempt 创建即 QUEUED+startedAt=null,web 在「占位提交后/升 RUNNING 前」崩溃的孤儿,原全库 backstop 只扫 RUNNING → PREPAY 永久挂起+幽灵"生成中"。对齐 router inflight sweep:`status {in:[RUNNING,QUEUED]}` + `OR(startedAt<cutoff ‖ startedAt=null&&createdAt<cutoff)`
+- **#2 aigc refVideoUrl 校验位置**(`aigc.ts`):caps+refVideoUrl 校验原在升 RUNNING 之后,而 failPlaceholder updateMany 只匹配 QUEUED → 命中 0 行 → 占位卡死 RUNNING 阻塞 group 10min。整段移到升 RUNNING 前
+- **#3 runPool 误标 cancelled**(`top-bar.tsx`):mutateAsync 已 resolve=后端已落库,无条件标 done(原 `cancelRef?'cancelled':'done'` 把取消时已成功的集误标→用户误以为没生成)
+- **#4 批量 toast 风暴**(`top-bar.tsx`):新增静默 `generateSilent` mutation 给 3 并发池用,消除 N 集 N toast + N 次 listEpisodes refetch
+- **#5 LLM 截断检测**(`openai-compat/claude/generate.ts`+types):透传 `finish_reason=length`/`stop_reason=max_tokens` → `TextResult.truncated`,warning 区分"被截断可重试"vs"格式问题",console 带 finish_reason
+- **#6 getTextProvider 缓存不失效**(`provider/index.ts`):删独立 textInstances Map 统一 cache.text(原失效路径只清 cache.text → resetProviderCache/debugProviders 看不到 text 实例;生产被 cacheKey 兜底)
+- **#7 estimateCost 钳 4096**(`openai-compat/claude`):去掉 `Math.min(maxTokens,4096)`,storyboard 传 16000 时事前预算护栏不再低估 ~3/4(真实记账走 calcCost 不受影响)
+
+### 🟡 梯队二 加固/一致性(5)
+- **#8 脱敏补 kv/Google key**(`errors.ts`):补 `secret/password/token/api-key:"xxx"` kv 形式(含 JSON `"k":"v"` key 后闭合引号)+ Google AIza key;**实测**含 ReDoS 对抗 <1ms 线性、正常文案("secret: not set"/"token expired")不误伤
+- **#9 SSE 早断**(`video-preview-section.tsx`):SSE 改订阅 `inflightTake.id` 而非 autoSelectAttemptId(原 take 一出现 RUNNING 就 onAutoSelectConsumed 置 null 卸载 EventSource → 实时进度断流只剩 5s 轮询);visibleTakes/inflightTake 提到 hook 调用前
+- **#10 claude 超时**(`claude.ts`):加 claudeDispatcher(connect 60s + body/headers 300s)对齐 openai-compat(原裸 request 无 connect、headers 仅 60s)
+- **#11 extractTaskId 兼容 number**(`seedance.ts`):部分中转站返数字 task_id,asString 返 '' 误判 Missing;改 `typeof string|number ? String(tid):''`
+- **#12 抽共享 tryParseLlmJson**(新 `parse-llm-json.ts`):openai-compat 4级 / claude 2级 JSON 容错解析合并,claude 补回"正则提内嵌 fence"那级,防漂移
+
+### ⚪ 梯队三 整洁(8)
+#13 errors.ts B64 死量词 `={0,2}` 修正 · #14 删 LinkInspirationButton 死 prop episodeNumber · #15 use-video-settings aspectRatio effect 改函数式 setter 去自依赖 · #16 media.ts softDelete 死分支删 · #17 processor.ts takeSeq 改成功序号 `count{status:SUCCESS}+1` · #18 seed.ts FORCE_PROMPTS 补 varsJson · #19 core exports 暴露 `./shared` + inspiration 复用 loadPromptTemplate 删内联(ctx.prisma===全局 prisma 证等价)· #20 admin/system.ts setSetting 加 `cacheInvalidatePrefix('cache:bindings:')`
+
+### 审查校准/排除(透明)
+- **C8(modelId=providerId)误报**:全链路统一约定(视频 provider id 即 model 标识),未动
+- **大量跨边界契约确认一致**:draft.episodes 结构 / VideoGenJobData / SSE 事件 / prompt slug / billing 单源 / seed additive — 端到端 agent 逐一核对无 drift
+
+**问题/待决策**
+- ❓ **A3 重传剧本重置已发布集 status**(script.ts 4 处 upsert):复活软删集时无条件 `status:NOT_STARTED`,对已发布集(publishedAt!=null)重传会打回 status 但保留 publishedAt → (status,publishedAt) 不一致。可能落在「需求2 覆盖一切」有意设计内,**留拍板**是否区分(仅 deletedAt!=null 才重置)
+- ❓ 多数修复(worker 崩溃恢复 / 退费幂等 / provider 截断 / 批量UI / SSE)需真实 provider/进程才能端到端真打,本次只 typecheck+test+单元验证
+
+**下次接着做**
+- 📌 端到端真打:批量分镜生成 UI(#3 取消标 done / #4 无 toast 风暴)、视频 SSE 实时进度(#9)、灵感创作 prompt 链路(#19 复用后)
+- 📌 A3 拍板是否算 bug
+- 📌 (可选)首个真实 provider key 接入跑通完整生成链(验 #5 截断 warning / #7 预算 / #11 taskId)
+
+---
+
 ## 2026-06-04(周四,mac-mini · 五二次收工)— 分镜生成结果对话框配色 token 化 + 失败集就地重试 + 进度条改绿 + 生成永不自动组(代码定死)+ 解释分镜组合并原理
 
 **完成 — 3 文件改 · typecheck 20/20 + test 全绿 · 用户实测失败重试成功**

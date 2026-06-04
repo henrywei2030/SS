@@ -13,6 +13,7 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
 import { getTextProvider } from '@ss/adapters/provider';
+import { loadPromptTemplate } from '@ss/core/shared';
 import { Prisma } from '@ss/db';
 import { sanitizeErrorMsg } from '@ss/shared';
 
@@ -149,25 +150,6 @@ function parseEpisodesBatch(text: string): Map<number, string> {
   return out;
 }
 
-// core/shared/load-prompt 未公开 export → 内联同款逻辑(DB 优先,fallback 兜底)
-async function loadPrompt(
-  prisma: Context['prisma'],
-  slug: string,
-  fallback: string,
-): Promise<string> {
-  try {
-    const t = await prisma.promptTemplate.findFirst({
-      where: { slug, isActive: true },
-      orderBy: { updatedAt: 'desc' },
-      select: { content: true },
-    });
-    if (t?.content?.trim()) return t.content;
-  } catch {
-    /* DB 抖动 → fallback */
-  }
-  return fallback;
-}
-
 /** 解析 LLM 大纲 JSON → {title, episodes[]},尽量鲁棒兜底 */
 function parseOutline(json: unknown, text: string): { title: string; episodes: OutlineEp[] } {
   let obj: unknown = json;
@@ -268,7 +250,7 @@ export const inspirationRouter = router({
       }
       const modelId = await resolveModelId(ctx.prisma);
       const provider = await getTextProvider(modelId);
-      const system = await loadPrompt(ctx.prisma, 'inspiration_outline', OUTLINE_FALLBACK);
+      const system = await loadPromptTemplate('inspiration_outline', OUTLINE_FALLBACK);
       const userPrompt = buildOutlinePrompt(input.idea, input.params);
 
       const attempt = await ctx.prisma.generationAttempt.create({
@@ -369,7 +351,7 @@ export const inspirationRouter = router({
 
       const modelId = await resolveModelId(ctx.prisma, draft.modelId);
       const provider = await getTextProvider(modelId);
-      const system = await loadPrompt(ctx.prisma, 'inspiration_episode', EPISODE_FALLBACK);
+      const system = await loadPromptTemplate('inspiration_episode', EPISODE_FALLBACK);
       const userPrompt = buildEpisodePrompt(
         draft.title,
         draft.idea,
@@ -487,7 +469,7 @@ export const inspirationRouter = router({
 
       const modelId = await resolveModelId(ctx.prisma, draft.modelId);
       const provider = await getTextProvider(modelId);
-      const system = await loadPrompt(ctx.prisma, 'inspiration_episodes_batch', EPISODES_BATCH_FALLBACK);
+      const system = await loadPromptTemplate('inspiration_episodes_batch', EPISODES_BATCH_FALLBACK);
       const userPrompt = buildEpisodesBatchPrompt(
         draft.title,
         draft.idea,

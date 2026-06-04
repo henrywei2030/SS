@@ -77,6 +77,15 @@ const systemRouter = router({
         maskValue(before),
         maskValue(setting),
       );
+      // 全盘审查 #20:失效 binding 缓存 — getStoryboardBindings 把 storyboard.maxDurationS /
+      //   defaultShotDurationS 等非 binding.* key 一起缓存在 cache:bindings:(TTL 60s),
+      //   原 setSetting 无失效逻辑 → 改这些配置后最多 60s 才生效。与 admin.binding.set 对齐。
+      try {
+        const { cacheInvalidatePrefix } = await import('@ss/queue/cache');
+        await cacheInvalidatePrefix('cache:bindings:');
+      } catch (e) {
+        console.warn('[admin.system.setSetting] binding cache invalidate failed (non-fatal):', e);
+      }
       return setting;
     }),
 });

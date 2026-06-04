@@ -63,9 +63,19 @@ export function sanitizeErrorMsg(err: unknown, maxLen = 200): string {
     //   (这些含 - _ . 会打断 base64 规则的连续段;JWT 每段 <40 字符也漏网)
     .replace(/\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]+/g, '[JWT]')
     .replace(/\bBearer\s+[A-Za-z0-9._-]{8,}/gi, 'Bearer [TOKEN]')
+    // 全盘审查加固:kv 赋值形式(secret/password/token/api-key: "xxx" 或 =xxx)— 原前缀式 [KEY]
+    //   只认值自带前缀(sk-/pk-),漏掉「键名:值」结构(JSON / header / env var)。
+    //   值要求 8+ 连续凭证字符(无空格),避免吃掉 "secret: not set" 这类正常文案。
+    .replace(
+      /\b(secret|password|passwd|token|api[_-]?key|access[_-]?key|x[_-]?api[_-]?key)\b["']?(\s*[:=]\s*)["']?[A-Za-z0-9._\-+/]{8,}["']?/gi,
+      '$1$2[REDACTED]',
+    )
+    // Google API key(AIza + 35 字符,无 sk- 前缀且长度 39 < 40,漏 B64 规则)
+    .replace(/\bAIza[0-9A-Za-z_-]{35}\b/g, '[KEY]')
     .replace(/\b(?:sk|pk|rk|ak|tok|secret|api[_-]?key)[-_][A-Za-z0-9_-]{8,}/gi, '[KEY]')
     .replace(/\b[a-f0-9]{32,}\b/gi, '[HASH]')
-    .replace(/\b[A-Za-z0-9+/=]{40,}={0,2}\b/g, '[B64]')
+    // 全盘审查:= 仅作 padding 出现在尾部(原 ={0,2} 因 = 已在主字符类内是死量词)
+    .replace(/\b[A-Za-z0-9+/]{40,}={0,2}\b/g, '[B64]')
     .replace(/\b\d{1,3}(?:\.\d{1,3}){3}(?::\d{1,5})?\b/g, '[IP]')
     .replace(/(\/[^\s/]+){3,}/g, '[PATH]')
     .slice(0, maxLen)

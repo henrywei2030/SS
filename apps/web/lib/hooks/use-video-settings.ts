@@ -79,23 +79,19 @@ export function useVideoSettings(input: {
   const aspectRatioInitializedRef = React.useRef(false);
   React.useEffect(() => {
     if (!capabilities) return;
+    const supported = capabilities.supportedAspectRatios;
+    // 全盘审查 #15:用函数式 setter 读最新 aspectRatio,从 deps 移除 aspectRatio
+    //   (effect 依赖自己 set 的 state 是易回归模式;对齐下方 resolution effect 的写法)
     if (aspectRatioInitializedRef.current) {
-      if (!capabilities.supportedAspectRatios.includes(aspectRatio)) {
-        const first = capabilities.supportedAspectRatios[0];
-        if (first) setAspectRatio(first);
-      }
+      setAspectRatio((prev) => (supported.includes(prev) ? prev : (supported[0] ?? prev)));
       return;
     }
     if (!groupDetail) return;
     const candidate = groupDetail.project?.aspect as AspectRatio | undefined;
-    if (candidate && capabilities.supportedAspectRatios.includes(candidate)) {
-      setAspectRatio(candidate);
-    } else {
-      const first = capabilities.supportedAspectRatios[0];
-      if (first) setAspectRatio(first);
-    }
+    const next = candidate && supported.includes(candidate) ? candidate : supported[0];
+    if (next) setAspectRatio(next);
     aspectRatioInitializedRef.current = true;
-  }, [capabilities, groupDetail, aspectRatio]);
+  }, [capabilities, groupDetail]);
 
   // W5.5.1:capabilities 加载后,同步默认分辨率(切 Provider 时 list 可能变)
   React.useEffect(() => {

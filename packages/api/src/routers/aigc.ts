@@ -1293,6 +1293,27 @@ export const aigcRouter = router({
         );
       }
 
+      // 全盘审查 #2:Provider 能力(caps)查询 + refVideoUrl 校验必须在「升级 RUNNING」之前!
+      //   failPlaceholder 的 updateMany 只匹配 status:'QUEUED';若该校验在 RUNNING 之后失败,
+      //   updateMany 命中 0 行 → 占位 attempt 卡死 RUNNING、阻塞该 group 抽卡直到 stale-sweep(10min)。
+      //   caps/refVideoUrl 只依赖 input + providerId,与 attempt 状态无关,故提前到升 RUNNING 前。
+      // 2026-05-27 audit r14 P0:删 `.catch(() => null)` — 吞 DB 异常会致 capsParams={} → 校验失效;
+      //   真异常应往上抛,trpc 返 INTERNAL_SERVER_ERROR。
+      const caps = await ctx.prisma.providerConfig.findUnique({
+        where: { providerId },
+        select: { defaultParams: true },
+      });
+      const capsParams =
+        caps?.defaultParams && typeof caps.defaultParams === 'object'
+          ? (caps.defaultParams as Record<string, unknown>)
+          : {};
+      if (input.refVideoUrl && capsParams.supportsRefVideo !== true) {
+        await failPlaceholder(
+          new Error(`当前 Provider 不支持 refVideo(请去 admin/providers 配 supportsRefVideo:true)`),
+          'BAD_REQUEST',
+        );
+      }
+
       // 3. 升级占位 attempt 到 RUNNING + 真实 inputJson(7 轮 audit A1)
       // 注:projectId/episodeId/shotGroupId/providerId/modelId/action 在占位时已写,不重复 set
       const startedAt = new Date();
@@ -1332,24 +1353,6 @@ export const aigcRouter = router({
         .filter((r) => r.kind === 'AUDIO')
         .map((r) => r.mediaUrl)
         .filter((u): u is string => !!u);
-
-      // W5.5.1 audit 修复 P2:Provider 不支持的多模态参考字段直接拒(防绕 UI 直调 API 滥用)
-      // 2026-05-27 audit r14 P0:删 `.catch(() => null)` — 之前吞掉 DB 异常导致 capsParams={} → supportsRef* 校验失效
-      // 真异常(DB 连接 / schema 错)应该往上抛,trpc 会返 INTERNAL_SERVER_ERROR 让 caller 处理
-      const caps = await ctx.prisma.providerConfig.findUnique({
-        where: { providerId },
-        select: { defaultParams: true },
-      });
-      const capsParams =
-        caps?.defaultParams && typeof caps.defaultParams === 'object'
-          ? (caps.defaultParams as Record<string, unknown>)
-          : {};
-      if (input.refVideoUrl && capsParams.supportsRefVideo !== true) {
-        await failPlaceholder(
-          new Error(`当前 Provider 不支持 refVideo(请去 admin/providers 配 supportsRefVideo:true)`),
-          'BAD_REQUEST',
-        );
-      }
       // 2026-05-27 audit r14 P1:audio 处理统一(input.refAudioUrl + binding 来的 audio 都 silent drop)
       // 之前 input.refAudioUrl 不支持时直接 failPlaceholder 拒,但 binding 来的 audio silent drop —
       // 用户体感不一致(同样不支持,一种拒一种丢)。统一改 silent drop + 日志,不阻断生成

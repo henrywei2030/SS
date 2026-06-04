@@ -271,7 +271,10 @@ export async function processVideoGenJob(
       tx.project.findUnique({ where: { id: projectId }, select: { name: true } }),
       tx.episode.findUnique({ where: { id: episodeId }, select: { number: true } }),
     ]);
-    const takeSeq = await tx.generationAttempt.count({ where: { shotGroupId } });
+    // 全盘审查 #17:用"成功序号"语义 — 原 count 含 placeholder/FAILED/并发 attempt,
+    //   文件名「第N次」会跳号。改数已成功的 + 1(当前这次此刻仍 RUNNING、未计入)。
+    const takeSeq =
+      (await tx.generationAttempt.count({ where: { shotGroupId, status: 'SUCCESS' } })) + 1;
     // 文件名片段:去文件系统非法字符(中文保留),空兜底
     const sanitizeName = (s: string): string => s.replace(/[/\\:*?"<>|]+/g, '_').trim();
     const projPart = sanitizeName(proj?.name ?? '') || '项目';

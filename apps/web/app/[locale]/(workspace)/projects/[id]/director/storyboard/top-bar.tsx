@@ -171,7 +171,7 @@ function LinkInspirationButton({
   onSaved,
 }: {
   projectId: string;
-  episodeNumber: number; // 保留 prop(caller 传),多集导入不再需要单一目标集
+  // 全盘审查 #14:删死 prop episodeNumber — 改多集导入后组件全靠 selectedNums,此 prop 从未被解构使用
   onSaved: () => void;
 }): React.ReactElement {
   const [open, setOpen] = React.useState(false);
@@ -483,7 +483,6 @@ function ScriptActions({
 
       <LinkInspirationButton
         projectId={projectId}
-        episodeNumber={episodeNumber}
         onSaved={onSaved}
       />
 
@@ -631,6 +630,11 @@ function ShotsActions({
     onError: (e) => toast.error(e.message),
   });
 
+  // 全盘审查 #4:批量池专用「静默」mutation — 不弹单集 toast、不每集 invalidate listEpisodes。
+  //   runPool 自己维护每集 chip 状态 + 结束后统一 onAfterAction()。原来池复用上面的 generate,
+  //   React-Query 对每次 mutateAsync 都触发其 hook 级 onSuccess/onError → N 集弹 N 个 toast + N 次 refetch 刷屏。
+  const generateSilent = trpc.storyboard.generateForEpisode.useMutation();
+
   const router = useRouter();
   const params = useParams<{ locale: string }>();
   const locale = params?.locale ?? 'zh-CN';
@@ -752,8 +756,11 @@ function ShotsActions({
         if (!ep) continue;
         setEpStat(ep.episodeId, 'running');
         try {
-          await generate.mutateAsync({ episodeId: ep.episodeId, replaceExisting: true });
-          setEpStat(ep.episodeId, cancelRef.current ? 'cancelled' : 'done');
+          await generateSilent.mutateAsync({ episodeId: ep.episodeId, replaceExisting: true });
+          // 全盘审查 #3:mutateAsync 已 resolve = 后端已落库,无条件标 done。
+          //   原 `cancelRef ? 'cancelled' : 'done'` 会把"取消时正好已成功落库"的集误标 cancelled,
+          //   与 cancelBatch 注释"in-flight 跑完即停(后端已落库)"矛盾,且让用户误以为没生成。
+          setEpStat(ep.episodeId, 'done');
         } catch (e) {
           setEpStat(ep.episodeId, 'failed', e instanceof Error ? e.message : String(e));
         }

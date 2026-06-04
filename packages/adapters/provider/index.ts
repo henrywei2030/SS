@@ -262,14 +262,15 @@ export async function getImageProvider(id: string): Promise<IImageProvider> {
 export async function getTextProvider(id: string): Promise<ITextProvider> {
   const cfg = await loadConfig(id);
   // 简单缓存：每个 providerId 一个实例（修改 key 后通过 cacheKey 失效）
-  const hit = textInstances.get(id);
+  // 全盘审查 #6:统一用 cache.text(原独立 textInstances Map 不在任何失效路径里 →
+  //   resetProviderCache 不清它、debugProviders 漏列 text 实例;生产虽被 cacheKey 含 updatedAt 兜底,
+  //   但测试隔离失效。改用 cache.text 与 image/video/compliance 对称,失效路径自然覆盖)
+  const hit = cache.text.get(id);
   if (hit && hit.cacheKey === cfg.cacheKey) return hit.instance;
   const instance = constructTextProvider(cfg);
-  textInstances.set(id, { instance, cacheKey: cfg.cacheKey });
+  cache.text.set(id, { instance, cacheKey: cfg.cacheKey });
   return instance;
 }
-
-const textInstances = new Map<string, { instance: ITextProvider; cacheKey: string }>();
 
 function constructTextProvider(cfg: ResolvedConfig): ITextProvider {
   // 第 21 轮 audit:protocol='openai-compat' 优先(任意 OpenAI 兼容中转站 / Poe / OpenRouter / OpenAI 直连)

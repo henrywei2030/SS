@@ -4,11 +4,12 @@
  * API: https://docs.anthropic.com/en/api/messages
  * 模型 ID: claude-sonnet-4-5-20250929 (默认)
  */
-import { request } from 'undici';
+import { Agent, request } from 'undici';
 
 import { ProviderError } from '@ss/shared';
 
 import { BaseProvider } from './base.js';
+import { tryParseLlmJson } from './parse-llm-json.js';
 import type {
   CallContext,
   ITextProvider,
@@ -16,6 +17,18 @@ import type {
   TextRequest,
   TextResult,
 } from './types.js';
+
+// 全盘审查 #10:对齐 openai-compat — Anthropic 直连原为裸 request,无 connect timeout(undici 默认 10s)
+//   且 headersTimeout 仅 60s,慢模型大输出(剧本分析/分镜)易撞超时。统一 connect 60s + body/headers 300s。
+const claudeDispatcher = new Agent({
+  keepAliveTimeout: 30_000,
+  keepAliveMaxTimeout: 60_000,
+  connections: 16,
+  pipelining: 1,
+  connect: { timeout: 60_000 },
+  bodyTimeout: 300_000,
+  headersTimeout: 300_000,
+});
 
 export interface ClaudeProviderConfig {
   apiUrl: string;
@@ -50,7 +63,8 @@ export class ClaudeTextProvider extends BaseProvider implements ITextProvider {
 
   estimateCost(req: TextRequest): number {
     const approxTokens = Math.ceil((req.prompt.length + (req.system?.length ?? 0)) / 4);
-    const approxOut = Math.min(req.maxTokens ?? 4096, 4096);
+    // 全盘审查 #7:不再钳 4096(与 openai-compat 对齐)— 大输出请求事前预算预估不再系统性偏低
+    const approxOut = req.maxTokens ?? 4096;
     return ((approxTokens + approxOut) / 1000) * this.cfg.unitPriceCny;
   }
 
@@ -78,8 +92,7 @@ export class ClaudeTextProvider extends BaseProvider implements ITextProvider {
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify(body),
-        bodyTimeout: 120_000,
-        headersTimeout: 60_000,
+        dispatcher: claudeDispatcher, // 全盘审查 #10:connect 60s + body/headers 300s
       });
       const text = await respBody.text();
       if (statusCode >= 400) {
@@ -101,6 +114,8 @@ export class ClaudeTextProvider extends BaseProvider implements ITextProvider {
     }
 
     const text = resp.content.find((c) => c.type === 'text')?.text ?? '';
+    // 全盘审查 #5:Anthropic stop_reason=max_tokens 即被 maxTokens 截断
+    const truncated = resp.stop_reason === 'max_tokens';
     const inputTokens = resp.usage.input_tokens;
     const outputTokens = resp.usage.output_tokens;
     const totalKt = (inputTokens + outputTokens) / 1000;
@@ -117,23 +132,18 @@ export class ClaudeTextProvider extends BaseProvider implements ITextProvider {
       success: true,
     });
 
+    // 全盘审查 #12:用共享 tryParseLlmJson(原 claude 仅 2 级 fallback,缺"正则提内嵌 ```json``` block"
+    //   那级 → 与 openai-compat 漂移;统一为 4 级 fallback)
     let json: unknown;
     if (req.jsonSchema) {
-      try {
-        // Claude 倾向于把 JSON 包在 ```json ... ``` 里，先剥离
-        const cleaned = text.replace(/^```(?:json)?\s*|\s*```$/g, '').trim();
-        json = JSON.parse(cleaned);
-      } catch {
-        // 二次容错：尝试找到第一个 { 到最后一个 }
-        const start = text.indexOf('{');
-        const end = text.lastIndexOf('}');
-        if (start >= 0 && end > start) {
-          try {
-            json = JSON.parse(text.slice(start, end + 1));
-          } catch {
-            /* 留给业务层处理 */
-          }
-        }
+      json = tryParseLlmJson(text);
+      // 全盘审查 #5:解析失败时带上 stop_reason,运维区分模型不听话 vs 输出被截断
+      if (!json) {
+        console.warn(
+          `[claude] modelId=${modelId} jsonSchema set but JSON.parse all-fallback failed` +
+            ` (stop_reason=${resp.stop_reason}${truncated ? ', TRUNCATED' : ''}). raw (first 500 chars):`,
+          text.slice(0, 500),
+        );
       }
     }
 
@@ -141,6 +151,7 @@ export class ClaudeTextProvider extends BaseProvider implements ITextProvider {
     return {
       text,
       json,
+      truncated,
       inputTokens,
       outputTokens,
       costCny,

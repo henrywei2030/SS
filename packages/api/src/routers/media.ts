@@ -463,6 +463,9 @@ export const mediaRouter = router({
       if (!m) throw new TRPCError({ code: 'NOT_FOUND', message: 'media 不存在' });
 
       // 权限:global admin / project owner / project ADMIN member
+      // 全盘审查 #16:删原 `else if (scope==='PUBLIC') canDelete = isAdmin` 死分支 —
+      //   进该分支必有 !canDelete,而 canDelete 初值即 isAdmin,等于把 false 赋成 false(no-op)。
+      //   PUBLIC media 无 projectId,本就走不进项目分支,canDelete 保持初值 isAdmin,行为不变。
       let canDelete = ctx.user.isAdmin;
       if (!canDelete && m.projectId && m.project) {
         if (m.project.ownerId === ctx.user.id) {
@@ -475,8 +478,6 @@ export const mediaRouter = router({
           });
           canDelete = adminMember?.role === 'ADMIN';
         }
-      } else if (!canDelete && m.scope === 'PUBLIC') {
-        canDelete = ctx.user.isAdmin; // 公共库只 admin 能删
       }
       if (!canDelete) {
         throw new TRPCError({

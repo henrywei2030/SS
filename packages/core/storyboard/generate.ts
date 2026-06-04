@@ -181,9 +181,15 @@ export async function generateStoryboard(
 
   let warning: string | undefined;
   if (!result.json) {
-    warning = 'LLM 未返回 JSON';
+    // 全盘审查 #5:区分"被 maxTokens 截断"(调大上限 / 减内容可重试成功)vs"模型格式问题"
+    warning = result.truncated
+      ? 'LLM 输出被 maxTokens 截断、JSON 不完整 — 请减少单场内容或调高分镜 maxTokens 上限后重试'
+      : 'LLM 未返回 JSON';
   } else if (shots.length === 0) {
     warning = 'LLM 输出无可解析 shots（已计费但本场未生成分镜）';
+  } else if (result.truncated) {
+    // JSON 解析成功但被截断 → 裸花括号 fallback 可能只截出部分镜头,提示可能不全
+    warning = `LLM 输出疑被 maxTokens 截断,本场仅解析出 ${shots.length} 个镜头、可能不全 — 必要时减少单场内容重试`;
   }
 
   return {

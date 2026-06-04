@@ -51,11 +51,18 @@ async function bootstrap(): Promise<void> {
   //   - 复用 aigc.ts:1175-1209 的同款 idempotent 退款逻辑(查 REFUND 是否已存在防双写)
   try {
     const staleCutoff = new Date(Date.now() - STALE_TIMEOUT_WORKER_BOOT_MS);
+    // 全盘审查 #1:对齐 router inflight sweep — 同时扫 QUEUED。占位 attempt 创建即 QUEUED 且
+    //   startedAt=null;若 web 进程在「占位 QUEUED+PREPAY 提交后、升 RUNNING 前」崩溃,这个孤儿
+    //   原本永远不会被全库 backstop 清理(只扫 RUNNING)→ 只能等用户对同 group 再次生成触发 router sweep
+    //   → PREPAY 永久挂起 + 幽灵"生成中"。QUEUED 的 startedAt 为 null,故用 OR + createdAt 兜底。
     const staleAttempts = await prisma.generationAttempt.findMany({
       where: {
-        status: 'RUNNING',
+        status: { in: ['RUNNING', 'QUEUED'] },
         action: 'VIDEO',
-        startedAt: { lt: staleCutoff },
+        OR: [
+          { startedAt: { lt: staleCutoff } },
+          { startedAt: null, createdAt: { lt: staleCutoff } },
+        ],
       },
       select: {
         id: true,
@@ -74,7 +81,7 @@ async function bootstrap(): Promise<void> {
             where: { id: stale.id },
             data: {
               status: 'FAILED',
-              errorMsg: 'worker_restart_recovered: process crashed while attempt was RUNNING',
+              errorMsg: 'worker_restart_recovered: process crashed before attempt completed (QUEUED/RUNNING)',
               finishedAt: new Date(),
             },
           });
@@ -98,7 +105,7 @@ async function bootstrap(): Promise<void> {
 
     if (staleAttempts.length > 0) {
       console.warn(
-        `[${workerId}] recovered ${staleAttempts.length} stale RUNNING attempt(s) → marked FAILED, ${refundedCount} PREPAY refunded`,
+        `[${workerId}] recovered ${staleAttempts.length} stale QUEUED/RUNNING attempt(s) → marked FAILED, ${refundedCount} PREPAY refunded`,
       );
     }
   } catch (err) {

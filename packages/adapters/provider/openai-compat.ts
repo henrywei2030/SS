@@ -64,6 +64,7 @@ function ensureGlobalDispatcher(): void {
 }
 
 import { BaseProvider } from './base.js';
+import { tryParseLlmJson } from './parse-llm-json.js';
 import type {
   CallContext,
   ITextProvider,
@@ -134,7 +135,9 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
 
   estimateCost(req: TextRequest): number {
     const approxIn = Math.ceil((req.prompt.length + (req.system?.length ?? 0)) / 4);
-    const approxOut = Math.min(req.maxTokens ?? 4096, 4096);
+    // 全盘审查 #7:不再钳 4096 — storyboard 实传 maxTokens=16000,钳死会让事前预算护栏
+    //   把大输出请求的成本系统性低估 ~3/4(真实记账走 calcCost 用实际 usage,不受影响)
+    const approxOut = req.maxTokens ?? 4096;
     // Phase 1.5 P0-2:modelRate 非空时优先 2 倍率公式
     if (this.cfg.modelRate != null && this.cfg.modelRate > 0) {
       const oRate = this.cfg.outputRate ?? 1;
@@ -233,6 +236,9 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
     // 三十六收工 P0 修:prefill 模式下 prepend prefill content 还原完整 JSON
     const rawContent = resp.choices?.[0]?.message?.content ?? '';
     const content = usePrefill ? prefillContent + rawContent : rawContent;
+    // 全盘审查 #5:检测 maxTokens 截断(finish_reason=length)— 残缺 JSON 可能被裸花括号
+    //   fallback 解析成"少镜头"的合法对象,需透传给业务层让 warning 文案能区分截断
+    const truncated = resp.choices?.[0]?.finish_reason === 'length';
     const inputTokens = resp.usage?.prompt_tokens ?? 0;
     const outputTokens = resp.usage?.completion_tokens ?? 0;
     const costCny = this.calcCost(inputTokens, outputTokens);
@@ -250,43 +256,17 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
       costCnyOverride: costCny,
     });
 
-    // JSON 模式:request_format=json_object 时优先 JSON.parse;否则也尝试剥 ```json 容错
-    // 三十六收工 fix:加 inner ```json``` markdown block 提取(LLM 解释 + JSON 混合常见)
+    // JSON 模式:全盘审查 #12 用共享 tryParseLlmJson(4 级 fallback 抽到 parse-llm-json.ts,
+    //   与 claude.ts 共用防实现漂移:直接 parse → 剥首尾 fence → 正则提 ```json``` block → 裸花括号)
     let json: unknown;
     if (req.jsonSchema) {
-      try {
-        json = JSON.parse(content);
-      } catch {
-        const cleaned = content.replace(/^```(?:json)?\s*|\s*```$/g, '').trim();
-        try {
-          json = JSON.parse(cleaned);
-        } catch {
-          // 三十六收工 fix #2:正则提取 markdown 内 ```json ... ``` block(Claude 习惯包 markdown)
-          const fenced = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-          if (fenced && fenced[1]) {
-            try {
-              json = JSON.parse(fenced[1]);
-            } catch {
-              /* 继续 fallback */
-            }
-          }
-          if (!json) {
-            const start = content.indexOf('{');
-            const end = content.lastIndexOf('}');
-            if (start >= 0 && end > start) {
-              try {
-                json = JSON.parse(content.slice(start, end + 1));
-              } catch {
-                /* 留给业务层处理 */
-              }
-            }
-          }
-        }
-      }
-      // 三十六收工 fix #3:解析失败时打 raw content 让运维 grep 排查
+      json = tryParseLlmJson(content);
+      // 三十六收工 fix #3 + 全盘审查 #5:解析失败时打 raw + finish_reason,
+      //   让运维区分"模型不听话"(stop)vs"输出被 maxTokens 砍断"(length,调大 maxTokens 即可)
       if (!json) {
         console.warn(
-          `[openai-compat] modelId=${modelId} response_format=json_object but JSON.parse all-fallback failed. raw content (first 500 chars):`,
+          `[openai-compat] modelId=${modelId} response_format=json_object but JSON.parse all-fallback failed` +
+            ` (finish_reason=${resp.choices?.[0]?.finish_reason ?? 'unknown'}${truncated ? ', TRUNCATED' : ''}). raw (first 500 chars):`,
           content.slice(0, 500),
         );
       }
@@ -295,6 +275,7 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
     return {
       text: content,
       json,
+      truncated,
       inputTokens,
       outputTokens,
       costCny,

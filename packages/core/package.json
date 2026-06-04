@@ -11,7 +11,8 @@
     "./generation": "./generation/index.ts",
     "./video-generation": "./video-generation/index.ts",
     "./asset": "./asset/index.ts",
-    "./script": "./script/index.ts"
+    "./script": "./script/index.ts",
+    "./shared": "./shared/load-prompt.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

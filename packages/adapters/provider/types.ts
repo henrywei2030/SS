@@ -133,6 +133,11 @@ export interface TextRequest {
 export interface TextResult {
   text: string;
   json?: unknown;
+  /**
+   * 全盘审查 #5:响应被 maxTokens 截断(OpenAI finish_reason=length / Anthropic stop_reason=max_tokens)。
+   * 业务层据此区分 warning 文案:截断可调大 maxTokens / 减内容重试,非截断是模型格式问题。
+   */
+  truncated?: boolean;
   inputTokens: number;
   outputTokens: number;
   costCny: number;

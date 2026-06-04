@@ -307,7 +307,8 @@ async function main() {
       // 增量默认保留 admin 手编正文;FORCE_PROMPTS 时强更 content/name/description(改进传播)
       update: ADDITIVE
         ? FORCE_PROMPTS
-          ? ({ content: t.content, name: t.name, description: t.description } as never)
+          ? // 全盘审查 #18:补 varsJson — 原强更分支漏它,prompt 占位符元信息改进无法跨机传播
+            ({ content: t.content, name: t.name, description: t.description, varsJson: t.varsJson } as never)
           : {}
         : (t as never),
     });
