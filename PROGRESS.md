@@ -5,6 +5,40 @@
 
 ---
 
+## 2026-06-04(周四,mac-mini · 五二次收工)— 分镜生成结果对话框配色 token 化 + 失败集就地重试 + 进度条改绿 + 生成永不自动组(代码定死)+ 解释分镜组合并原理
+
+**完成 — 3 文件改 · typecheck 20/20 + test 全绿 · 用户实测失败重试成功**
+
+### 一、分镜生成结果对话框:配色 + 失败重试(用户反馈)
+
+五十收工的「全部集数生成」结果对话框(`top-bar.tsx`)。用户:配色不好看 + 失败集要能就地重试。
+- **配色 token 化**:状态 chip(成功/失败/进行中)、进度条、失败列表 从硬编码 `emerald/pink/red/blue` + 粉蓝渐变 + white pulse → 全用 design token(`--color-success/destructive/primary`),跟主题协调克制
+- **进度条改绿**:`primary` → `--color-success`(用户指定)
+- **失败集就地重试**:抽 `runPool` 复用 3 并发池 + 新增 `retryFailed` + 「重新生成失败的 N 集」按钮(结果对话框 `failedEps>0` 时出现),只重跑失败集、不动已成功的。**用户实测**:限流失败的第 6/12/18 集点重试后全成功
+
+### 二、生成分镜永不自动组(代码定死 · 用户强调规则)
+
+用户:生成分镜后不自动形成组,人工组合。**根因**:不是 bug,是 mac-mini 本机 DB `storyboard.autoMergeOnGenerate=true`(代码/seed 默认一直 false),各机 setting 漂移(mac-studio false / mac-mini true)。用户选「代码定死」:
+- 移除 `storyboard.ts` generateForEpisode 生成时的自动 `mergeShots` 合并段(~60 行)+ `autoMerge` binding 字段/读取 + `mergeShots`/`MergeableShot` import
+- 删 `seed.ts` `storyboard.autoMergeOnGenerate` setting
+- 生成永远只产单镜(`createdGroupIds` 恒空),组合全靠人工(手动 `mergeShots` endpoint + `splitGroup` 保留);发布仍 1:1 group 化供 AIGC
+- `merge.ts` 算法 + 测试保留(core 能力,生产暂不调,future 手动智能合并可接)
+
+### 三、解释分镜组合并原理(用户问)
+
+`mergeShots`(`core/storyboard/merge.ts`)= 按视频模型 `maxDurationS` 向下贪心合并相邻镜头:排序 → 累加时长不超阈值就并入下一镜 → 超则封口开新组;可选场景连续性 / S 级隔离。目的:凑满视频模型单次时长上限,省抽卡 + 连贯。(现已移除生成时自动调用)
+
+**问题/待决策**
+- ❓ `merge.ts` 算法现为生产孤立代码(只 test 用),保留作 future 手动智能合并基础 — 是否删待拍板
+- ❓ 旧组不动(只影响新生成),现有集变单镜需重新生成或手动拆分
+- ❓ mac-mini DB `autoMerge=true` 已失效(代码不读),无需清理
+
+**下次接着做**
+- 📌 端到端真打:生成 1 集验证 0 组(不自动组)
+- 📌 (可选)清理 `merge.ts` 若确定不要自动合并能力
+
+---
+
 ## 2026-06-04(周四,mac-mini · 五一次收工)— 前两轮(五十/四九)漏洞两遍审查 + 4 项加固 + 项目编辑功能(列表行入口)+ 关联剧本导入 0 集根因修 + 灵感/项目编辑/关联 Chrome 真打
 
 **完成 — 6 文件改 · typecheck 20/20 + test 全绿 · 大量 Chrome 真打**

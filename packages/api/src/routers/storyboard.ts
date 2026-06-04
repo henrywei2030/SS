@@ -13,7 +13,7 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
-import { generateStoryboard, mergeShots, type MergeableShot } from '@ss/core/storyboard';
+import { generateStoryboard } from '@ss/core/storyboard';
 import { parseScriptText } from '@ss/core/script';
 import { EVENTS } from '@ss/shared/events';
 import { getEventBus } from '@ss/adapters/eventbus';
@@ -132,7 +132,6 @@ async function getStoryboardBindings(ctx: Context): Promise<{
   modelId: string;
   maxDurationS: number;
   defaultShotDurationS: number;
-  autoMerge: boolean;
 }> {
   // r8 性能优化:storyboard bindings 高频读(每次 generateForEpisode + N 场并发都走)
   // 用 cache 缓 60s · admin.system.setSetting / admin.binding.set 后会 invalidate
@@ -147,7 +146,6 @@ async function getStoryboardBindings(ctx: Context): Promise<{
         'binding.storyboard.generation.modelId',
         'storyboard.maxDurationS',
         'storyboard.defaultShotDurationS',
-        'storyboard.autoMergeOnGenerate',
       ]);
       const out: Record<string, string> = {};
       for (const [k, v] of Object.entries(settings)) {
@@ -169,8 +167,6 @@ async function getStoryboardBindings(ctx: Context): Promise<{
     modelId,
     maxDurationS: Number(map.get('storyboard.maxDurationS') ?? '15'),
     defaultShotDurationS: Number(map.get('storyboard.defaultShotDurationS') ?? '3'),
-    // Phase 1.5.3 精炼 9:默认不自动合并组 — 用户用每行 ↑↓ 按钮手动组合
-    autoMerge: (map.get('storyboard.autoMergeOnGenerate') ?? 'false') === 'true',
   };
 }
 
@@ -1029,9 +1025,8 @@ export const storyboardRouter = router({
    * 流程：
    *   1. 找到该集的当前剧本（含 Scene 拆解）
    *   2. 对每个 Scene 调 generateStoryboard()
-   *   3. 单镜入库
-   *   4. 若 autoMerge=true，调 mergeShots 算法预合并组
-   *   5. 触发 EVENTS.STORYBOARD_GENERATED
+   *   3. 单镜入库（规则:生成不自动形成组,组合由人工在分镜工坊手动调整）
+   *   4. 触发 EVENTS.STORYBOARD_GENERATED
    */
   /**
    * 列出项目所有集的分镜 — 给"导出全部"用,一次返回省 N+1
@@ -1467,7 +1462,7 @@ export const storyboardRouter = router({
           }
 
           // 三十九收工 perf:N+1 串行 shot.create → createManyAndReturn(一集 N 镜单次往返,~50× 加速)
-          //   autoMerge 默认 false 后这是分镜生成主热路径。globalIdx/positionIdx 前置自增保持单调,
+          //   生成只产单镜(不自动组),这是主热路径。globalIdx/positionIdx 前置自增保持单调,
           //   createManyAndReturn 返回顺序跟 data 数组一致(PostgreSQL),故 createdShotIds 顺序正确。
           const shotData = result.shots.map((s) => ({
             episodeId: ep.id,
@@ -1504,67 +1499,11 @@ export const storyboardRouter = router({
         clearInterval(refreshTimer);
       }
 
-      // 7. 自动合并组（按 maxDurationS）
-      //
-      // 用 advisory lock 串行化同一 episode 的 group 写入，
-      // 防两个并发 generate 各自读到 max positionIdx=10 → 都从 11 起,撞 unique。
-      let createdGroupIds: string[] = [];
-      if (bindings.autoMerge && createdShotIds.length > 0) {
-        const allShots = await ctx.prisma.shot.findMany({
-          where: { id: { in: createdShotIds }, deletedAt: null },
-          orderBy: { positionIdx: 'asc' },
-        });
-        const merge = mergeShots(
-          allShots.map<MergeableShot>((s) => ({
-            id: s.id,
-            number: s.number,
-            durationS: s.durationS,
-            framing: s.framing ?? undefined,
-            angle: s.angle ?? undefined,
-            content: s.content,
-            prompt: s.prompt,
-            positionIdx: s.positionIdx,
-            priority: s.priority ?? undefined,
-          })),
-          {
-            maxDurationS: bindings.maxDurationS,
-            isolateSPriority: true,
-          },
-        );
-
-        createdGroupIds = await ctx.prisma.$transaction(async (tx) => {
-          await tx.$executeRawUnsafe(
-            `SELECT pg_advisory_xact_lock(hashtext('storyboard_group:' || $1)::bigint)`,
-            ep.id,
-          );
-          // 锁内读 max positionIdx,起点单调递增
-          const lastExistingGroup = await tx.shotGroup.findFirst({
-            where: { episodeId: ep.id },
-            orderBy: { positionIdx: 'desc' },
-          });
-          let gIdx = lastExistingGroup?.positionIdx ?? 0;
-          const ids: string[] = [];
-          for (const g of merge.groups) {
-            if (g.shots.length < 2) continue; // 单镜不建组
-            gIdx += 1;
-            const grp = await tx.shotGroup.create({
-              data: {
-                episodeId: ep.id,
-                number: g.number,
-                positionIdx: gIdx,
-                durationS: g.durationS,
-                prompt: g.mergedPrompt,
-              },
-            });
-            await tx.shot.updateMany({
-              where: { id: { in: g.shots.map((x) => x.id) } },
-              data: { groupId: grp.id },
-            });
-            ids.push(grp.id);
-          }
-          return ids;
-        });
-      }
+      // 规则:生成分镜后【不自动形成组】— 永远只产单镜,组合由人工在分镜工坊手动调整
+      //   (手动合并走 storyboard.mergeShots endpoint,拆分走 splitGroup)。彻底移除生成时自动
+      //   mergeShots,杜绝 autoMerge setting 各机漂移(原 mac-studio=false / mac-mini=true)。
+      //   发布(publishEpisode)时仍会把 standalone shot 1:1 group 化供 AIGC。
+      const createdGroupIds: string[] = [];
 
       await logOperation(ctx, 'storyboard.generate', 'episode', ep.id, null, {
         shotCount: createdShotIds.length,

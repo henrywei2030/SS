@@ -18,6 +18,7 @@ import {
   Lightbulb,
   Link2,
   X,
+  RotateCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -736,28 +737,18 @@ function ShotsActions({
       prev.map((e) => (e.episodeId === episodeId ? { ...e, status, error } : e)),
     );
 
-  const runBatch = async (): Promise<void> => {
-    const eligible = eligibleQuery.data ?? [];
-    if (eligible.length === 0) return;
+  // 四九收工:3 并发 worker pool — 跑指定集列表(全量生成 / 失败重试 复用),每 worker 抢下一个
+  const runPool = async (targets: { episodeId: string }[]): Promise<void> => {
+    if (targets.length === 0) return;
     cancelRef.current = false;
     setBatchRunning(true);
-    setBatchEps(
-      eligible.map((e) => ({
-        episodeNumber: e.episodeNumber,
-        episodeId: e.episodeId,
-        title: e.title,
-        status: 'pending' as const,
-      })),
-    );
-
-    // 四九收工:3 并发 worker pool — 每个 worker 抢下一个未处理集,直到队列空或被取消
     let idx = 0;
     const worker = async (): Promise<void> => {
       while (true) {
         if (cancelRef.current) return;
         const myIdx = idx++;
-        if (myIdx >= eligible.length) return;
-        const ep = eligible[myIdx];
+        if (myIdx >= targets.length) return;
+        const ep = targets[myIdx];
         if (!ep) continue;
         setEpStat(ep.episodeId, 'running');
         try {
@@ -769,7 +760,7 @@ function ShotsActions({
       }
     };
     await Promise.all(
-      Array.from({ length: Math.min(BATCH_CONCURRENCY, eligible.length) }, () => worker()),
+      Array.from({ length: Math.min(BATCH_CONCURRENCY, targets.length) }, () => worker()),
     );
     // 取消后:还没跑的 pending 标 cancelled
     if (cancelRef.current) {
@@ -779,6 +770,32 @@ function ShotsActions({
     }
     setBatchRunning(false);
     onAfterAction();
+  };
+
+  const runBatch = async (): Promise<void> => {
+    const eligible = eligibleQuery.data ?? [];
+    if (eligible.length === 0) return;
+    setBatchEps(
+      eligible.map((e) => ({
+        episodeNumber: e.episodeNumber,
+        episodeId: e.episodeId,
+        title: e.title,
+        status: 'pending' as const,
+      })),
+    );
+    await runPool(eligible);
+  };
+
+  // 失败集就地重试:把 failed 重置 pending 再跑(已成功/中断的集不动),复用同款 3 并发 pool
+  const retryFailed = async (): Promise<void> => {
+    const targets = batchEps.filter((e) => e.status === 'failed');
+    if (targets.length === 0) return;
+    setBatchEps((prev) =>
+      prev.map((e) =>
+        e.status === 'failed' ? { ...e, status: 'pending' as const, error: undefined } : e,
+      ),
+    );
+    await runPool(targets);
   };
 
   const cancelBatch = (): void => {
@@ -885,32 +902,32 @@ function ShotsActions({
           {/* 已开始:B站式进度 — 进度条 + 流光动画 + 每集状态 chip */}
           {batchStarted && (
             <div className="space-y-3">
-              <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-[hsl(var(--color-muted))]">
+              <div className="relative h-2 w-full overflow-hidden rounded-full bg-[hsl(var(--color-muted))]">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-pink-500 to-blue-500 transition-all duration-500"
+                  className="h-full rounded-full bg-[hsl(var(--color-success))] transition-all duration-500"
                   style={{
                     width: `${batchEps.length > 0 ? Math.round(((doneCount + failedEps.length) / batchEps.length) * 100) : 0}%`,
                   }}
                 />
                 {batchRunning && (
-                  <div className="absolute inset-0 animate-pulse bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+                  <div className="absolute inset-0 animate-pulse bg-gradient-to-r from-transparent via-[hsl(var(--color-foreground))]/10 to-transparent" />
                 )}
               </div>
               {batchRunning && (
                 <div className="flex items-center justify-center gap-2 py-1 text-xs text-[hsl(var(--color-muted-foreground))]">
-                  <Loader2 className="size-4 animate-spin text-pink-500" />
-                  <span className="animate-pulse">3 集并发统筹生成中,请稍候…</span>
+                  <Loader2 className="size-4 animate-spin text-[hsl(var(--color-primary))]" />
+                  <span>3 集并发生成中,请稍候…</span>
                 </div>
               )}
               <div className="flex max-h-44 flex-wrap gap-1.5 overflow-y-auto">
                 {batchEps.map((e) => {
                   const cls =
                     e.status === 'done'
-                      ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                      ? 'border-[hsl(var(--color-success))]/40 bg-[hsl(var(--color-success))]/10 text-[hsl(var(--color-success))]'
                       : e.status === 'failed'
-                        ? 'border-red-500/50 bg-red-500/15 text-red-600 dark:text-red-400'
+                        ? 'border-[hsl(var(--color-destructive))]/40 bg-[hsl(var(--color-destructive))]/10 text-[hsl(var(--color-destructive))]'
                         : e.status === 'running'
-                          ? 'border-blue-500/60 bg-blue-500/15 text-blue-700 dark:text-blue-300'
+                          ? 'border-[hsl(var(--color-primary))]/50 bg-[hsl(var(--color-primary))]/10 text-[hsl(var(--color-primary))]'
                           : e.status === 'cancelled'
                             ? 'border-[hsl(var(--color-border))] bg-[hsl(var(--color-muted))] text-[hsl(var(--color-muted-foreground))] line-through'
                             : 'border-[hsl(var(--color-border))] text-[hsl(var(--color-muted-foreground))]';
@@ -937,10 +954,10 @@ function ShotsActions({
                 })}
               </div>
               {failedEps.length > 0 && !batchRunning && (
-                <div className="max-h-24 space-y-0.5 overflow-y-auto rounded border border-red-500/40 p-2 text-[11px]">
+                <div className="max-h-24 space-y-0.5 overflow-y-auto rounded-md border border-[hsl(var(--color-destructive))]/30 bg-[hsl(var(--color-destructive))]/5 p-2 text-[11px]">
                   {failedEps.map((f) => (
-                    <div key={f.episodeId} className="text-red-500">
-                      第 {f.episodeNumber} 集: {f.error}
+                    <div key={f.episodeId} className="text-[hsl(var(--color-destructive))]">
+                      第 {f.episodeNumber} 集:{f.error}
                     </div>
                   ))}
                 </div>
@@ -955,9 +972,21 @@ function ShotsActions({
                 中断生成(进行中的集跑完即停)
               </Button>
             ) : batchStarted ? (
-              <Button size="sm" onClick={resetBatch}>
-                关闭
-              </Button>
+              <>
+                {failedEps.length > 0 && (
+                  <Button variant="default" size="sm" onClick={retryFailed} className="gap-1.5">
+                    <RotateCw className="size-3.5" />
+                    重新生成失败的 {failedEps.length} 集
+                  </Button>
+                )}
+                <Button
+                  variant={failedEps.length > 0 ? 'outline' : 'default'}
+                  size="sm"
+                  onClick={resetBatch}
+                >
+                  关闭
+                </Button>
+              </>
             ) : (
               <>
                 <Button variant="outline" size="sm" onClick={() => setBatchOpen(false)}>
