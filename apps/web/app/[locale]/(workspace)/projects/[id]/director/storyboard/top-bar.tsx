@@ -27,6 +27,8 @@ import { trpc } from '@/lib/trpc/client';
 
 type ListShotsResult = inferRouterOutputs<AppRouter>['storyboard']['listShots'];
 type PreviewResult = inferRouterOutputs<AppRouter>['script']['previewParseFile'];
+// 需求3:分镜导出格式
+type ExportFormat = 'csv' | 'txt' | 'word';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -177,7 +179,11 @@ function LinkInspirationButton({
   const [targetEp, setTargetEp] = React.useState<number>(episodeNumber);
   const utils = trpc.useUtils();
 
-  const { data: drafts } = trpc.inspiration.listDrafts.useQuery({ projectId }, { enabled: open });
+  // 需求1e:只列顶置草稿(用户标记最满意的才能关联到剧本)
+  const { data: drafts } = trpc.inspiration.listDrafts.useQuery(
+    { projectId, pinnedOnly: true },
+    { enabled: open },
+  );
   const { data: draft } = trpc.inspiration.getDraft.useQuery(
     { draftId },
     { enabled: open && !!draftId },
@@ -260,7 +266,7 @@ function LinkInspirationButton({
               </select>
               {drafts && drafts.length === 0 && (
                 <p className="mt-1 text-[11px] text-[hsl(var(--color-muted-foreground))]">
-                  还没有灵感草稿 — 去「灵感创作」tab 生成
+                  还没有顶置的灵感草稿 — 去「灵感创作」tab 生成后点 📌 顶置最满意的剧本
                 </p>
               )}
             </div>
@@ -640,19 +646,29 @@ function ShotsActions({
     onError: (e) => toast.error(e.message),
   });
 
-  const handleExportCurrent = async (): Promise<void> => {
+  const handleExportCurrent = async (format: ExportFormat): Promise<void> => {
     if (!episodeId) return;
     try {
       const data = await utils.storyboard.listShots.fetch({ episodeId, grouped: true });
-      const csv = buildShotsCsv(data, episodeNumber ?? 0);
-      downloadFile(csv, `第${episodeNumber ?? '?'}集分镜.csv`, 'text/csv;charset=utf-8;');
-      toast.success('CSV 导出完成');
+      const epn = episodeNumber ?? 0;
+      if (format === 'csv') {
+        downloadFile(buildShotsCsv(data, epn), `第${epn}集分镜.csv`, 'text/csv;charset=utf-8;');
+      } else if (format === 'txt') {
+        downloadFile(buildShotsText(data, epn), `第${epn}集分镜.txt`, 'text/plain;charset=utf-8;');
+      } else {
+        downloadFile(
+          wrapWordHtml(`第${epn}集分镜`, buildShotsHtml(data, epn)),
+          `第${epn}集分镜.doc`,
+          'application/msword',
+        );
+      }
+      toast.success(`${format.toUpperCase()} 导出完成`);
     } catch (e) {
       toast.error(`导出失败: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
 
-  const handleExportAll = async (): Promise<void> => {
+  const handleExportAll = async (format: ExportFormat): Promise<void> => {
     try {
       const data = await utils.storyboard.listShotsByProject.fetch({ projectId });
       const nonEmpty = data.episodes.filter((ep) => ep.shotCount > 0);
@@ -660,23 +676,34 @@ function ShotsActions({
         toast.warning('项目内还没有任何已生成的分镜');
         return;
       }
-      const headerRow = buildShotsCsv({ groups: [], ungrouped: [] }, 0).split('\n')[0] ?? '';
-      const bodies: string[] = [];
-      for (const ep of nonEmpty) {
-        const full = buildShotsCsv(
-          { groups: ep.groups, ungrouped: ep.ungrouped },
-          ep.episodeNumber,
+      if (format === 'csv') {
+        const headerRow = buildShotsCsv({ groups: [], ungrouped: [] }, 0).split('\n')[0] ?? '';
+        const bodies: string[] = [];
+        for (const ep of nonEmpty) {
+          const full = buildShotsCsv({ groups: ep.groups, ungrouped: ep.ungrouped }, ep.episodeNumber);
+          const lines = full.split('\n');
+          if (lines.length > 1) bodies.push(lines.slice(1).join('\n'));
+        }
+        downloadFile(
+          [headerRow, ...bodies].filter(Boolean).join('\n'),
+          `项目全部分镜(${nonEmpty.length}集).csv`,
+          'text/csv;charset=utf-8;',
         );
-        // 去掉第一行(表头),只取数据行
-        const lines = full.split('\n');
-        if (lines.length > 1) bodies.push(lines.slice(1).join('\n'));
+      } else if (format === 'txt') {
+        const txt = nonEmpty
+          .map((ep) => buildShotsText({ groups: ep.groups, ungrouped: ep.ungrouped }, ep.episodeNumber))
+          .join('\n\n\n');
+        downloadFile(txt, `项目全部分镜(${nonEmpty.length}集).txt`, 'text/plain;charset=utf-8;');
+      } else {
+        const bodies = nonEmpty
+          .map((ep) => buildShotsHtml({ groups: ep.groups, ungrouped: ep.ungrouped }, ep.episodeNumber))
+          .join('<br/><br/>');
+        downloadFile(
+          wrapWordHtml('项目全部分镜', bodies),
+          `项目全部分镜(${nonEmpty.length}集).doc`,
+          'application/msword',
+        );
       }
-      const csv = [headerRow, ...bodies].filter(Boolean).join('\n');
-      downloadFile(
-        csv,
-        `项目全部分镜(${nonEmpty.length}集).csv`,
-        'text/csv;charset=utf-8;',
-      );
       toast.success(`已导出 ${nonEmpty.length} 集分镜`);
     } catch (e) {
       toast.error(`导出失败: ${e instanceof Error ? e.message : String(e)}`);
@@ -868,14 +895,30 @@ function ShotsActions({
             <ChevronDown className="size-3" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-44">
-          <DropdownMenuItem onClick={handleExportCurrent} disabled={disabled}>
+        <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuItem onClick={() => void handleExportCurrent('word')} disabled={disabled}>
             <FileText className="mr-2 size-3.5" />
-            当前集 CSV
+            当前集 · Word
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={handleExportAll}>
+          <DropdownMenuItem onClick={() => void handleExportCurrent('txt')} disabled={disabled}>
+            <FileText className="mr-2 size-3.5" />
+            当前集 · TXT
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => void handleExportCurrent('csv')} disabled={disabled}>
+            <FileText className="mr-2 size-3.5" />
+            当前集 · CSV
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => void handleExportAll('word')}>
             <Package className="mr-2 size-3.5" />
-            全部集 CSV(合并)
+            全部集 · Word
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => void handleExportAll('txt')}>
+            <Package className="mr-2 size-3.5" />
+            全部集 · TXT
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => void handleExportAll('csv')}>
+            <Package className="mr-2 size-3.5" />
+            全部集 · CSV(合并)
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -1029,6 +1072,65 @@ function csvRow(cells: string[]): string {
       return needsQuote ? `"${escaped}"` : escaped;
     })
     .join(',');
+}
+
+// 需求3:TXT 导出 — 可读纯文本结构(组 → 组级 prompt → 各单镜)
+function buildShotsText(data: ListShotsResult, episodeNumber: number): string {
+  const groups = (data && 'groups' in data ? data.groups : undefined) ?? [];
+  const ungrouped = (data && 'ungrouped' in data ? data.ungrouped : undefined) ?? [];
+  const lines: string[] = [`第${episodeNumber}集 分镜表`, '='.repeat(28), ''];
+  const shotLines = (
+    s: { number: string; framing?: string | null; angle?: string | null; durationS: number; priority?: string | null; content: string; prompt: string },
+  ): void => {
+    lines.push(`  · 镜${s.number} [${s.framing ?? ''}/${s.angle ?? ''}] ${s.durationS.toFixed(1)}s ${s.priority ?? ''}`);
+    lines.push(`    剧本: ${s.content}`);
+    lines.push(`    提示词: ${s.prompt}`);
+  };
+  for (const g of groups) {
+    lines.push(`【组 ${g.number}】 时长 ${g.durationS.toFixed(1)}s · 状态 ${g.status}`);
+    lines.push(`组级提示词: ${g.prompt}`);
+    g.shots.forEach(shotLines);
+    lines.push('');
+  }
+  if (ungrouped.length > 0) {
+    lines.push('【未分组单镜】');
+    ungrouped.forEach(shotLines);
+  }
+  return lines.join('\n');
+}
+
+// 需求3:Word 导出 — HTML 表格(Word 可直接打开 .doc),含组级 prompt + 单镜明细
+function buildShotsHtml(data: ListShotsResult, episodeNumber: number): string {
+  const groups = (data && 'groups' in data ? data.groups : undefined) ?? [];
+  const ungrouped = (data && 'ungrouped' in data ? data.ungrouped : undefined) ?? [];
+  const esc = (s: string): string =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br/>');
+  const td = (...cells: string[]): string =>
+    `<tr>${cells
+      .map((c) => `<td style="border:1px solid #999;padding:4px;font-size:11px;vertical-align:top">${esc(c)}</td>`)
+      .join('')}</tr>`;
+  const rows: string[] = [];
+  for (const g of groups) {
+    rows.push(td(`组 ${g.number}`, '组级', '—', g.durationS.toFixed(1), '—', g.prompt, g.status));
+    g.shots.forEach((s, i) =>
+      rows.push(
+        td(`${g.number}-${i + 1}`, `${s.framing ?? ''}/${s.angle ?? ''}`, s.number, s.durationS.toFixed(1), s.priority ?? '', `${s.content}\n${s.prompt}`, s.status),
+      ),
+    );
+  }
+  for (const s of ungrouped) {
+    rows.push(
+      td('单镜', `${s.framing ?? ''}/${s.angle ?? ''}`, s.number, s.durationS.toFixed(1), s.priority ?? '', `${s.content}\n${s.prompt}`, s.status),
+    );
+  }
+  const headers = ['组/镜', '景别/角度', '镜号', '时长(s)', '优先级', '内容/提示词', '状态']
+    .map((h) => `<th style="border:1px solid #999;padding:4px;background:#eee">${h}</th>`)
+    .join('');
+  return `<h2>第${episodeNumber}集 分镜表</h2><table style="border-collapse:collapse;width:100%"><tr>${headers}</tr>${rows.join('')}</table>`;
+}
+
+function wrapWordHtml(title: string, body: string): string {
+  return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${title}</title></head><body>${body}</body></html>`;
 }
 
 function downloadFile(content: string, filename: string, mime: string): void {

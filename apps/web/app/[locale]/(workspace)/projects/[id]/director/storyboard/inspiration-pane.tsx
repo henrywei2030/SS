@@ -10,6 +10,7 @@ import {
   Trash2,
   Wand2,
   FileDown,
+  Pin,
 } from 'lucide-react';
 
 import { trpc } from '@/lib/trpc/client';
@@ -45,18 +46,27 @@ function downloadText(filename: string, text: string): void {
 
 export function InspirationPane({ projectId }: { projectId: string }): React.ReactElement {
   const utils = trpc.useUtils();
+  const togglePin = trpc.inspiration.togglePin.useMutation({
+    onSuccess: () => void utils.inspiration.listDrafts.invalidate({ projectId }),
+    onError: (e) => toast.error(`顶置失败:${e.message}`),
+  });
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [mode, setMode] = React.useState<'new' | 'detail'>('new');
+  const didInit = React.useRef(false);
 
   const { data: drafts, isLoading } = trpc.inspiration.listDrafts.useQuery({ projectId });
 
-  // 首次加载:有草稿则选第一个进详情,否则进新建
+  // 需求1a 修:首次加载有草稿 → 选第一个进详情。用 didInit ref 只跑一次,
+  //   否则用户点"新建"(setMode('new')+清 selectedId)会被本 effect 立即拉回第一个草稿,新建窗口打不开。
   React.useEffect(() => {
-    if (drafts && drafts.length > 0 && !selectedId && mode === 'new') {
-      setSelectedId(drafts[0]!.id);
-      setMode('detail');
+    if (!didInit.current && drafts !== undefined) {
+      didInit.current = true;
+      if (drafts.length > 0) {
+        setSelectedId(drafts[0]!.id);
+        setMode('detail');
+      }
     }
-  }, [drafts, selectedId, mode]);
+  }, [drafts]);
 
   const openNew = (): void => {
     setSelectedId(null);
@@ -94,24 +104,52 @@ export function InspirationPane({ projectId }: { projectId: string }): React.Rea
           )}
           {drafts?.map((d) => {
             const eps = (d.outline as unknown as OutlineEp[]) ?? [];
+            const isActive = selectedId === d.id && mode === 'detail';
             return (
-              <button
+              <div
                 key={d.id}
-                onClick={() => openDraft(d.id)}
-                className={`mb-1 w-full rounded-md border px-2.5 py-2 text-left transition-colors ${
-                  selectedId === d.id && mode === 'detail'
-                    ? 'border-blue-600 bg-blue-600/10'
-                    : 'border-transparent hover:bg-[hsl(var(--color-muted))]'
+                className={`group/d relative mb-1 rounded-md border transition-colors ${
+                  d.pinned
+                    ? 'border-amber-500/60 bg-amber-500/10'
+                    : isActive
+                      ? 'border-blue-600 bg-blue-600/10'
+                      : 'border-transparent hover:bg-[hsl(var(--color-muted))]'
                 }`}
               >
-                <div className="truncate text-xs font-medium">{d.title}</div>
-                <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-[hsl(var(--color-muted-foreground))]">
-                  <span className="rounded bg-[hsl(var(--color-secondary))] px-1">
-                    {STATUS_LABEL[d.status] ?? d.status}
-                  </span>
-                  <span>{eps.length} 集</span>
-                </div>
-              </button>
+                <button
+                  onClick={() => openDraft(d.id)}
+                  className="block w-full px-2.5 py-2 pr-7 text-left"
+                >
+                  <div className="flex items-center gap-1">
+                    {d.pinned && <Pin className="size-3 shrink-0 fill-amber-500 text-amber-500" />}
+                    <span className="truncate text-xs font-medium">{d.title}</span>
+                  </div>
+                  <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-[hsl(var(--color-muted-foreground))]">
+                    {d.pinned && (
+                      <span className="rounded bg-amber-500/20 px-1 text-amber-700 dark:text-amber-300">
+                        顶置
+                      </span>
+                    )}
+                    <span className="rounded bg-[hsl(var(--color-secondary))] px-1">
+                      {STATUS_LABEL[d.status] ?? d.status}
+                    </span>
+                    <span>{eps.length} 集</span>
+                  </div>
+                </button>
+                {/* 需求1d:顶置按钮(顶置后才能在剧本「关联剧本」选) */}
+                <button
+                  onClick={() => togglePin.mutate({ draftId: d.id })}
+                  disabled={togglePin.isPending}
+                  className={`absolute right-1 top-1.5 rounded p-0.5 transition-opacity ${
+                    d.pinned
+                      ? 'text-amber-500'
+                      : 'text-[hsl(var(--color-muted-foreground))] opacity-0 group-hover/d:opacity-100 hover:text-amber-500'
+                  }`}
+                  title={d.pinned ? '取消顶置' : '顶置 — 顶置后才能在剧本「关联剧本」选用'}
+                >
+                  <Pin className={`size-3 ${d.pinned ? 'fill-current' : ''}`} />
+                </button>
+              </div>
             );
           })}
         </div>

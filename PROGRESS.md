@@ -5,6 +5,45 @@
 
 ---
 
+## 2026-06-04(周四,mac-studio · 四十八次收工)— 灵感创作迭代(新建 bug 修/顶置/50 限制)+ 剧本覆盖语义反转 + 分镜 Word/TXT 导出
+
+**完成 — 6 文件 + 1 migration · typecheck 16/16 + test 11/11 + 关键项真打**
+
+### 触发场景
+
+用户分 3 批反馈(对四七收工灵感创作 + 剧本模块的迭代):① 灵感新建 bug + 草稿 50 上限 + 顶置标记 + 关联只列顶置 ② 剧本上传/关联覆盖语义反转 ③ 分镜导出加 Word/TXT。dev server 真打。
+
+### 需求1:灵感创作迭代
+
+- **新建 bug 修**:`inspiration-pane` 的 useEffect(`mode==='new' && !selectedId` → 自动拉回第一个草稿)跟用户点"新建"(正是设这俩)冲突,新建窗口被立即拉回 → 改 `didInit` ref 只跑一次。真打:新建表单正常打开
+- **草稿上限 50**:generateOutline 前 count 检查 ≥50 抛 PRECONDITION_FAILED
+- **顶置(pinned)**:InspirationDraft 加 `pinned` 字段 + migration `20260604120000_inspiration_draft_pinned` + `togglePin` procedure + listDrafts `orderBy [{pinned desc},{updatedAt desc}]`;前端金色 📌 图标/边框/"顶置"标签/顶置按钮。真打 ✓
+- **关联只列顶置**:listDrafts 加 `pinnedOnly` 参数 + LinkInspirationButton 传 `pinnedOnly:true`。真打:关联下拉只列顶置的"代码成神"
+
+### 需求2:剧本覆盖语义反转(跟四七收工相反)
+
+- **上传/关联覆盖所有**:移除 uploadMultiEpisode 的 `skipIfLocked` + lockedCurrent 检查 → 重传时所有集覆盖(不管发布/锁定,以最新为准)
+- **清空全部仅留分集列表锁定**:deleteAllForProject 保护逻辑从 publishedAt + Script.lockedAt → 改成只保护 `Episode.batchLocked`(分集列表 🔒)+ 生成中;**含已发布也清**。前端 dialog 文案 + toast 同步
+
+### 需求3:分镜 Word/TXT 导出
+
+- top-bar 导出菜单从 2 项(当前/全部 CSV)→ **6 项**(当前集/全部集 × Word/TXT/CSV)
+- 新建 `buildShotsText`(可读纯文本:组→组级 prompt→各单镜)+ `buildShotsHtml`(HTML 表格)+ `wrapWordHtml`(Word 可直接打开 .doc,application/msword,**无需额外库**)。真打:菜单 6 项
+
+### 验证
+
+typecheck 16/16 + test 11/11 + Chrome 真打(新建打开 / 顶置金色高亮 / 关联只列顶置下拉 / 导出 6 项菜单)。需求2b/2c 逻辑反转由 typecheck 保证(真打需 docx 重传 + 锁定场景)。
+
+**问题/待决策**
+- ❓ test 项目 59 集被四七收工前的 deleteAllForProject 软删(ARCHIVED · 可恢复)— 用户拍板**保持现状不恢复**(视为测试数据)
+- ❓ 需求2 覆盖/清空语义已反转,跟四七收工日志记的相反 — 以本次为准
+
+**下次接着做**
+- 📌 灵感 prompt 后台精调 + 真打多集批量展开 / 全剧 Word 导出
+- 📌 测真 AIGC 视频抽卡(prod env gate 后需 provider 真配)/ 60 集压测
+
+---
+
 ## 2026-06-04(周四,mac-studio · 四十七次收工)— 导演「灵感创作」子模块(想法→LLM 多集剧本)+ 布局/清空调整 + 后台节点暴露
 
 **完成 — 新表 + 新 router + 新 UI · 11 文件 · typecheck 16/16 + test 11/11 + 真打全链路 gemini-flash 真生成**

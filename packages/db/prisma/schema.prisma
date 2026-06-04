@@ -215,6 +215,7 @@ model InspirationDraft {
   outline   Json? // [{number, title, synopsis}] 多集大纲
   episodes  Json    @default("[]") // [{number, title, content}] 各集已展开剧本
   status    String  @default("DRAFT") // DRAFT / OUTLINE_DONE / DONE
+  pinned    Boolean @default(false) // 需求1d:顶置(最满意)— 只有顶置草稿能在剧本「关联剧本」选用
   modelId   String?
   createdBy String
 

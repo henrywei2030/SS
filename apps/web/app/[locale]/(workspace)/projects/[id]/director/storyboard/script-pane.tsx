@@ -26,9 +26,9 @@ function ClearAllProjectButton({ projectId }: { projectId: string }): React.Reac
   const utils = trpc.useUtils();
   const clear = trpc.script.deleteAllForProject.useMutation({
     onSuccess: (res) => {
-      const skipped = res.skippedGenerating + res.skippedPublished + res.skippedLocked;
+      const skipped = res.skippedGenerating + res.skippedLocked;
       toast.success(
-        `已清空 ${res.cleared} 集剧本${skipped > 0 ? ` · ${skipped} 集保留(已发布/锁定/生成中)` : ''}`,
+        `已清空 ${res.cleared} 集剧本${skipped > 0 ? ` · ${skipped} 集保留(分集列表锁定/生成中)` : ''}`,
       );
       setOpen(false);
       void utils.script.listVersions.invalidate();
@@ -55,7 +55,7 @@ function ClearAllProjectButton({ projectId }: { projectId: string }): React.Reac
             <DialogDescription>
               软删本项目<b>所有集</b>的剧本 + 分集列表(级联清场景/分镜)。
               <br />
-              已发布 / 锁定 / 正在生成的集会自动保留。
+              仅<b>分集列表锁定</b>(🔒)及正在生成的集保留 — <b>含已发布的集也会清空</b>。
               <br />
               数据库 deletedAt 标记可手动恢复。
             </DialogDescription>

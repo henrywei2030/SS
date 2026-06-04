@@ -160,6 +160,16 @@ export const inspirationRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId);
+      // 需求1b:灵感草稿上限 50
+      const draftCount = await ctx.prisma.inspirationDraft.count({
+        where: { projectId: input.projectId, deletedAt: null },
+      });
+      if (draftCount >= 50) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '灵感草稿已达上限 50 个 — 请先删除一些再新建',
+        });
+      }
       const modelId = await resolveModelId(ctx.prisma);
       const provider = await getTextProvider(modelId);
       const system = await loadPrompt(ctx.prisma, 'inspiration_outline', OUTLINE_FALLBACK);
@@ -337,22 +347,53 @@ export const inspirationRouter = router({
 
   /** 3. 列出项目的灵感草稿 */
   listDrafts: protectedProcedure
-    .input(z.object({ projectId: z.string().cuid() }))
+    .input(
+      z.object({
+        projectId: z.string().cuid(),
+        // 需求1e:剧本「关联剧本」只列顶置草稿
+        pinnedOnly: z.boolean().optional(),
+      }),
+    )
     .query(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId);
       return ctx.prisma.inspirationDraft.findMany({
-        where: { projectId: input.projectId, deletedAt: null },
-        orderBy: { updatedAt: 'desc' },
+        where: {
+          projectId: input.projectId,
+          deletedAt: null,
+          ...(input.pinnedOnly ? { pinned: true } : {}),
+        },
+        // 需求1d:顶置优先,其次按更新时间
+        orderBy: [{ pinned: 'desc' }, { updatedAt: 'desc' }],
         select: {
           id: true,
           title: true,
           idea: true,
           status: true,
+          pinned: true,
           outline: true,
+          episodes: true,
           createdAt: true,
           updatedAt: true,
         },
       });
+    }),
+
+  /** 需求1d:切换顶置(最满意标记)— 只有顶置草稿能在剧本「关联剧本」选用 */
+  togglePin: protectedProcedure
+    .input(z.object({ draftId: z.string().cuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const draft = await ctx.prisma.inspirationDraft.findFirst({
+        where: { id: input.draftId, deletedAt: null },
+        select: { id: true, projectId: true, pinned: true },
+      });
+      if (!draft) throw new TRPCError({ code: 'NOT_FOUND', message: '灵感草稿不存在' });
+      await assertProjectAccess(ctx, draft.projectId);
+      const updated = await ctx.prisma.inspirationDraft.update({
+        where: { id: draft.id },
+        data: { pinned: !draft.pinned },
+        select: { id: true, pinned: true },
+      });
+      return updated;
     }),
 
   /** 4. 单个草稿详情(含各集内容) */

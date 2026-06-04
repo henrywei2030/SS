@@ -481,33 +481,8 @@ export const scriptRouter = router({
       }> = [];
 
       for (const b of boundaries) {
-        // 需求2B:已锁定 current 的集不复活/不改 title — 重新上传时锁定集完全保留。
-        //   先查该集是否存在且 current 锁定,锁定则跳过整个 upsert + createNextVersion。
-        const existingEp = await ctx.prisma.episode.findUnique({
-          where: { projectId_number: { projectId: input.projectId, number: b.episodeNumber } },
-          select: { id: true, deletedAt: true },
-        });
-        if (existingEp && !existingEp.deletedAt) {
-          const lockedCurrent = await ctx.prisma.script.findFirst({
-            where: { episodeId: existingEp.id, isCurrent: true, deletedAt: null, lockedAt: { not: null } },
-            select: { id: true, version: true },
-          });
-          if (lockedCurrent) {
-            results.push({
-              episodeNumber: b.episodeNumber,
-              title: b.title,
-              scriptId: lockedCurrent.id,
-              version: lockedCurrent.version,
-              created: false,
-              skippedLocked: true,
-              sceneCount: b.sceneCount,
-            });
-            continue;
-          }
-        }
-
-        // Phase 1.5.3 bugfix:upsert 若命中软删 Episode(deletedAt!=null),复活它
-        // 否则用户删了的集再上传会更新 title 但留 deletedAt,导致 listEpisodes 看不到
+        // 需求2:重新上传**覆盖所有集**(不管发布/锁定等一切情况)— 以最新上传内容为准。
+        // Phase 1.5.3 bugfix:upsert 命中软删 Episode(deletedAt!=null)时复活它。
         const episode = await ctx.prisma.episode.upsert({
           where: {
             projectId_number: { projectId: input.projectId, number: b.episodeNumber },
@@ -531,7 +506,6 @@ export const scriptRouter = router({
           content: b.content,
           language: input.language,
           source: 'UPLOAD',
-          skipIfLocked: true,
         });
 
         results.push({
@@ -661,28 +635,21 @@ export const scriptRouter = router({
           number: true,
           status: true,
           generatingStartedAt: true,
-          publishedAt: true,
+          batchLocked: true,
         },
       });
       const now = new Date();
       let cleared = 0;
       let skippedGenerating = 0;
-      let skippedPublished = 0;
       let skippedLocked = 0;
       for (const ep of episodes) {
+        // 生成分镜中 → 保护(worker 在跑,清了会孤儿;非用户意图的技术约束)
         if (isEpisodeLockedNow(ep)) {
           skippedGenerating++;
           continue;
         }
-        if (ep.publishedAt) {
-          skippedPublished++;
-          continue;
-        }
-        const lockedCurrent = await ctx.prisma.script.findFirst({
-          where: { episodeId: ep.id, isCurrent: true, deletedAt: null, lockedAt: { not: null } },
-          select: { id: true },
-        });
-        if (lockedCurrent) {
+        // 需求2c:仅保护"分集列表锁定"(Episode.batchLocked),其余一切情形(含已发布/版本锁定)全清
+        if (ep.batchLocked) {
           skippedLocked++;
           continue;
         }
@@ -718,11 +685,10 @@ export const scriptRouter = router({
       await logOperation(ctx, 'script.delete.all.project', 'project', input.projectId, null, {
         cleared,
         skippedGenerating,
-        skippedPublished,
         skippedLocked,
         total: episodes.length,
       });
-      return { cleared, skippedGenerating, skippedPublished, skippedLocked, total: episodes.length };
+      return { cleared, skippedGenerating, skippedLocked, total: episodes.length };
     }),
 
   /**
