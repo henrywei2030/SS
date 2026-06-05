@@ -24,6 +24,7 @@
     "@ss/shared": "workspace:*",
     "bcryptjs": "^2.4.3",
     "jose": "^5.9.6",
+    "jsonrepair": "^3.14.0",
     "mime-types": "^2.1.35",
     "undici": "^6.20.1",
     "zod": "^3.23.8"

@@ -13,6 +13,8 @@
  *
  * 全部失败返回 undefined,交给业务层(配合 TextResult.truncated 判断是截断还是格式问题)。
  */
+import { jsonrepair } from 'jsonrepair';
+
 export function tryParseLlmJson(content: string): unknown {
   if (!content) return undefined;
 
@@ -44,12 +46,22 @@ export function tryParseLlmJson(content: string): unknown {
   // 4. 裸花括号:首个 { 到最后一个 }
   const start = content.indexOf('{');
   const end = content.lastIndexOf('}');
-  if (start >= 0 && end > start) {
+  const candidate = start >= 0 && end > start ? content.slice(start, end + 1) : null;
+  if (candidate) {
     try {
-      return JSON.parse(content.slice(start, end + 1));
+      return JSON.parse(candidate);
     } catch {
-      /* 留给业务层处理 */
+      /* fall through */
     }
+  }
+
+  // 5. jsonrepair 修 broken JSON(灵感真打 2026-06:LLM 在中文字符串值内塞未转义半角双引号、
+  //    尾逗号、单引号等 — 前 4 级只处理 markdown 包裹,救不了「内容本身非法」)。
+  //    对裸花括号子串优先(去 markdown 噪声),没有则用剥 fence 后的 cleaned。
+  try {
+    return JSON.parse(jsonrepair(candidate ?? cleaned));
+  } catch {
+    /* 留给业务层处理 */
   }
 
   return undefined;

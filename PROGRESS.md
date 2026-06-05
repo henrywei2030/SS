@@ -5,6 +5,40 @@
 
 ---
 
+## 2026-06-05(周五,mac-studio · 五四次收工)— 灵感真打修复:jsonrepair 根治 broken JSON + 大纲可编辑/加宽 + 点击回归修 + 全局字号 +2
+
+**完成 — 7 文件改 · typecheck 16/16 + test 107 全过 · 灵感链路真打验证通过**
+
+开工真打灵感创作(承五三"端到端真打灵感链路"),连环发现 + 修 4 项。
+
+### 一、灵感大纲生成"没反应"根因 + jsonrepair+prompt 双保险(真打 P0)
+用户真打点"生成分集大纲"无反应。查 dev 日志:后端收到请求、LLM(claude-sonnet-4-6)正常返回(finish_reason=stop 非截断 —— 五三 #5 加的日志正好帮排除截断),但 **JSON 解析失败**:synopsis 值内塞未转义半角双引号(`就要"斩妖除魔"`)破坏 JSON,4 级 fallback(只处理 markdown 包裹)救不了。**用户选 jsonrepair+prompt 双保险**:
+- **jsonrepair**(`pnpm add` @ss/adapters):`tryParseLlmJson` 加第 5 级,修未转义引号/尾逗号/单引号等 broken JSON。实测那条 broken JSON → 成功解析 3 集;正常 JSON / markdown fence 回归正常;纯文本仍 undefined。惠及灵感 + 分镜所有 JSON 链路
+- **prompt 约束**:`inspiration_outline`(OUTLINE_FALLBACK + seed + 本机 `db:sync:prompts`)加"字符串值严禁半角双引号,强调用「」《》"。只 outline 产 JSON(episode/batch 是 screenplay 文本不受影响)
+- **真打验证通过**:重新生成《公主逃进异时空》7 集大纲成功,synopsis 用「几钱几两」「奉命护送」中文引号(prompt 生效)
+
+### 二、大纲列 UX:加宽 + 完整显示 + 可编辑保存(用户需求)
+- 大纲列 `w-72`→`w-[36rem]`(2 倍);synopsis 去 `line-clamp-2` 改 `whitespace-pre-wrap` 完整显示
+- 每集梗概加"编辑"按钮 → textarea + 保存/取消,保存调 `updateDraft({outline})` 持久化
+- 后端 `inspiration.updateDraft` 新增 `outline` 字段(原只 title/episodes)
+
+### 三、点击集数不显示内容回归修(用户报)
+二的卡片重构把可点区缩到标题行,点完整 synopsis 落 button 外无反应。修:整卡 `div onClick` setActiveEp + cursor-pointer,编辑/展开/保存按钮加 `stopPropagation` 防误触发选中
+
+### 四、全局字号 +2(用户需求)
+项目大量用 `text-[Npx]` 绝对值(text-[10px]×185 等)+ Tailwind `text-*` rem。globals.css:body 15→17 + 全局 `text-[9~26px]` + `text-xs/sm/base/lg/xl/2xl` 显式 +2px 映射(!important,对齐 admin-pane 模式)。只放大字号不动 rem spacing(布局不整体撑大);admin-pane 特异性更高保持原样
+
+**问题/待决策**
+- ❓ 全局字号 +2 范围大(影响所有页面),紧凑处(chip/表格)可能需个别回调
+- ❓ jsonrepair 兜底"修复"极端 broken JSON 时可能歧义(罕见),正常 LLM 输出 + prompt 约束下基本不触发
+
+**下次接着做**
+- 📌 继续灵感→剧本→分镜端到端真打(展开本集剧本 / 关联剧本 / 分镜生成)
+- 📌 字号放大后扫一遍各页面紧凑布局是否需微调
+- 📌 五三留项:批量分镜 #3/#4、视频 SSE #9、A3 拍板
+
+---
+
 ## 2026-06-04(周四,mac-studio · 五三次收工)— 三遍全盘代码审查 + 修复全部 20 项逻辑优化/调整(7 真 bug + 5 加固 + 8 整洁)
 
 **完成 — 19 文件改(含 1 新建 parse-llm-json.ts)· typecheck 16/16 + test 107 全过 · sanitizeErrorMsg 功能+ReDoS 实测**

@@ -316,6 +316,9 @@ function DraftDetail({
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   // 四九收工:全部展开进度(前端循环驱动分块,实时进度条防卡死误判)
   const [batchProgress, setBatchProgress] = React.useState<{ done: number; total: number } | null>(null);
+  // 大纲可人工修改(2026-06):正在编辑哪一集的 synopsis + 编辑中的文本
+  const [editingNum, setEditingNum] = React.useState<number | null>(null);
+  const [editText, setEditText] = React.useState('');
 
   const genEp = trpc.inspiration.generateEpisode.useMutation({
     onSuccess: () => onChanged(),
@@ -329,6 +332,15 @@ function DraftDetail({
       onDeleted();
     },
     onError: (e) => toast.error(`删除失败:${e.message}`),
+  });
+  // 大纲可人工修改(2026-06):保存某集 synopsis 改动到 draft.outline
+  const saveOutline = trpc.inspiration.updateDraft.useMutation({
+    onSuccess: () => {
+      toast.success('大纲已保存');
+      setEditingNum(null);
+      onChanged();
+    },
+    onError: (e) => toast.error(`保存失败:${e.message}`),
   });
 
   if (isLoading || !draft) {
@@ -351,6 +363,12 @@ function DraftDetail({
       parts.push(ep?.content || `(本集尚未展开)\n梗概:${o.synopsis}`);
     }
     downloadText(`${draft.title}.txt`, parts.join('\n'));
+  };
+
+  // 大纲可人工修改:把编辑中的 synopsis 合并回 outline 数组保存
+  const saveOutlineSynopsis = (num: number): void => {
+    const next = outline.map((o) => (o.number === num ? { ...o, synopsis: editText } : o));
+    saveOutline.mutate({ draftId, outline: next });
   };
 
   // 四九收工:某一集是否正在生成(spinner 精确到该集,不再全部一起转)
@@ -458,40 +476,83 @@ function DraftDetail({
       {/* 主体:大纲列表 + 选中集内容 */}
       <div className="flex min-h-0 flex-1">
         {/* 大纲各集 */}
-        <div className="w-72 shrink-0 overflow-auto border-r border-[hsl(var(--color-border))] p-2">
+        <div className="w-[36rem] shrink-0 overflow-auto border-r border-[hsl(var(--color-border))] p-2">
           {outline.map((o) => {
             const ep = epByNum.get(o.number);
             const done = !!ep?.content;
             return (
               <div
                 key={o.number}
-                className={`mb-1.5 rounded-md border px-2.5 py-2 ${
+                onClick={() => setActiveEp(o.number)}
+                className={`mb-1.5 cursor-pointer rounded-md border px-2.5 py-2 ${
                   activeEp === o.number
                     ? 'border-blue-600 bg-blue-600/10'
-                    : 'border-[hsl(var(--color-border))]'
+                    : 'border-[hsl(var(--color-border))] hover:border-[hsl(var(--color-muted-foreground))]'
                 }`}
               >
-                <button onClick={() => setActiveEp(o.number)} className="block w-full text-left">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium">
-                      第{o.number}集 · {o.title}
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">
+                    第{o.number}集 · {o.title}
+                  </span>
+                  {done ? (
+                    <span className="shrink-0 rounded bg-emerald-500/20 px-1 text-[10px] text-emerald-700 dark:text-emerald-300">
+                      已展开
                     </span>
-                    {done ? (
-                      <span className="shrink-0 rounded bg-emerald-500/20 px-1 text-[9px] text-emerald-700 dark:text-emerald-300">
-                        已展开
-                      </span>
-                    ) : (
-                      <span className="shrink-0 rounded bg-[hsl(var(--color-secondary))] px-1 text-[9px] text-[hsl(var(--color-muted-foreground))]">
-                        未展开
-                      </span>
-                    )}
+                  ) : (
+                    <span className="shrink-0 rounded bg-[hsl(var(--color-secondary))] px-1 text-[10px] text-[hsl(var(--color-muted-foreground))]">
+                      未展开
+                    </span>
+                  )}
+                </div>
+                {/* 大纲梗概:完整显示(不再截断)+ 可人工编辑保存。编辑/展开按钮 stopPropagation 防触发选中 */}
+                {editingNum === o.number ? (
+                  <div className="mt-1" onClick={(e) => e.stopPropagation()}>
+                    <textarea
+                      value={editText}
+                      onChange={(e) => setEditText(e.target.value)}
+                      rows={5}
+                      autoFocus
+                      className="w-full resize-y rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] p-2 text-xs leading-relaxed"
+                    />
+                    <div className="mt-1 flex gap-1.5">
+                      <button
+                        onClick={() => saveOutlineSynopsis(o.number)}
+                        disabled={saveOutline.isPending}
+                        className="inline-flex items-center gap-1 rounded bg-blue-600 px-2 py-0.5 text-[11px] text-white hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {saveOutline.isPending ? <Loader2 className="size-2.5 animate-spin" /> : null}
+                        保存
+                      </button>
+                      <button
+                        onClick={() => setEditingNum(null)}
+                        className="rounded border border-[hsl(var(--color-border))] px-2 py-0.5 text-[11px] hover:bg-[hsl(var(--color-muted))]"
+                      >
+                        取消
+                      </button>
+                    </div>
                   </div>
-                  <p className="mt-0.5 line-clamp-2 text-[10px] text-[hsl(var(--color-muted-foreground))]">
-                    {o.synopsis}
-                  </p>
-                </button>
+                ) : (
+                  <div className="mt-0.5 flex items-start justify-between gap-1.5">
+                    <p className="whitespace-pre-wrap text-xs leading-relaxed text-[hsl(var(--color-muted-foreground))]">
+                      {o.synopsis}
+                    </p>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingNum(o.number);
+                        setEditText(o.synopsis);
+                      }}
+                      className="shrink-0 rounded border border-[hsl(var(--color-border))] px-1.5 py-0.5 text-[10px] text-[hsl(var(--color-muted-foreground))] hover:bg-[hsl(var(--color-muted))]"
+                    >
+                      编辑
+                    </button>
+                  </div>
+                )}
                 <button
-                  onClick={() => genEp.mutate({ draftId, episodeNumber: o.number })}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    genEp.mutate({ draftId, episodeNumber: o.number });
+                  }}
                   disabled={anyGenning}
                   className="mt-1.5 inline-flex items-center gap-1 rounded border border-[hsl(var(--color-border))] px-1.5 py-0.5 text-[10px] hover:bg-[hsl(var(--color-muted))] disabled:opacity-50"
                 >
