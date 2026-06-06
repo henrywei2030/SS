@@ -16,6 +16,7 @@
 - **再次生成失败修复**:`MediaItem.sourceRef` 的 AIGC partial unique(`media_items_aigc_source_ref_uniq`,20260524 为防双写加)挡住同资产第二张候选(`sourceRef=asset.id` 撞唯一)→ 新 migration `20260607030000_drop_media_aigc_source_ref_unique` 删之(已 deploy)。候选池本就一资产多候选;listCandidates 靠 outputMediaIds、confirmCandidate 靠 sourceRef 值校验,不依赖唯一。
 - **三视图一步到位**:「已确认三视图」tab 下加按钮「用形象图生成三视图」—— 以已确认 portrait 为参考图(图生图 /images/edits)+ 三视图 prompt 生成。**临时脚本真打验证 /images/edits 对 moyu Seedream 走通**(image[] multipart,出图 cost 0.22,无需调格式)。
 - **美术缩图**:候选卡 + 已确认槽改 `object-contain` + 限高(52vh/44vh)→ 一屏看完整图。
+- **收费口径对齐 moyu 实收**:核对 moyu 账单 —— seedream 图 ¥0.22/张 ✓ 本就一致;claude-sonnet-4-6 文本我们记 ¥0.519 vs moyu 实收 ¥0.889(偏低 ~58%)。反推 moyu 公式 `(输入 + 输出×5) × 模型倍率 / 1e6`(三条数据精确命中):根因 = `modelRate` 还是 2026-05-24 文档价 **7.486**,moyu 已涨到 **12.83**(outputRate=5 不变)。修 `relay-catalogs.json` + DB `provider_configs.modelRate` 7.486→12.83 + `moyu-pricing.md` 标注;重算 **¥0.889337 = moyu 实收精确一致**。**⚠️ 仅核过 sonnet-4-6 + seedream;haiku/gemini/gpt-5.5/opus/gpt-image-2 的 catalog 价同源 2026-05-24,moyu 可能也涨,用到时按实际账单再校。**(DB modelRate 是各机独立配置,本机已改;别机用到 sonnet-4-6 需各自在 /admin/providers 或重新从 catalog 添加同步到 12.83)
 
 ### 一、剧本管理界面重构(用户:4 tab 不齐 + 拆解来源应是仓库 + UI 质感)
 - **导演 4 tab 统一靠左**(根因:`storyboard-workspace` 把 TopBar 渲染在 grid 右列 → 剧本管理/分镜工坊被 260px 侧栏挤右)→ 改 flex-col,**TopBar 提到 grid 之上全宽行**,tab 永远最左。
