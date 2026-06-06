@@ -126,6 +126,7 @@ export function TopNav({
               ? [
                   // 三十六收工 UX 改造:导演 = storyboard 的 tab(灵感 / 剧本 / 分镜)
                   //   四九收工:灵感创作提到第一顺位(想法 → 多集剧本是创作起点)
+                  //   五六收工:加「剧本拆解」(P1 后端就绪 → P2 前端落地,接 asset.list/update/createRelation 等)
                   {
                     href: `/${locale}/projects/${projectId}/director/storyboard?tab=inspiration`,
                     label: '灵感创作',
@@ -133,6 +134,10 @@ export function TopNav({
                   {
                     href: `/${locale}/projects/${projectId}/director/storyboard?tab=script`,
                     label: '剧本管理',
+                  },
+                  {
+                    href: `/${locale}/projects/${projectId}/director/storyboard?tab=breakdown`,
+                    label: '剧本拆解',
                   },
                   {
                     href: `/${locale}/projects/${projectId}/director/storyboard?tab=shots`,

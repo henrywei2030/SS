@@ -731,16 +731,78 @@ export const assetRouter = router({
         },
       };
       const spec = FIELD_SPEC[input.field];
-      const result = await provider.generate(
-        {
-          system: '你是资深编剧 / 人物设定师。基于已知人物信息补全指定字段。严格只输出要求的内容,不要解释。',
-          prompt: `【已知人物信息】\n${known}\n\n【任务】${spec.task}`,
-          maxTokens: 1000,
-          temperature: 0.85,
-          ...(spec.json ? { jsonSchema: {} } : {}),
+
+      // 五六收工:补 GenerationAttempt 审计行(对齐 asset.breakdown 的 TEXT 链路)。
+      //   原本调 LLM 不留 attempt,BaseProvider 写的 ledger 行 attemptId 为空、无法回溯。
+      //   建 attempt + 传 attemptId 让 ledger 关联;不传 skipLedger(保持原计费,纯增审计)。
+      const attemptStartedAt = new Date();
+      const attempt = await ctx.prisma.generationAttempt.create({
+        data: {
+          projectId: asset.projectId,
+          assetId: asset.id,
+          providerId: modelId,
+          modelId,
+          action: 'TEXT',
+          inputJson: { kind: 'asset.generateProfileField', field: input.field },
+          outputMediaIds: [],
+          inputUnits: 0,
+          outputUnits: 0,
+          unitPriceCny: '0',
+          costCny: '0',
+          status: 'RUNNING',
+          startedAt: attemptStartedAt,
+          createdBy: ctx.user.id,
         },
-        { userId: ctx.user.id, projectId: asset.projectId, assetId: asset.id },
-      );
+      });
+
+      let result;
+      try {
+        result = await provider.generate(
+          {
+            system: '你是资深编剧 / 人物设定师。基于已知人物信息补全指定字段。严格只输出要求的内容,不要解释。',
+            prompt: `【已知人物信息】\n${known}\n\n【任务】${spec.task}`,
+            maxTokens: 1000,
+            temperature: 0.85,
+            ...(spec.json ? { jsonSchema: {} } : {}),
+          },
+          { userId: ctx.user.id, projectId: asset.projectId, assetId: asset.id, attemptId: attempt.id },
+        );
+      } catch (e) {
+        const failedAt = new Date();
+        // 对齐 breakdown:errMsg 入库 + throw 前脱敏(防真接 Provider 泄漏 URL/token)
+        console.error('[asset.generateProfileField] LLM failed (raw):', e);
+        const errMsg = sanitizeErrorMsg(e);
+        await ctx.prisma.generationAttempt.update({
+          where: { id: attempt.id },
+          data: {
+            status: 'FAILED',
+            errorMsg: errMsg,
+            finishedAt: failedAt,
+            durationMs: failedAt.getTime() - attemptStartedAt.getTime(),
+          },
+        });
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: errMsg || 'AI 生成失败',
+          cause: e,
+        });
+      }
+
+      // json 字段解析失败(result.json == null)记 FAILED,但仍返回让前端拿 warning 重试
+      const parseFailed = spec.json && result.json == null;
+      const finishedAt = new Date();
+      await ctx.prisma.generationAttempt.update({
+        where: { id: attempt.id },
+        data: {
+          status: parseFailed ? 'FAILED' : 'SUCCESS',
+          errorMsg: parseFailed ? 'AI 输出解析失败' : null,
+          inputUnits: result.inputTokens,
+          outputUnits: result.outputTokens,
+          costCny: result.costCny.toFixed(4),
+          finishedAt,
+          durationMs: finishedAt.getTime() - attemptStartedAt.getTime(),
+        },
+      });
 
       let value: unknown;
       if (input.field === 'mbti' || input.field === 'monologue') {
@@ -768,7 +830,7 @@ export const assetRouter = router({
       return {
         field: input.field,
         value,
-        warning: spec.json && result.json == null ? 'AI 输出解析失败,请重试' : undefined,
+        warning: parseFailed ? 'AI 输出解析失败,请重试' : undefined,
       };
     }),
 
@@ -808,6 +870,22 @@ export const assetRouter = router({
       });
       return { syncedCount: result.count };
     }),
+
+  /**
+   * 列出所有 active IMAGE Provider — 五六收工:美术工坊视觉生成器图片模型下拉
+   *
+   * 对齐 aigc.listVideoProviders 模式。原 GenerationPanel hardcode 3 个占位模型
+   * (nano-banana-pro / gpt-image-2 / seedance-2.0),与真实 ProviderConfig 脱节。
+   * 改读真实配置:默认空 = 用 binding.asset.image.providerId,用户可切换后传 input.modelId 覆盖。
+   */
+  listImageProviders: protectedProcedure.query(async ({ ctx }) => {
+    const rows = await ctx.prisma.providerConfig.findMany({
+      where: { kind: 'IMAGE', isActive: true },
+      orderBy: [{ providerId: 'asc' }],
+      select: { providerId: true, displayName: true },
+    });
+    return rows;
+  }),
 
   /**
    * 从剧本拆解资产 — 调 LLM

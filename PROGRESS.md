@@ -5,6 +5,49 @@
 
 ---
 
+## 2026-06-06(周六,mac-studio · 五六次收工)— 剧本拆解板块 P2 前端全套 + 美术工坊接同份 Asset + 环境修复(pnpm 缺失)
+
+**完成 — typecheck 16/16 + test 25/25 · 改 8 文件 + 新建 2 文件 · 承五五 P1 后端,P2 前端全落地**
+
+开工先修环境,再把五五留的「P2 前端全部待做」一次清完(含我主动收尾的两项可选)。
+
+### 〇、环境修复:mac-studio `pnpm: command not found`
+开工跑 `pnpm start` 报 `command not found`。根因 = **nvm 多版本**:当前激活 node v24.16.0,但 pnpm 当初全局装在 v24.14.0 下,不跨版本跟随。用 **corepack 修**(node 自带,按项目 `packageManager: pnpm@9.12.0` 字段提供):`corepack enable` + `corepack prepare pnpm@9.12.0 --activate` → v24.16.0 下建 pnpm shim,锁 9.12.0。各机独立环境问题,不入 git。**以后再 nvm 切新 node 版本同样要重跑 `corepack enable`**。
+
+### 一、导演「剧本拆解」子模块(P2 前端核心)
+- `top-nav.tsx`:导演 HoverNav 加「剧本拆解」(链 `?tab=breakdown`)
+- `storyboard-workspace.tsx`:`Tab` 类型 + rawTab 解析加 `breakdown`;剧本拆解 tab 跟灵感创作一样**项目级隐藏分集左栏**(grid-cols-1)
+- `storyboard/page.tsx`:SSR initialTab 注入 breakdown/inspiration(防初始闪烁)
+- `top-bar.tsx`:`TabKey` 类型 + 「剧本拆解」TabButton(Users 图标)
+- **新建 `script-breakdown-pane.tsx`** 三栏文字界面:左=资产列表(人物/场景/道具类型 tab + 同步视图切换 + 新建)/ 中=档案编辑(姓名/角色定位/外观/prompt + 性别/年龄/身高/MBTI/性格标签/独白/人生节点/嗓音,**每项「AI 生成」** 调 `generateProfileField` 落本地态审阅后存)/ 右=关联列表(`listRelations`/`createRelation`/`deleteRelation` + 方向徽章)+ 「同步到美术工坊」(单个/全部 `syncToArt`)
+
+### 二、美术工坊:接同一份 Asset(图2 人物详情 = 同步来的文字 + 生图)
+- `breakdown-dialog.tsx`:**修 drift bug** —— `DraftItem` 改从 `inferRouterOutputs` 推(后端 `AssetDraft` 加字段前端自动同步),`handleImport` 透传 `archetypeKey/gender/age/heightCm`(原静默丢弃)+ 预览 UI 加档案徽章;删不再用的本地 `AssetType`
+- `asset-edit-dialog.tsx` InfoPanel:加「角色档案(剧本拆解同步)」区(CHARACTER),性别/年龄/身高/MBTI/性格/独白/人生节点/嗓音可看可改 + 「已同步/未同步」徽章,整进现有 diff-patch 保存(`profileJson` 整体覆盖语义);**锁定态也可改档案**(后端 lock blockedFields 不含这些)
+- **图片模型下拉改读真实 Provider**(原 hardcode nano-banana-pro/gpt-image-2/seedance-2.0 占位):接新 `asset.listImageProviders`,默认空=用 binding
+- `art-workspace.tsx`:**同步闸筛选**(全部/已同步/未同步)→ `asset.list({syncFilter})`。**用户拍板默认「全部」不回归**(直接 synced-only 会让美术侧直接建的资产消失);筛选下为空时给准确提示 + 一键查看全部
+
+### 三、抽共享模块(DRY)
+**新建 `components/asset-profile-fields.tsx`**:`LifeNodesEditor` + `Gender/LifeNode` 类型 + `GENDER_LABEL` + `parseProfileJson/buildProfileJson`(整体覆盖 helper)。导演 `script-breakdown-pane` 和美术 `asset-edit-dialog` 共用,杜绝两套实现 drift。
+
+### 四、后端两项收尾(packages/api/src/routers/asset.ts)
+- **`listImageProviders`**:照搬 `aigc.listVideoProviders` 模式(ProviderConfig kind=IMAGE isActive)
+- **`generateProfileField` 补 GenerationAttempt 审计行**:原调 LLM 不留 attempt,BaseProvider 写的 ledger 行 attemptId 为空无法回溯;现建 attempt(action=TEXT,RUNNING→SUCCESS/FAILED,cost/tokens/duration)+ 传 attemptId 让 ledger 关联;**不传 skipLedger**(保持原计费,纯增审计);json 解析失败记 FAILED 但仍返回 warning
+
+### 逻辑链路自检(全段 ✓)
+导演拆解(建档/AI 生成/关联)→ `syncToArt` 翻转闸(只前进不回退)→ 美术工坊(筛选可见 + 详情同款 Asset 微调 + 批量透传 + 真实模型生图)。9 个 trpc endpoint signature 全核对、profileJson 整体覆盖、关联防自环双保险、age 空值显式转 null。「最终以美术工坊为准」成立。
+
+**问题/待决策**
+- ❓ 这些 P2 UI 大多需**真 provider key + 跑起来端到端真打**才算闭环(本次只 typecheck/test + ground-truth 自检);`generateProfileField`/批量拆解需配 `binding.asset.breakdown.modelId`(各机独立)
+- ❓ 同步闸默认「全部」是非回归选择(用户拍板);若日后要严格 synced-only,需配套改 create/batchCreate 在美术侧建资产时自动置 syncedToArtAt(否则新建资产消失)
+
+**下次接着做**
+- 📌 `pnpm start` 浏览器端到端真打:剧本拆解建档/AI 生成 → 同步 → 美术工坊筛选/详情/生图 整条链
+- 📌 P3+:世界观/金手指/地图资产类型、合规接入(桩已删需全新做)
+- 📌(可选)图片模型下拉真接入后跑通完整生成链
+
+---
+
 ## 2026-06-06(周六,mac-studio · 五五次收工)— 分镜自动整合 + 分集状态徽章三态 + 剧本拆解板块 P1 重构(规划 + 数据模型 + 后端,含同步闸)
 
 **完成 — typecheck 20/20 + test 107 全过 · 2 migration applied · 连通性校验 0 P0/P1 · 大量真打**

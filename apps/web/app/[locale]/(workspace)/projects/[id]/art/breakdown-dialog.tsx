@@ -3,6 +3,9 @@ import * as React from 'react';
 import { Loader2, Sparkles, Check } from 'lucide-react';
 import { toast } from 'sonner';
 
+import type { inferRouterOutputs } from '@trpc/server';
+import type { AppRouter } from '@ss/api';
+
 import { trpc } from '@/lib/trpc/client';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -22,7 +25,6 @@ interface Props {
   onSaved: () => void;
 }
 
-type AssetType = 'CHARACTER' | 'SCENE' | 'PROP';
 type CharacterRole =
   | '主演-男主'
   | '主演-女主'
@@ -42,15 +44,14 @@ const VALID_ROLES = new Set<CharacterRole>([
   '群演',
 ]);
 
-interface DraftItem {
-  type: AssetType;
-  name: string;
-  alias: string[];
-  description: string;
-  prompt: string;
-  characterRole?: string;
-  tags: string[];
-}
+// 五六收工:DraftItem 从 router output 推,防字段 drift。
+//   原手写 interface 漏了 archetypeKey/gender/age/heightCm(后端 AssetDraft 已产),
+//   批量入库时被静默丢弃。改从 breakdown 输出推后,后端加字段前端自动同步。
+type BreakdownOutput = inferRouterOutputs<AppRouter>['asset']['breakdown'];
+type DraftItem =
+  | BreakdownOutput['characters'][number]
+  | BreakdownOutput['scenes'][number]
+  | BreakdownOutput['props'][number];
 
 export function BreakdownDialog({ projectId, onClose, onSaved }: Props): React.ReactElement {
   const [episodeId, setEpisodeId] = React.useState<string>('');
@@ -111,6 +112,12 @@ export function BreakdownDialog({ projectId, onClose, onSaved }: Props): React.R
         VALID_ROLES.has(d.characterRole as CharacterRole)
           ? { characterRole: d.characterRole as CharacterRole }
           : {}),
+        // 五六收工:透传后端 AssetDraft 已产但前端原先丢弃的档案字段
+        //   archetypeKey 给 W4 变体聚合;gender/age/heightCm 给剧本拆解档案
+        ...(d.archetypeKey ? { archetypeKey: d.archetypeKey } : {}),
+        ...(d.gender ? { gender: d.gender } : {}),
+        ...(typeof d.age === 'number' ? { age: d.age } : {}),
+        ...(typeof d.heightCm === 'number' ? { heightCm: d.heightCm } : {}),
       }));
     if (items.length === 0) {
       toast.error('请至少勾选 1 个');
@@ -219,6 +226,31 @@ export function BreakdownDialog({ projectId, onClose, onSaved }: Props): React.R
                     {d.alias.length > 0 && (
                       <div className="mt-0.5 text-[10px] text-[hsl(var(--color-muted-foreground))]">
                         @ {d.alias.join(' / ')}
+                      </div>
+                    )}
+                    {/* 五六收工:展示后端拆解出的档案字段(让用户入库前看到将带入的设定)*/}
+                    {(d.gender || typeof d.age === 'number' || typeof d.heightCm === 'number' || d.archetypeKey) && (
+                      <div className="mt-0.5 flex flex-wrap gap-1">
+                        {d.gender && (
+                          <Badge variant="outline" className="px-1 text-[9px]">
+                            {d.gender === 'MALE' ? '男' : d.gender === 'FEMALE' ? '女' : '其他'}
+                          </Badge>
+                        )}
+                        {typeof d.age === 'number' && (
+                          <Badge variant="outline" className="px-1 text-[9px]">
+                            {d.age}岁
+                          </Badge>
+                        )}
+                        {typeof d.heightCm === 'number' && (
+                          <Badge variant="outline" className="px-1 text-[9px]">
+                            {d.heightCm}cm
+                          </Badge>
+                        )}
+                        {d.archetypeKey && (
+                          <Badge variant="outline" className="px-1 font-mono text-[9px]">
+                            #{d.archetypeKey}
+                          </Badge>
+                        )}
                       </div>
                     )}
                     <div className="mt-1 text-[hsl(var(--color-muted-foreground))]">{d.description}</div>

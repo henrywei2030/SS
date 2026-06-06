@@ -9,8 +9,10 @@ import { TopBar } from './top-bar';
 import { ScriptPane } from './script-pane';
 import { ShotsPane } from './shots-pane';
 import { InspirationPane } from './inspiration-pane';
+import { ScriptBreakdownPane } from './script-breakdown-pane';
 
-type Tab = 'inspiration' | 'script' | 'shots';
+// 五六收工:加 'breakdown' tab(剧本拆解三栏文字界面 — 资产列表 / 档案编辑 / 关联)
+type Tab = 'inspiration' | 'script' | 'breakdown' | 'shots';
 
 interface Props {
   projectId: string;
@@ -58,15 +60,18 @@ export function StoryboardWorkspace({
   // 当前选中 — 从 URL 实时读，跟随 router.replace 立即生效
   const epFromUrl = searchParams.get('ep');
   const rawTab = searchParams.get('tab');
-  // tab fallback 链:URL 显式 script/shots 优先,否则用 initialTab(SSR 注入),否则默认 'shots'
+  // tab fallback 链:URL 显式四 tab 之一优先,否则用 initialTab(SSR 注入),否则默认 'shots'
+  // 五六收工:加 'breakdown' 分支(剧本拆解三栏)
   const tab: Tab =
     rawTab === 'inspiration'
       ? 'inspiration'
       : rawTab === 'script'
         ? 'script'
-        : rawTab === 'shots'
-          ? 'shots'
-          : initialTab;
+        : rawTab === 'breakdown'
+          ? 'breakdown'
+          : rawTab === 'shots'
+            ? 'shots'
+            : initialTab;
   const selectedEpisodeId =
     epFromUrl ?? initialEpisodeId ?? episodes?.[0]?.id;
 
@@ -92,12 +97,13 @@ export function StoryboardWorkspace({
   return (
     <div
       className={`grid h-[calc(100vh-2.75rem)] gap-0 overflow-hidden bg-[hsl(var(--color-background))] ${
-        tab === 'inspiration' ? 'grid-cols-1' : 'grid-cols-[260px_1fr]'
+        // 五六收工:剧本拆解 tab 也项目级(资产是项目维度,不挂集),跟灵感创作一样隐藏左栏
+        tab === 'inspiration' || tab === 'breakdown' ? 'grid-cols-1' : 'grid-cols-[260px_1fr]'
       }`}
       style={{ ['--storyboard-fs' as string]: `${fontSize}px` }}
     >
-      {/* 左栏：分集列表 — 灵感创作 tab 不显示(项目级,不依赖选中集) */}
-      {tab !== 'inspiration' && (
+      {/* 左栏：分集列表 — 灵感创作 / 剧本拆解 tab 不显示(项目级,不依赖选中集) */}
+      {tab !== 'inspiration' && tab !== 'breakdown' && (
         <EpisodeSidebar
           episodes={episodes ?? []}
           selectedId={selectedEpisodeId}
@@ -129,6 +135,10 @@ export function StoryboardWorkspace({
           {tab === 'inspiration' ? (
             // 灵感创作是项目级(不依赖选中集)— 想法 → LLM 生成多集剧本草稿
             <InspirationPane projectId={projectId} />
+          ) : tab === 'breakdown' ? (
+            // 五六收工:剧本拆解 = 项目级三栏文字界面(资产列表 + 档案编辑 + 关联)
+            //   asset.list/update/createRelation/listRelations/generateProfileField/syncToArt
+            <ScriptBreakdownPane projectId={projectId} />
           ) : !selectedEpisodeId ? (
             <EmptyEpisodeState projectId={projectId} locale={locale} />
           ) : tab === 'script' ? (

@@ -20,6 +20,7 @@ import {
   X,
   RotateCw,
   Combine,
+  Users,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -50,12 +51,15 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 
+// 五六收工:加 'breakdown' tab
+type TabKey = 'inspiration' | 'script' | 'breakdown' | 'shots';
+
 interface Props {
   projectId: string;
   episodeId: string | undefined;
   episodeNumber: number | undefined;
-  tab: 'inspiration' | 'script' | 'shots';
-  onTabChange: (t: 'inspiration' | 'script' | 'shots') => void;
+  tab: TabKey;
+  onTabChange: (t: TabKey) => void;
   fontSize: number;
   onFontSizeChange: (delta: 1 | -1) => void;
   onAfterAction: () => void;
@@ -92,6 +96,14 @@ export function TopBar({
           icon={<FileText className="size-3.5" />}
         >
           剧本管理
+        </TabButton>
+        {/* 五六收工:剧本拆解 — 纯文字定稿(人物档案 / 关联),美术工坊负责生图 */}
+        <TabButton
+          active={tab === 'breakdown'}
+          onClick={() => onTabChange('breakdown')}
+          icon={<Users className="size-3.5" />}
+        >
+          剧本拆解
         </TabButton>
         <TabButton
           active={tab === 'shots'}

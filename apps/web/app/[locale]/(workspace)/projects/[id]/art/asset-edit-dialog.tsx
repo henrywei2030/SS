@@ -23,6 +23,15 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+// 五六收工:剧本拆解档案字段(与导演 script-breakdown-pane 共享同一份 Asset)
+import {
+  GENDER_LABEL,
+  LifeNodesEditor,
+  parseProfileJson,
+  buildProfileJson,
+  type Gender,
+  type LifeNode,
+} from '@/components/asset-profile-fields';
 import { cn } from '@/lib/utils';
 
 // ---------------------------------------------------------------------------
@@ -374,22 +383,26 @@ function InfoPanel({
   asset: AssetDetail;
   onChanged: () => void;
 }): React.ReactElement {
-  const [editing, setEditing] = React.useState<{
-    name: string;
-    archetypeKey: string;
-    description: string;
-    prompt: string;
-    characterRole: string;
-    tags: string;
-    alias: string;
-  }>({
-    name: asset.name,
-    archetypeKey: asset.archetypeKey ?? '',
-    description: asset.description ?? '',
-    prompt: asset.prompt,
-    characterRole: asset.characterRole ?? '',
-    tags: asset.tags.join(', '),
-    alias: asset.alias.join(', '),
+  // 五六收工:editing 用 lazy init,把剧本拆解档案字段一并纳入(personalityTags 与 tags/alias 一样逗号分隔)
+  const [editing, setEditing] = React.useState(() => {
+    const profileInit = parseProfileJson(asset.profileJson);
+    return {
+      name: asset.name,
+      archetypeKey: asset.archetypeKey ?? '',
+      description: asset.description ?? '',
+      prompt: asset.prompt,
+      characterRole: asset.characterRole ?? '',
+      tags: asset.tags.join(', '),
+      alias: asset.alias.join(', '),
+      gender: ((asset.gender as Gender | null) ?? '') as Gender | '',
+      age: asset.age == null ? '' : String(asset.age),
+      heightCm: asset.heightCm == null ? '' : String(asset.heightCm),
+      mbti: asset.mbti ?? '',
+      personalityTags: asset.personalityTags.join(', '),
+      monologue: asset.monologue ?? '',
+      lifeNodes: profileInit.lifeNodes as LifeNode[],
+      voiceLabel: profileInit.voiceLabel,
+    };
   });
   const [diffNote, setDiffNote] = React.useState('');
 
@@ -444,6 +457,37 @@ function InfoPanel({
       .map((s) => s.trim())
       .filter(Boolean);
     if (JSON.stringify(newAlias) !== JSON.stringify(asset.alias)) patch.alias = newAlias;
+
+    // 五六收工:剧本拆解档案字段 diff(仅人物;空字符串 = 清除 = null)
+    //   后端 update 不把这些列入 lock blockedFields,故锁定状态下也可微调档案
+    if (asset.type === 'CHARACTER') {
+      if (editing.gender !== ((asset.gender as string | null) ?? '')) {
+        patch.gender = editing.gender || null;
+      }
+      const newAge = editing.age === '' ? null : Number(editing.age);
+      if (newAge !== (asset.age ?? null)) patch.age = newAge;
+      const newHeight = editing.heightCm === '' ? null : Number(editing.heightCm);
+      if (newHeight !== (asset.heightCm ?? null)) patch.heightCm = newHeight;
+      if (editing.mbti !== (asset.mbti ?? '')) patch.mbti = editing.mbti || null;
+      const newPersonality = editing.personalityTags
+        .split(/[,，]/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 20);
+      if (JSON.stringify(newPersonality) !== JSON.stringify(asset.personalityTags)) {
+        patch.personalityTags = newPersonality;
+      }
+      if (editing.monologue !== (asset.monologue ?? '')) {
+        patch.monologue = editing.monologue || null;
+      }
+      // profileJson 整体覆盖语义:跟当前归一化后比较,变了才传(否则白白触发训练集/写入)
+      const cur = parseProfileJson(asset.profileJson);
+      const curProfileJson = buildProfileJson(cur.lifeNodes, cur.voiceLabel);
+      const newProfileJson = buildProfileJson(editing.lifeNodes, editing.voiceLabel);
+      if (JSON.stringify(newProfileJson) !== JSON.stringify(curProfileJson)) {
+        patch.profileJson = newProfileJson;
+      }
+    }
 
     if (Object.keys(patch).length === 0) {
       toast.info('没有改动');
@@ -600,6 +644,131 @@ function InfoPanel({
           />
         </div>
 
+        {/* 五六收工:角色档案 — 文字从剧本拆解同步、美术工坊也可微调(同一份 Asset)*/}
+        {type === 'CHARACTER' && (
+          <div className="grid gap-2 rounded border border-[hsl(var(--color-border)/0.6)] p-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-[10px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
+                角色档案(剧本拆解同步)
+              </Label>
+              {asset.syncedToArtAt ? (
+                <Badge variant="secondary" className="gap-1 px-1.5 text-[9px]">
+                  <CheckCircle2 className="size-2.5" />
+                  已同步
+                </Badge>
+              ) : (
+                <span className="text-[9px] text-[hsl(var(--color-muted-foreground))]">
+                  未同步(在「剧本拆解」生成/同步)
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-3 gap-1.5">
+              <div className="grid gap-1">
+                <Label className="text-[10px] text-[hsl(var(--color-muted-foreground))]">性别</Label>
+                <select
+                  value={editing.gender}
+                  onChange={(e) =>
+                    setEditing({ ...editing, gender: e.target.value as Gender | '' })
+                  }
+                  className="h-8 rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 text-xs"
+                >
+                  <option value="">—</option>
+                  {(['MALE', 'FEMALE', 'OTHER'] as const).map((g) => (
+                    <option key={g} value={g}>
+                      {GENDER_LABEL[g]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid gap-1">
+                <Label className="text-[10px] text-[hsl(var(--color-muted-foreground))]">年龄</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={200}
+                  value={editing.age}
+                  onChange={(e) => setEditing({ ...editing, age: e.target.value })}
+                  className="h-8 text-sm"
+                />
+              </div>
+              <div className="grid gap-1">
+                <Label className="text-[10px] text-[hsl(var(--color-muted-foreground))]">身高cm</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={300}
+                  value={editing.heightCm}
+                  onChange={(e) => setEditing({ ...editing, heightCm: e.target.value })}
+                  className="h-8 text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-1">
+              <Label className="text-[10px] text-[hsl(var(--color-muted-foreground))]">MBTI</Label>
+              <Input
+                value={editing.mbti}
+                onChange={(e) =>
+                  setEditing({ ...editing, mbti: e.target.value.toUpperCase().slice(0, 8) })
+                }
+                placeholder="INTJ"
+                className="h-8 font-mono text-sm uppercase"
+              />
+            </div>
+
+            <div className="grid gap-1">
+              <Label className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
+                性格标签(逗号分隔)
+              </Label>
+              <Input
+                value={editing.personalityTags}
+                onChange={(e) => setEditing({ ...editing, personalityTags: e.target.value })}
+                placeholder="冷静, 强势, 重情义"
+                className="h-8 text-sm"
+              />
+            </div>
+
+            <div className="grid gap-1">
+              <Label className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
+                内心独白
+              </Label>
+              <textarea
+                value={editing.monologue}
+                onChange={(e) =>
+                  setEditing({ ...editing, monologue: e.target.value.slice(0, 2000) })
+                }
+                rows={2}
+                className="rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 py-1.5 text-xs"
+              />
+            </div>
+
+            <div className="grid gap-1">
+              <Label className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
+                人生关键节点
+              </Label>
+              <LifeNodesEditor
+                nodes={editing.lifeNodes}
+                onChange={(nodes) => setEditing({ ...editing, lifeNodes: nodes })}
+              />
+            </div>
+
+            <div className="grid gap-1">
+              <Label className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
+                嗓音特征
+              </Label>
+              <Input
+                value={editing.voiceLabel}
+                onChange={(e) =>
+                  setEditing({ ...editing, voiceLabel: e.target.value.slice(0, 100) })
+                }
+                placeholder="低沉沙哑 / 清脆少年音 等"
+                className="h-8 text-sm"
+              />
+            </div>
+          </div>
+        )}
+
         <div className="grid gap-1">
           <Label className="text-[10px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
             修改原因(可选,入训练集)
@@ -657,6 +826,9 @@ function GenerationPanel({
     assetId: asset.id,
     slot: selectedSlot,
   });
+
+  // 五六收工:图片模型下拉读真实 active IMAGE Provider(替原 hardcode 3 占位模型)
+  const { data: imageProviders } = trpc.asset.listImageProviders.useQuery();
 
   const [infoOpen, setInfoOpen] = React.useState<
     | {
@@ -740,11 +912,14 @@ function GenerationPanel({
             value={modelId}
             onChange={(e) => setModelId(e.target.value)}
             className="h-8 rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 text-xs"
+            title="默认 = 用后台 binding 配的图片模型;也可显式切到某个已配 Provider"
           >
-            <option value="">默认模型</option>
-            <option value="nano-banana-pro">Nano Banana Pro</option>
-            <option value="gpt-image-2">GPT Image 2</option>
-            <option value="seedance-2.0">Seedance 2.0</option>
+            <option value="">默认模型(绑定)</option>
+            {imageProviders?.map((p) => (
+              <option key={p.providerId} value={p.providerId}>
+                {p.displayName || p.providerId}
+              </option>
+            ))}
           </select>
           <select
             value={aspectRatio}

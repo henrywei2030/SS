@@ -34,6 +34,15 @@ const TYPES: Array<{ value: AssetType; label: string; icon: React.ElementType }>
   { value: 'STYLE_REFERENCE', label: '风格参考', icon: Palette },
 ];
 
+// 五六收工:同步闸筛选(剧本拆解 syncToArt 翻转 syncedToArtAt)。默认 all 不回归,
+//   让美术工坊能选「只看剧本拆解已同步过来的」/「未同步(美术侧直接建的)」。
+type SyncFilter = 'all' | 'synced' | 'unsynced';
+const SYNC_FILTERS: Array<{ value: SyncFilter; label: string; title: string }> = [
+  { value: 'all', label: '全部', title: '显示全部资产(含美术侧直接新建的)' },
+  { value: 'synced', label: '已同步', title: '只看从「剧本拆解」同步过来的资产' },
+  { value: 'unsynced', label: '未同步', title: '只看还没同步的资产(多为美术侧直接新建)' },
+];
+
 interface Props {
   projectId: string;
   locale: string;
@@ -54,10 +63,12 @@ export function ArtWorkspace({ projectId, locale, initialType }: Props): React.R
   const [creating, setCreating] = React.useState(false);
   const [breakdownOpen, setBreakdownOpen] = React.useState(false);
   const [gapOpen, setGapOpen] = React.useState(false);
+  const [syncFilter, setSyncFilter] = React.useState<SyncFilter>('all');
 
   const { data, isLoading, refetch } = trpc.asset.list.useQuery({
     projectId,
     type: currentType,
+    syncFilter,
   });
   const assets = data?.assets;
   const mediaMap = data?.mediaMap ?? {};
@@ -158,6 +169,25 @@ export function ArtWorkspace({ projectId, locale, initialType }: Props): React.R
               </button>
             );
           })}
+          {/* 五六收工:同步闸筛选(默认全部,非回归)*/}
+          <span className="mx-1 h-4 w-px bg-[hsl(var(--color-border))]" />
+          <div className="flex items-center gap-0.5">
+            {SYNC_FILTERS.map((f) => (
+              <button
+                key={f.value}
+                onClick={() => setSyncFilter(f.value)}
+                title={f.title}
+                className={cn(
+                  'rounded px-1.5 py-0.5 text-[11px]',
+                  syncFilter === f.value
+                    ? 'bg-[hsl(var(--color-accent)/0.12)] text-[hsl(var(--color-accent))]'
+                    : 'text-[hsl(var(--color-muted-foreground))] hover:bg-[hsl(var(--color-secondary)/0.5)]',
+                )}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -206,6 +236,8 @@ export function ArtWorkspace({ projectId, locale, initialType }: Props): React.R
         ) : !assets || assets.length === 0 ? (
           <EmptyState
             type={currentType}
+            syncFilter={syncFilter}
+            onClearFilter={() => setSyncFilter('all')}
             onBreakdown={() => setBreakdownOpen(true)}
             onCreate={() => setCreating(true)}
           />
@@ -295,10 +327,14 @@ export function ArtWorkspace({ projectId, locale, initialType }: Props): React.R
 
 function EmptyState({
   type,
+  syncFilter,
+  onClearFilter,
   onBreakdown,
   onCreate,
 }: {
   type: AssetType;
+  syncFilter: SyncFilter;
+  onClearFilter: () => void;
   onBreakdown: () => void;
   onCreate: () => void;
 }): React.ReactElement {
@@ -310,6 +346,25 @@ function EmptyState({
         : type === 'PROP'
           ? '道具'
           : '风格参考';
+
+  // 五六收工:筛选下为空 — 明确告知是「筛选导致」而非没数据,给一键查看全部
+  if (syncFilter !== 'all') {
+    const filterLabel = syncFilter === 'synced' ? '已同步' : '未同步';
+    return (
+      <div className="flex h-full flex-col items-center justify-center text-center">
+        <div className="mb-3 text-sm font-medium">
+          当前「{filterLabel}」筛选下没有{label}资产
+        </div>
+        <div className="mb-5 text-xs text-[hsl(var(--color-muted-foreground))]">
+          可能有其他资产被筛选隐藏了 —— 点下方查看全部
+        </div>
+        <Button size="sm" variant="outline" className="gap-1.5" onClick={onClearFilter}>
+          查看全部
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col items-center justify-center text-center">
       <div className="mb-3 text-sm font-medium">还没有任何{label}资产</div>
