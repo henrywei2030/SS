@@ -19,6 +19,7 @@ import {
   Link2,
   X,
   RotateCw,
+  Combine,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -668,6 +669,18 @@ function ShotsActions({
     onError: (e) => toast.error(e.message),
   });
 
+  // 自动整合(2026-06):对当前集未入组的单一分镜按顺序贪心合并成组(每组累计 ≤maxDurationS)
+  const autoMerge = trpc.storyboard.autoMergeEpisode.useMutation({
+    onSuccess: (res, vars) => {
+      if (res.groupsCreated > 0) toast.success(res.message);
+      else toast.warning(res.message);
+      void utils.storyboard.listShots.invalidate({ episodeId: vars.episodeId, grouped: true });
+      void utils.storyboard.listShots.invalidate({ episodeId: vars.episodeId, grouped: false });
+      onAfterAction();
+    },
+    onError: (e) => toast.error(`自动整合失败:${e.message}`),
+  });
+
   const handleExportCurrent = async (format: ExportFormat): Promise<void> => {
     if (!episodeId) return;
     try {
@@ -1047,6 +1060,21 @@ function ShotsActions({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => episodeId && autoMerge.mutate({ episodeId })}
+        disabled={disabled || autoMerge.isPending || publish.isPending}
+        className="gap-1.5"
+        title="把当前集未入组的单一分镜按顺序贪心合并成分镜组(每组累计 ≤15s,严格按顺序、不任意组合)"
+      >
+        {autoMerge.isPending ? (
+          <Loader2 className="size-3.5 animate-spin" />
+        ) : (
+          <Combine className="size-3.5" />
+        )}
+        自动整合
+      </Button>
       <Button
         size="sm"
         variant="outline"

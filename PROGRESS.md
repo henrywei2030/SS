@@ -5,6 +5,38 @@
 
 ---
 
+## 2026-06-06(周六,mac-studio · 五五次收工)— 分镜自动整合 + 分集状态徽章三态 + 剧本拆解板块 P1 重构(规划 + 数据模型 + 后端,含同步闸)
+
+**完成 — typecheck 20/20 + test 107 全过 · 2 migration applied · 连通性校验 0 P0/P1 · 大量真打**
+
+承五三/五四真打,推进 3 块。
+
+### 一、分镜自动整合(用户需求)
+分镜工坊加「自动整合」按钮(确认发布左)。后端 `storyboard.autoMergeEpisode`:复用 `core/storyboard/merge.ts` 贪心算法,对当前集**未入组单镜**按 positionIdx 顺序累加 ≤maxDurationS(默认15)就并、超则开新组,**严格顺序不任意组合**;只对 ≥2 镜建 ShotGroup,advisory lock 原子。前端 `top-bar` 加按钮调它。真打:第1集 38 镜 → 8 组(1-6/7-11… 每组 ≤15s)。
+
+### 二、分集状态徽章三态(用户反馈)
+`listEpisodes` 改拉 shot/group 的 status,返回 `hasUnpublishedChanges`(存在非 PUBLISHED 的 shot/group)。`episode-sidebar` badge 三态:**草稿**(0镜)/ **分镜已生成**(有镜未发布 or 发布后又改)/ **已发布**(发布且无未发布改动)。这样自动整合(建 DRAFT group)后从「已发布」回到「分镜已生成」,提示需重新发布同步 AIGC。
+
+### 三、剧本拆解板块 P1 重构(规划 + 数据模型 + 后端)
+**规划**:调研「从剧本拆解资产」全链路(找到 archetypeKey 入库丢/prompt 双源/合规0/4096截断等问题)→ 重新规划。**关键架构定论**(用户拍板):剧本拆解(导演)= **纯文字设定**;美术工坊(美术)= 图2人物详情(文字从剧本拆解同步、也可改)+ 图3视觉生成器生图;**同一份 Asset**,「同步」只翻转闸不复制数据 → 保证最终以美术工坊微调为准。
+- **schema**:Asset +8 字段(gender/age/heightCm/mbti/personalityTags/monologue/profileJson + syncedToArtAt 同步闸)+ 新表 `AssetRelation`(关联人物/资产)+ 2 additive migration(均 applied)
+- **asset router**:create/update/batchCreate 支持档案字段 / `createRelation`+`listRelations`+`deleteRelation` / `generateProfileField`(AI 逐项生成 mbti/性格/独白/人生节点草案,返回不入库)/ `syncToArt`(同步闸,只翻转未同步的→已同步永不被覆盖)/ `list` 加 `syncFilter`(剧本拆解全量 vs 美术工坊只看已同步)
+- **core breakdown**:产 gender/age/heightCm + 修 archetypeKey 链路;seed `asset_step_base` 从简陋4条→完整JSON版、**删「出场集数」幻承诺**
+- **灵感剧本 prompt**:单集/批量都加「人物首次登场补人物速写」→ 剧本含更多人设供拆解提取
+- **连通性校验**(独立 agent + 复核):全段 ✓ 通,**0 P0/P1**;「以美术工坊为准」闸成立(syncedToArtAt 无重置路径);4 项 P2/P3 打磨(已补 profileJson 覆盖语义注释)
+
+**问题/待决策**
+- ❓ P2 前端全部待做:剧本拆解三栏文字界面(顶栏导演菜单加「剧本拆解」+ storyboard tab + 资产列表/档案编辑/关联)+ 美术工坊图2/3(人物详情 + 视觉生成器,含图5 moyu 图片模型选择)+ `breakdown-dialog` 的 DraftItem 接新档案字段(当前前端丢 archetypeKey/gender/age)
+- ❓ generateProfileField 可补 GenerationAttempt 审计行 / monologue 入训练集(P2/P3 打磨,非阻塞)
+- ❓ 世界观/金手指/地图资产类型(P4)、合规接入(桩已删需全新做)
+
+**下次接着做**
+- 📌 P2 前端:导演加「剧本拆解」子模块(storyboard-workspace 加 tab `Tab` 类型 + top-nav 导演 HoverNav 加项 + 新建 script-breakdown-pane 三栏文字界面)
+- 📌 美术工坊图2/3 改造(人物卡 → 详情 = 同步来的文字 + 生图)
+- 📌 breakdown-dialog DraftItem 透传新档案字段(后端已通,前端补)
+
+---
+
 ## 2026-06-05(周五,mac-studio · 五四次收工)— 灵感真打修复:jsonrepair 根治 broken JSON + 大纲可编辑/加宽 + 点击回归修 + 全局字号 +2
 
 **完成 — 7 文件改 · typecheck 16/16 + test 107 全过 · 灵感链路真打验证通过**

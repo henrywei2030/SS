@@ -13,7 +13,7 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
-import { generateStoryboard } from '@ss/core/storyboard';
+import { generateStoryboard, mergeShots } from '@ss/core/storyboard';
 import { parseScriptText } from '@ss/core/script';
 import { EVENTS } from '@ss/shared/events';
 import { getEventBus } from '@ss/adapters/eventbus';
@@ -249,10 +249,11 @@ export const storyboardRouter = router({
           _count: {
             select: {
               scenes: { where: { deletedAt: null } },
-              shots: { where: { deletedAt: null } },
-              shotGroups: { where: { deletedAt: null } },
             },
           },
+          // 拉 shot/group 的 status,用于「分镜已生成 vs 已发布」判断(数据量小,每集数十行 status)
+          shots: { where: { deletedAt: null }, select: { status: true } },
+          shotGroups: { where: { deletedAt: null }, select: { status: true } },
         },
       });
       return episodes.map((e) => ({
@@ -264,8 +265,13 @@ export const storyboardRouter = router({
         publishedVersion: e.publishedVersion,
         batchLocked: e.batchLocked,
         sceneCount: e._count.scenes,
-        shotCount: e._count.shots,
-        groupCount: e._count.shotGroups,
+        shotCount: e.shots.length,
+        groupCount: e.shotGroups.length,
+        // 2026-06:发布后又改了分镜/组(自动整合 / 重新生成 → 新建的是 DRAFT)→ 标"有未发布改动",
+        //   让分集列表从「已发布」回到「分镜已生成」,提示需重新发布同步 AIGC
+        hasUnpublishedChanges:
+          e.shots.some((s) => s.status !== 'PUBLISHED') ||
+          e.shotGroups.some((g) => g.status !== 'PUBLISHED'),
       }));
     }),
 
@@ -860,6 +866,116 @@ export const storyboardRouter = router({
       });
 
       return group;
+    }),
+
+  /**
+   * 自动整合(2026-06 用户需求):对当前集所有「单一分镜」(未入组)按 positionIdx 顺序
+   * 贪心合并 — 累加时长 ≤ maxDurationS 就并入同组,超则封口开新组。**严格顺序,不任意组合**。
+   * 复用 core/storyboard/merge.ts 的 mergeShots 算法(与手动合并同一真相源)。
+   */
+  autoMergeEpisode: protectedProcedure
+    .meta({
+      agentTool: {
+        description: '对当前集未入组的单一分镜按顺序贪心合并成多个 ShotGroup(每组累计时长 ≤maxDurationS)',
+        sideEffects: ['db.create:ShotGroup', 'db.update:Shot.groupId', 'OperationLog.write'],
+        costEstimateCny: 0,
+        requireConfirm: true,
+      },
+    })
+    .input(
+      z.object({
+        episodeId: z.string().cuid(),
+        maxDurationS: z.number().positive().max(120).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const ep = await loadEpisodeOrThrow(ctx, input.episodeId);
+      if (isEpisodeLockedNow(ep)) {
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: '本集正在生成分镜,请等完成后再自动整合',
+        });
+      }
+      // 合并阈值:前端传(可选)优先,否则读系统设置 storyboard.maxDurationS(默认 15)。
+      //   不走 getStoryboardBindings(它强制要求 LLM modelId,而自动整合纯本地不调 LLM)
+      const settings = await loadSystemSettings(ctx.prisma, ['storyboard.maxDurationS']);
+      const maxD = input.maxDurationS ?? Number(settings['storyboard.maxDurationS'] ?? '15');
+
+      // 该集所有「单一分镜」(未入组)按 positionIdx 顺序
+      const standalone = await ctx.prisma.shot.findMany({
+        where: { episodeId: input.episodeId, groupId: null, deletedAt: null },
+        orderBy: { positionIdx: 'asc' },
+      });
+      if (standalone.length < 2) {
+        return { groupsCreated: 0, shotsMerged: 0, message: '没有可整合的单一分镜(需 ≥2 个未入组镜头)' };
+      }
+
+      // 贪心合并(merge.ts:按 positionIdx 顺序累加 ≤maxD 就并,超则封口开新组 — 严格顺序,不任意组合)
+      const { groups } = mergeShots(
+        standalone.map((s) => ({
+          id: s.id,
+          number: s.number,
+          durationS: s.durationS,
+          framing: s.framing ?? undefined,
+          angle: s.angle ?? undefined,
+          content: s.content,
+          prompt: s.prompt,
+          positionIdx: s.positionIdx,
+          priority: (s.priority ?? undefined) as 'S' | 'A' | 'B' | 'C' | undefined,
+        })),
+        { maxDurationS: maxD },
+      );
+      // 只对 ≥2 镜的组建 ShotGroup(单镜保持 standalone,发布时再 1:1 成组)
+      const mergeable = groups.filter((g) => g.shots.length >= 2);
+      if (mergeable.length === 0) {
+        return {
+          groupsCreated: 0,
+          shotsMerged: 0,
+          message: `按 ≤${maxD}s 整合后没有可合并的相邻镜头(均超单镜时长或已成组)`,
+        };
+      }
+
+      let shotsMerged = 0;
+      await ctx.prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(
+          `SELECT pg_advisory_xact_lock(hashtext('storyboard_group:' || $1)::bigint)`,
+          input.episodeId,
+        );
+        const lastGroup = await tx.shotGroup.findFirst({
+          where: { episodeId: input.episodeId },
+          orderBy: { positionIdx: 'desc' },
+        });
+        let nextPos = (lastGroup?.positionIdx ?? 0) + 1;
+        for (const g of mergeable) {
+          const created = await tx.shotGroup.create({
+            data: {
+              episodeId: input.episodeId,
+              number: g.number,
+              positionIdx: nextPos++,
+              durationS: g.durationS,
+              prompt: g.mergedPrompt,
+            },
+          });
+          await tx.shot.updateMany({
+            where: { id: { in: g.shots.map((s) => s.id) } },
+            data: { groupId: created.id },
+          });
+          shotsMerged += g.shots.length;
+        }
+      });
+
+      await logOperation(ctx, 'shot_group.auto_merge', 'episode', input.episodeId, null, {
+        groupsCreated: mergeable.length,
+        shotsMerged,
+        maxDurationS: maxD,
+        projectId: ep.projectId,
+      });
+
+      return {
+        groupsCreated: mergeable.length,
+        shotsMerged,
+        message: `已按 ≤${maxD}s 顺序整合为 ${mergeable.length} 组(共 ${shotsMerged} 镜)`,
+      };
     }),
 
   /**

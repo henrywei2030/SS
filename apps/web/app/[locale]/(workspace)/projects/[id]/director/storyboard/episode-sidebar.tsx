@@ -27,6 +27,7 @@ type EpisodeBrief = {
   sceneCount: number;
   shotCount: number;
   groupCount: number;
+  hasUnpublishedChanges: boolean;
 };
 
 interface Props {
@@ -211,23 +212,26 @@ export function EpisodeSidebar({
 }
 
 function EpisodeStatusBadge({ ep }: { ep: EpisodeBrief }): React.ReactElement {
-  if (ep.publishedAt) {
+  // 草稿:还没生成任何分镜
+  if (ep.shotCount === 0) {
+    return (
+      <Badge variant="secondary" className="px-1 text-[9px]">
+        草稿
+      </Badge>
+    );
+  }
+  // 已发布:发布过且发布后无新改动(分镜/组全是 PUBLISHED)→ 已同步 AIGC
+  if (ep.publishedAt && !ep.hasUnpublishedChanges) {
     return (
       <Badge variant="success" className="px-1 text-[9px]">
         已发布
       </Badge>
     );
   }
-  if (ep.shotCount > 0) {
-    return (
-      <Badge variant="success" className="flex items-center gap-0.5 px-1 text-[9px]">
-        <span className="size-1.5 rounded-full bg-green-500" />已分镜 {ep.shotCount}
-      </Badge>
-    );
-  }
+  // 分镜已生成:有分镜但未发布,或发布后又改了分镜/组(自动整合 / 重新生成)→ 待(重新)发布同步 AIGC
   return (
-    <Badge variant="secondary" className="px-1 text-[9px]">
-      草稿
+    <Badge variant="default" className="flex items-center gap-0.5 px-1 text-[9px]">
+      <span className="size-1.5 rounded-full bg-blue-400" />分镜已生成
     </Badge>
   );
 }

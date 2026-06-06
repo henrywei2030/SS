@@ -90,6 +90,7 @@ model Project {
   members  ProjectMember[]
   episodes Episode[]
   assets   Asset[]
+  assetRelations AssetRelation[]
   scripts  Script[]
   media    MediaItem[]
   costs    CostLedgerEntry[]
@@ -664,6 +665,18 @@ model Asset {
   characterRole String?
   tags          String[]
 
+  // ---- 剧本拆解角色档案(2026-06 P1:导演「剧本拆解」子模块的文字设定)----
+  gender          String? // 'MALE' | 'FEMALE' | 'OTHER'(人物)
+  age             Int? // 年龄
+  heightCm        Int? // 身高 cm
+  mbti            String? // MBTI(AI 深化 / 人工)
+  personalityTags String[] @default([]) // 性格标签
+  monologue       String?  @db.Text // 一句独白
+  profileJson     Json? // 半结构化档案:人生节点 lifeNodes:[{year,title,desc}] + 声音/场景/道具特有设定
+  // 同步闸(2026-06):剧本拆解文字定稿 → 同步到美术工坊。null=仅剧本拆解可见可编辑;
+  //   非空=已同步,美术工坊显示+编辑(同步只翻转此闸不复制数据,故最终以美术工坊微调为准,剧本拆解侧只读)
+  syncedToArtAt   DateTime?
+
   // 提示词风格继承
   styleId String? // → StyleProfile.id;null=随项目
 
@@ -717,6 +730,8 @@ model Asset {
   /// @deprecated 用 usageBindings (AssetUsageBinding)
   bindings      ShotAssetRef[]
   usageBindings AssetUsageBinding[]
+  relationsFrom AssetRelation[]     @relation("AssetRelationFrom")
+  relationsTo   AssetRelation[]     @relation("AssetRelationTo")
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -727,6 +742,29 @@ model Asset {
   @@index([projectId, archetypeKey])
   @@index([deletedAt])
   @@map("assets")
+}
+
+/// 资产间关联(2026-06 P1:图2 右侧「关联人物 / 关联资产」)
+/// 通用 from→to + 关系描述;世界观/金手指/地图(P4)出现后也复用此表
+model AssetRelation {
+  id            String    @id @default(cuid())
+  projectId     String
+  fromAssetId   String
+  toAssetId     String
+  relationLabel String?   @db.Text // 如 "前任搭档 / 唯一见其崩溃时刻之人"
+  createdBy     String
+  createdAt     DateTime  @default(now())
+  deletedAt     DateTime?
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fromAsset Asset   @relation("AssetRelationFrom", fields: [fromAssetId], references: [id], onDelete: Cascade)
+  toAsset   Asset   @relation("AssetRelationTo", fields: [toAssetId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([fromAssetId])
+  @@index([toAssetId])
+  @@index([deletedAt])
+  @@map("asset_relations")
 }
 
 enum AssetMaturity {

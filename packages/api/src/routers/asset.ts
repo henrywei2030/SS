@@ -18,8 +18,9 @@ import {
   type AssetDraft,
   compileAssetPrompt,
 } from '@ss/core/asset';
-import { getImageProvider } from '@ss/adapters/provider';
+import { getImageProvider, getTextProvider } from '@ss/adapters/provider';
 import { getEventBus } from '@ss/adapters/eventbus';
+import { Prisma } from '@ss/db';
 // 第 18 轮 audit P1:errMsg 入库 + throw 前脱敏,防真接 NanoBanana / GPT Image 后泄漏 URL/token
 // 第 19 轮 audit P1:加 EventBus publish(ASSET_GENERATED / ASSET_CONFIRMED),events.ts 定义但漏调
 import { sanitizeErrorMsg, EVENTS, asRecord } from '@ss/shared';
@@ -107,6 +108,27 @@ const CharacterRoleSchema = z.enum([
   '群演',
 ]);
 
+// 剧本拆解角色档案 — 人生节点 + profileJson(2026-06 P1)
+const LifeNodeSchema = z.object({
+  year: z.string().max(20),
+  title: z.string().max(100),
+  desc: z.string().max(2000),
+});
+const ProfileJsonSchema = z.object({
+  lifeNodes: z.array(LifeNodeSchema).max(50).optional(),
+  voiceLabel: z.string().max(100).optional(),
+});
+// 档案字段(均可选 — 拆解可能不全;MBTI/性格/独白/人生节点等深度设定留空待 AI 生成 / 人工填)
+const ProfileFieldsSchema = {
+  gender: z.enum(['MALE', 'FEMALE', 'OTHER']).optional(),
+  age: z.number().int().min(0).max(200).optional(),
+  heightCm: z.number().int().min(0).max(300).optional(),
+  mbti: z.string().max(8).optional(),
+  personalityTags: z.array(z.string().max(30)).max(20).optional(),
+  monologue: z.string().max(2000).optional(),
+  profileJson: ProfileJsonSchema.optional(),
+};
+
 const DraftInputSchema = z.object({
   type: AssetTypeSchema,
   name: z.string().min(1).max(100),
@@ -118,6 +140,7 @@ const DraftInputSchema = z.object({
   styleId: z.string().cuid().optional(),
   archetypeKey: z.string().max(100).optional(),
   importance: z.enum(['S', 'A', 'B', 'C']).optional(),
+  ...ProfileFieldsSchema,
 });
 
 const SlotSchema = z.enum([
@@ -238,6 +261,8 @@ export const assetRouter = router({
         projectId: z.string().cuid(),
         type: AssetTypeSchema.optional(),
         includeDeleted: z.boolean().default(false),
+        // 同步闸视图:all(剧本拆解全量)/ synced(美术工坊只看已同步)/ unsynced(待同步)
+        syncFilter: z.enum(['all', 'synced', 'unsynced']).default('all'),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -247,6 +272,8 @@ export const assetRouter = router({
           projectId: input.projectId,
           ...(input.type && { type: input.type }),
           ...(input.includeDeleted ? {} : { deletedAt: null }),
+          ...(input.syncFilter === 'synced' && { syncedToArtAt: { not: null } }),
+          ...(input.syncFilter === 'unsynced' && { syncedToArtAt: null }),
         },
         orderBy: [{ type: 'asc' }, { name: 'asc' }],
       });
@@ -354,9 +381,13 @@ export const assetRouter = router({
         });
       }
 
-      const { projectId, ...rest } = input;
+      const { projectId, profileJson, ...rest } = input;
       const asset = await ctx.prisma.asset.create({
-        data: { projectId, ...rest },
+        data: {
+          projectId,
+          ...rest,
+          ...(profileJson !== undefined && { profileJson: profileJson as Prisma.InputJsonValue }),
+        },
       });
       await logOperation(ctx, 'asset.create', 'asset', asset.id, null, asset);
       return asset;
@@ -401,7 +432,13 @@ export const assetRouter = router({
       const created =
         toCreate.length > 0
           ? await ctx.prisma.asset.createManyAndReturn({
-              data: toCreate.map((d) => ({ projectId: input.projectId, ...d })),
+              data: toCreate.map(({ profileJson, ...d }) => ({
+                projectId: input.projectId,
+                ...d,
+                ...(profileJson !== undefined && {
+                  profileJson: profileJson as Prisma.InputJsonValue,
+                }),
+              })),
               select: { id: true, name: true, type: true },
             })
           : [];
@@ -432,6 +469,14 @@ export const assetRouter = router({
             styleId: z.string().cuid().nullable().optional(),
             archetypeKey: z.string().max(100).nullable().optional(),
             importance: z.enum(['S', 'A', 'B', 'C']).nullable().optional(),
+            // 剧本拆解角色档案(2026-06 P1)
+            gender: z.enum(['MALE', 'FEMALE', 'OTHER']).nullable().optional(),
+            age: z.number().int().min(0).max(200).nullable().optional(),
+            heightCm: z.number().int().min(0).max(300).nullable().optional(),
+            mbti: z.string().max(8).nullable().optional(),
+            personalityTags: z.array(z.string().max(30)).max(20).optional(),
+            monologue: z.string().max(2000).nullable().optional(),
+            profileJson: ProfileJsonSchema.optional(),
             voiceMediaId: z.string().cuid().nullable().optional(),
             voiceModelId: z.string().max(100).nullable().optional(),
             refImageIds: z.array(z.string().cuid()).optional(),
@@ -495,9 +540,18 @@ export const assetRouter = router({
         const maturityUpdate = touchesPromptOrSlot
           ? { maturity: computeMaturity(projected) }
           : {};
+        // profileJson 是 Json 字段:cast 成 Prisma.InputJsonValue,且为「整体覆盖」语义。
+        //   ⚠️ 前端改 profileJson 须读-改-写全量(只传 voiceLabel 会清掉 lifeNodes),否则丢字段
+        const { profileJson: patchProfileJson, ...patchRest } = input.patch;
         return tx.asset.update({
           where: { id: input.assetId },
-          data: { ...input.patch, ...maturityUpdate },
+          data: {
+            ...patchRest,
+            ...(patchProfileJson !== undefined && {
+              profileJson: patchProfileJson as Prisma.InputJsonValue,
+            }),
+            ...maturityUpdate,
+          },
         });
       });
 
@@ -537,6 +591,222 @@ export const assetRouter = router({
       ]);
       await logOperation(ctx, 'asset.delete', 'asset', input.assetId, asset, null);
       return { ok: true };
+    }),
+
+  // ---- 资产关联(2026-06 P1:图2 右侧「关联人物 / 关联资产」)----
+  createRelation: protectedProcedure
+    .meta({
+      agentTool: {
+        description: '创建两个资产之间的关联(from→to + 关系描述)',
+        sideEffects: ['db.create:AssetRelation', 'OperationLog.write'],
+        costEstimateCny: 0,
+        requireConfirm: false,
+      },
+    })
+    .input(
+      z.object({
+        fromAssetId: z.string().cuid(),
+        toAssetId: z.string().cuid(),
+        relationLabel: z.string().max(2000).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      if (input.fromAssetId === input.toAssetId) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '不能关联资产自身' });
+      }
+      const from = await loadAssetWithAccess(ctx, input.fromAssetId);
+      const to = await loadAssetWithAccess(ctx, input.toAssetId);
+      if (from.projectId !== to.projectId) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '只能关联同项目内的资产' });
+      }
+      // 防重复:同 from→to 未删的已存在则更新 label
+      const existing = await ctx.prisma.assetRelation.findFirst({
+        where: { fromAssetId: input.fromAssetId, toAssetId: input.toAssetId, deletedAt: null },
+      });
+      if (existing) {
+        return ctx.prisma.assetRelation.update({
+          where: { id: existing.id },
+          data: { relationLabel: input.relationLabel ?? existing.relationLabel },
+        });
+      }
+      const rel = await ctx.prisma.assetRelation.create({
+        data: {
+          projectId: from.projectId,
+          fromAssetId: input.fromAssetId,
+          toAssetId: input.toAssetId,
+          relationLabel: input.relationLabel,
+          createdBy: ctx.user.id,
+        },
+      });
+      await logOperation(ctx, 'asset.relation.create', 'asset_relation', rel.id, null, rel);
+      return rel;
+    }),
+
+  /** 列某资产的全部关联(双向),归一化返回「对端资产 + 方向」 */
+  listRelations: protectedProcedure
+    .input(z.object({ assetId: z.string().cuid() }))
+    .query(async ({ ctx, input }) => {
+      const asset = await loadAssetWithAccess(ctx, input.assetId);
+      const rels = await ctx.prisma.assetRelation.findMany({
+        where: { deletedAt: null, OR: [{ fromAssetId: asset.id }, { toAssetId: asset.id }] },
+        include: {
+          fromAsset: { select: { id: true, name: true, type: true, portraitMediaId: true } },
+          toAsset: { select: { id: true, name: true, type: true, portraitMediaId: true } },
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+      return rels.map((r) => {
+        const isFrom = r.fromAssetId === asset.id;
+        return {
+          id: r.id,
+          direction: isFrom ? ('OUT' as const) : ('IN' as const),
+          relationLabel: r.relationLabel,
+          other: isFrom ? r.toAsset : r.fromAsset,
+        };
+      });
+    }),
+
+  deleteRelation: protectedProcedure
+    .input(z.object({ relationId: z.string().cuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const rel = await ctx.prisma.assetRelation.findFirst({
+        where: { id: input.relationId, deletedAt: null },
+      });
+      if (!rel) throw new TRPCError({ code: 'NOT_FOUND', message: '关联不存在' });
+      await assertProjectAccess(ctx, rel.projectId);
+      await ctx.prisma.assetRelation.update({
+        where: { id: rel.id },
+        data: { deletedAt: new Date() },
+      });
+      await logOperation(ctx, 'asset.relation.delete', 'asset_relation', rel.id, rel, null);
+      return { ok: true };
+    }),
+
+  // ---- AI 生成档案字段(2026-06 P1:图2「AI 生成」按钮后端;返回草案不直接入库,前端编辑后再 update)----
+  generateProfileField: protectedProcedure
+    .meta({
+      agentTool: {
+        description: '基于已有人物信息 AI 生成某档案字段草案(mbti/personalityTags/monologue/lifeNodes)',
+        sideEffects: ['extern.api:TextProvider', 'cost.deduct'],
+        costEstimateCny: 0.01,
+        requireConfirm: false,
+      },
+    })
+    .input(
+      z.object({
+        assetId: z.string().cuid(),
+        field: z.enum(['mbti', 'personalityTags', 'monologue', 'lifeNodes']),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const asset = await loadAssetWithAccess(ctx, input.assetId);
+      const settings = await loadSystemSettings(ctx.prisma, ['binding.asset.breakdown.modelId']);
+      const modelId = settings['binding.asset.breakdown.modelId'];
+      if (!modelId) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '资产设定 AI 生成未配置 LLM — 去 /admin/bindings 配 binding.asset.breakdown.modelId',
+        });
+      }
+      const provider = await getTextProvider(modelId);
+      const known = [
+        `姓名:${asset.name}`,
+        asset.gender ? `性别:${asset.gender}` : null,
+        asset.age != null ? `年龄:${asset.age}` : null,
+        asset.characterRole ? `角色定位:${asset.characterRole}` : null,
+        asset.description ? `外观/描述:${asset.description}` : null,
+        asset.personalityTags.length ? `性格标签:${asset.personalityTags.join('、')}` : null,
+        asset.mbti ? `MBTI:${asset.mbti}` : null,
+      ]
+        .filter(Boolean)
+        .join('\n');
+
+      const FIELD_SPEC: Record<typeof input.field, { task: string; json: boolean }> = {
+        mbti: { task: '推断该角色最可能的 MBTI 类型,只输出 4 个大写字母(如 INTJ),不要解释。', json: false },
+        monologue: { task: '写一句体现该角色内核的第一人称独白,≤40 字,只输出独白本身。', json: false },
+        personalityTags: { task: '生成 3-5 个性格标签。严格输出 JSON:{"tags":["标签1","标签2"]}', json: true },
+        lifeNodes: {
+          task: '生成 3-5 个人生关键节点(按时间排序)。严格输出 JSON:{"lifeNodes":[{"year":"2076","title":"出生","desc":"≤80字"}]}',
+          json: true,
+        },
+      };
+      const spec = FIELD_SPEC[input.field];
+      const result = await provider.generate(
+        {
+          system: '你是资深编剧 / 人物设定师。基于已知人物信息补全指定字段。严格只输出要求的内容,不要解释。',
+          prompt: `【已知人物信息】\n${known}\n\n【任务】${spec.task}`,
+          maxTokens: 1000,
+          temperature: 0.85,
+          ...(spec.json ? { jsonSchema: {} } : {}),
+        },
+        { userId: ctx.user.id, projectId: asset.projectId, assetId: asset.id },
+      );
+
+      let value: unknown;
+      if (input.field === 'mbti' || input.field === 'monologue') {
+        value = result.text.trim().replace(/^["'「」]+|["'「」]+$/g, '');
+      } else if (input.field === 'personalityTags') {
+        const obj = asRecord(result.json);
+        value = Array.isArray(obj?.tags)
+          ? obj.tags.filter((t): t is string => typeof t === 'string').slice(0, 10)
+          : [];
+      } else {
+        const obj = asRecord(result.json);
+        const arr = Array.isArray(obj?.lifeNodes) ? obj.lifeNodes : [];
+        value = arr
+          .map((n) => {
+            const r = asRecord(n);
+            if (!r) return null;
+            return {
+              year: typeof r.year === 'string' ? r.year : String(r.year ?? ''),
+              title: typeof r.title === 'string' ? r.title : '',
+              desc: typeof r.desc === 'string' ? r.desc : '',
+            };
+          })
+          .filter((n): n is { year: string; title: string; desc: string } => n !== null);
+      }
+      return {
+        field: input.field,
+        value,
+        warning: spec.json && result.json == null ? 'AI 输出解析失败,请重试' : undefined,
+      };
+    }),
+
+  // ---- 同步到美术工坊(2026-06 P1:剧本拆解文字定稿 → 翻转同步闸)----
+  //   只把「未同步」的资产标记 syncedToArtAt=now(幂等);已同步的不重新覆盖,
+  //   保证「最终以美术工坊微调为准」—— 同步只翻转闸、不复制/回灌数据。
+  syncToArt: protectedProcedure
+    .meta({
+      agentTool: {
+        description: '把剧本拆解定稿的资产同步到美术工坊(标记 syncedToArtAt;只处理未同步的)',
+        sideEffects: ['db.updateMany:Asset', 'OperationLog.write'],
+        costEstimateCny: 0,
+        requireConfirm: false,
+      },
+    })
+    .input(
+      z.object({
+        projectId: z.string().cuid(),
+        // 不传 = 同步该项目所有「未同步」资产;传则只同步指定的
+        assetIds: z.array(z.string().cuid()).max(500).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId);
+      const result = await ctx.prisma.asset.updateMany({
+        where: {
+          projectId: input.projectId,
+          deletedAt: null,
+          syncedToArtAt: null, // 只翻转未同步的 → 已同步资产的美术工坊改动永不被覆盖
+          ...(input.assetIds && input.assetIds.length > 0 ? { id: { in: input.assetIds } } : {}),
+        },
+        data: { syncedToArtAt: new Date() },
+      });
+      await logOperation(ctx, 'asset.syncToArt', 'asset', input.projectId, null, {
+        projectId: input.projectId,
+        syncedCount: result.count,
+      });
+      return { syncedCount: result.count };
     }),
 
   /**
