@@ -227,6 +227,8 @@ async function main() {
 4. characterRole 严格取其一:主演-男主 / 主演-女主 / 主演-反派 / 配角-正派 / 配角-反派 / 配角-中性 / 群演。群演只汇总一条(如"村民群演"),不为每个无名路人建条。
 5. 场景只拆"独立空间"(非分镜机位);道具只拆"反复出现或有戏剧意义"的关键道具。
 6. alias 留昵称 / 别称(用于 AIGC 自动 @ 匹配),≤5 个;name 必填且唯一。
+7. 出场集:每个资产输出 episodes 数组 = 它在剧本中出现的集号(依据 ===第N集=== 标记;跨多集的人物 / 场景 / 道具列出全部出场集,升序)。
+8. 排序输出:characters 数组先按重要性(主演 > 配角 > 群演)、同档再按首次出场集升序;scenes 与 props 数组按首次出场集升序排列。
 
 【人物 = 角色圣经三段式】每个人物必须完整产出:
 - description(形象设定 · 利于生图一致性,120-200字):面部特征(脸型 / 五官 / 眼神)+ 体型与身高 + 发型发色 + 典型服饰(款式 / 颜色 / 材质 / 配饰)+ 标志性外观 / 伤痕 / 整体气质。写成稳定的"视觉锚",同一角色每次生图都应一致。
@@ -240,7 +242,7 @@ async function main() {
 【道具 = hero-prop 细节】description(80-150字)覆盖:外形与尺寸 + 材质与工艺 + 年代 / 磨损 / 使用痕迹 + 颜色纹理 + 在剧情中的功能与象征意义。prompt(80-120字):浓缩为可生图的道具 spec。
 
 【输出严格 JSON · 不要 markdown · 不要任何解释 · 第一个字符是 { 最后一个是 }】
-{"characters":[{"name":"","archetypeKey":"","alias":[],"gender":"MALE","age":0,"heightCm":0,"characterRole":"","description":"","prompt":"","bio":"","personalityTags":[],"tags":[]}],"scenes":[{"name":"","archetypeKey":"","alias":[],"description":"","prompt":"","tags":[]}],"props":[{"name":"","archetypeKey":"","alias":[],"description":"","prompt":"","tags":[]}]}`,
+{"characters":[{"name":"","archetypeKey":"","alias":[],"gender":"MALE","age":0,"heightCm":0,"characterRole":"","episodes":[1,3],"description":"","prompt":"","bio":"","personalityTags":[],"tags":[]}],"scenes":[{"name":"","archetypeKey":"","alias":[],"episodes":[1],"description":"","prompt":"","tags":[]}],"props":[{"name":"","archetypeKey":"","alias":[],"episodes":[2],"description":"","prompt":"","tags":[]}]}`,
       varsJson: {},
     },
     {

@@ -131,16 +131,34 @@ export async function compileVideoPromptForGroup(
   );
 
   // W1-W5 audit P1 followup(P1-6):全 7 槽位 fallback 链
-  const refs: VideoReference[] = dbBindings.map((b) => {
+  const refs: VideoReference[] = dbBindings.flatMap((b) => {
     const kind = kindFromUsage(b.usageType);
     const chosen = pickAssetMediaId(b.asset, kind);
-    return {
+    const base: VideoReference = {
       refSlotIdx: b.refSlotIdx!,
       kind,
       assetId: b.asset.id,
       name: b.asset.name,
       mediaUrl: chosen ? (mediaMap.get(chosen) ?? null) : null,
     };
+    // 五七-3:绑定 CHARACTER 形象时,若该角色配了参考音频(voiceMediaId),自动追加一条 AUDIO 引用
+    //   → 视频生成同步带上角色配音参考(关联图也关联声)。SOUND_VOICE 绑定本身已是 AUDIO,不重复追加。
+    if (kind !== 'AUDIO' && b.asset.type === 'CHARACTER' && b.asset.voiceMediaId) {
+      const voiceUrl = mediaMap.get(b.asset.voiceMediaId) ?? null;
+      if (voiceUrl) {
+        return [
+          base,
+          {
+            refSlotIdx: b.refSlotIdx!,
+            kind: 'AUDIO' as const,
+            assetId: b.asset.id,
+            name: b.asset.name,
+            mediaUrl: voiceUrl,
+          },
+        ];
+      }
+    }
+    return [base];
   });
 
   const compiled = compileShotGroupVideoPrompt({

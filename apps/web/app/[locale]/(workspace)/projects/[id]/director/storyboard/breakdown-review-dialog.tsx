@@ -90,7 +90,7 @@ export function BreakdownReviewDialog({
             for (const d of drafts) {
               acc.push({
                 draft: d,
-                selected: !d.matchedAssetId, // 新建默认勾选;已存在默认不勾(防误覆盖)
+                selected: true, // 五七-3:重新拆解默认全选 —— 以最新内容覆盖已存在(用户拍板);不想覆盖可取消勾选
                 name: d.name,
                 description: d.description ?? '',
                 prompt: d.prompt ?? '',
@@ -178,6 +178,8 @@ export function BreakdownReviewDialog({
           ? { personalityTags: d.personalityTags }
           : {}),
         ...(isChar && it.bio ? { bio: it.bio } : {}),
+        // 五七-3:出场集(人物/场景/道具通用)
+        ...(d.episodes && d.episodes.length > 0 ? { episodes: d.episodes } : {}),
       };
     });
     apply.mutate({ projectId, items: payload });
@@ -192,7 +194,7 @@ export function BreakdownReviewDialog({
           <DialogTitle>从完整剧本拆解 · 审阅草稿</DialogTitle>
           <DialogDescription>
             后端模型分批读取本项目完整剧本,产出人物(形象 + 小传)/ 场景 / 道具设定草稿。
-            勾选要应用的条目(可内联微调),「已存在」默认不勾以防覆盖手改。应用后写入对应板块。
+            重新拆解默认全选,会用最新内容覆盖「已存在」条目(含出场集);不想覆盖的取消勾选。可内联微调后应用。
           </DialogDescription>
         </DialogHeader>
 
@@ -306,6 +308,11 @@ function ReviewRow({
           {isChar && 'characterRole' in d && d.characterRole && (
             <span className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
               {d.characterRole}
+            </span>
+          )}
+          {d.episodes && d.episodes.length > 0 && (
+            <span className="ml-auto shrink-0 text-[10px] text-[hsl(var(--color-muted-foreground))]">
+              第{[...d.episodes].sort((a, b) => a - b).join('·')}集
             </span>
           )}
         </button>

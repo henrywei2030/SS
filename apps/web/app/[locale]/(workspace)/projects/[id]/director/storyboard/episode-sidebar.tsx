@@ -82,11 +82,11 @@ export function EpisodeSidebar({
             <div
               key={ep.id}
               className={cn(
-                'group relative mb-1 rounded-md border transition-colors',
+                'group relative mb-1 rounded-lg border transition-all',
                 selectedId === ep.id
-                  ? 'border-[hsl(var(--color-accent))] bg-[hsl(var(--color-accent)/0.08)]'
+                  ? 'border-[hsl(var(--color-accent)/0.6)] bg-[hsl(var(--color-accent)/0.08)] shadow-sm'
                   : ep.shotCount > 0
-                    ? 'border-green-500/30 bg-green-500/5 hover:bg-green-500/10'
+                    ? 'border-[hsl(var(--color-success)/0.3)] bg-[hsl(var(--color-success)/0.05)] hover:bg-[hsl(var(--color-success)/0.1)]'
                     : 'border-transparent hover:bg-[hsl(var(--color-secondary)/0.5)]',
               )}
             >

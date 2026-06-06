@@ -673,6 +673,7 @@ model Asset {
   personalityTags String[] @default([]) // 性格标签
   monologue       String?  @db.Text // 一句独白
   bio             String?  @db.Text // 人物小传(背景故事:家世/关键人生节点/动机弧光,五六-2 剧本拆解 LLM 生成 + 人工微调)
+  episodes        Int[] @default([]) // 五七-3:出场集号(人物/场景/道具均用;据剧本 ===第N集=== 标记拆解;用于排序 + 标注出场)
   profileJson     Json? // 半结构化档案:人生节点 lifeNodes:[{year,title,desc}] + 声音/场景/道具特有设定
   // 同步闸(2026-06):剧本拆解文字定稿 → 同步到美术工坊。null=仅剧本拆解可见可编辑;
   //   非空=已同步,美术工坊显示+编辑(同步只翻转此闸不复制数据,故最终以美术工坊微调为准,剧本拆解侧只读)

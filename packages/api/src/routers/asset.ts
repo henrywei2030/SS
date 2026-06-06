@@ -20,6 +20,7 @@ import {
   compileAssetPrompt,
 } from '@ss/core/asset';
 import { getImageProvider, getTextProvider } from '@ss/adapters/provider';
+import { getStorageAdapter } from '@ss/adapters/storage';
 import { getEventBus } from '@ss/adapters/eventbus';
 import { Prisma } from '@ss/db';
 // 第 18 轮 audit P1:errMsg 入库 + throw 前脱敏,防真接 NanoBanana / GPT Image 后泄漏 URL/token
@@ -158,6 +159,8 @@ const ProfileFieldsSchema = {
   monologue: z.string().max(2000).optional(),
   // 五六-2:人物小传(背景故事,LLM 拆解生成 + 人工微调)
   bio: z.string().max(4000).optional(),
+  // 五七-3:出场集号(据剧本 ===第N集=== 拆解;排序 + 标注出场用)
+  episodes: z.array(z.number().int().min(1).max(99999)).max(2000).optional(),
   profileJson: ProfileJsonSchema.optional(),
 };
 
@@ -509,6 +512,7 @@ export const assetRouter = router({
             personalityTags: z.array(z.string().max(30)).max(20).optional(),
             monologue: z.string().max(2000).nullable().optional(),
             bio: z.string().max(4000).nullable().optional(),
+            episodes: z.array(z.number().int().min(1).max(99999)).max(2000).optional(),
             profileJson: ProfileJsonSchema.optional(),
             voiceMediaId: z.string().cuid().nullable().optional(),
             voiceModelId: z.string().max(100).nullable().optional(),
@@ -1558,6 +1562,10 @@ export const assetRouter = router({
         aspectRatio: z.string().max(20).optional(),
         sizePx: z.string().max(20).optional(),
         extraInstruction: z.string().max(500).optional(),
+        // 五七-3:图生图参考图(mediaId)+ 强度 + 负面词
+        refImageIds: z.array(z.string().cuid()).max(16).optional(),
+        strength: z.number().min(0).max(1).optional(),
+        extraNegative: z.array(z.string().max(50)).max(20).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -1601,6 +1609,7 @@ export const assetRouter = router({
         style: project?.style ?? null,
         slot: input.slot,
         extraInstruction: input.extraInstruction,
+        extraNegative: input.extraNegative,
       });
 
       const aspectRatio =
@@ -1612,6 +1621,33 @@ export const assetRouter = router({
             : input.slot === 'panorama'
               ? '2:1'
               : '1:1');
+
+      // 五七-3:解析参考图 mediaId → 可 fetch 的 http URL(给图生图 /images/edits;adapter 会 fetch bytes)
+      let refImageUrls: string[] | undefined;
+      if (input.refImageIds && input.refImageIds.length > 0) {
+        const refMedias = await ctx.prisma.mediaItem.findMany({
+          where: { id: { in: input.refImageIds }, deletedAt: null },
+          select: { storageKey: true, cdnUrl: true },
+        });
+        const storage = getStorageAdapter();
+        const urls: string[] = [];
+        for (const m of refMedias) {
+          if (m.cdnUrl) {
+            urls.push(m.cdnUrl);
+          } else if (m.storageKey.startsWith('external://')) {
+            urls.push(m.storageKey.replace(/^external:\/\//, ''));
+          } else if (m.storageKey.startsWith('placeholder://')) {
+            // mock 占位图无法 fetch,跳过
+          } else {
+            try {
+              urls.push(await storage.getSignedUrl(m.storageKey, 3600));
+            } catch {
+              /* sign 失败跳过该参考图 */
+            }
+          }
+        }
+        refImageUrls = urls.length > 0 ? urls : undefined;
+      }
 
       // 调 ImageProvider(W4-MM.6 真接入,当前 MockImageProvider 走 picsum.photos)
       const startedAt = new Date();
@@ -1625,6 +1661,9 @@ export const assetRouter = router({
             aspectRatio,
             mode: input.slot === 'three_view' ? 'three_view' : input.slot === 'panorama' ? 'panorama_360' : 'standard',
             model: input.modelId,
+            // 五七-3:有参考图 → adapter 走 /images/edits 图生图;strength 经 extra 透传(视模型支持)
+            refImageUrls,
+            ...(input.strength != null ? { extra: { strength: input.strength } } : {}),
           },
           {
             userId: ctx.user.id,

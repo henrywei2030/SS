@@ -5,6 +5,51 @@
 
 ---
 
+## 2026-06-07(周日,mac-studio · 五八次收工)— 剧本管理界面重构 + 出场集排序 + 文本框 auto-grow + 美术紧凑化 + 参考音频 + 图生图升级
+
+**完成 — typecheck 16/16 + test 全过 · 1 migration · 改 16 文件 + 新建 3 文件 · 全程 web dev 在线真打调试**
+
+承五七真打,用户连环 UI/特性反馈,边测边改(dev 起在 :3000,日志 /tmp/ss-dev.log 我实时盯)。
+
+### 一、剧本管理界面重构(用户:4 tab 不齐 + 拆解来源应是仓库 + UI 质感)
+- **导演 4 tab 统一靠左**(根因:`storyboard-workspace` 把 TopBar 渲染在 grid 右列 → 剧本管理/分镜工坊被 260px 侧栏挤右)→ 改 flex-col,**TopBar 提到 grid 之上全宽行**,tab 永远最左。
+- **拆解来源仓库化**(`script-pane` BreakdownSourceView):两组 = ① 灵感创作顶置草稿(`inspiration.listDrafts pinnedOnly`)② 项目正式剧本(`script.list`)。**草稿点「导入为正式剧本」→ 确认 → linkInspirationEpisodes 转正 → 集列表+内容统一更新**(用户拍板:选中即自动关联转正);项目剧本点击 → 跳到该集(onSelectEpisode)。
+- **UI 克制现代感**:tab pill / 集卡 / 来源卡 / 版本 pill 改 rounded-lg + 柔边框(/60·/70)+ 选中 shadow-sm;绿色硬编码 → `--color-success` token。
+
+### 二、出场集 + 排序(用户:区分重要性 + 标注出场集 + 按集排序)
+- **schema**:Asset + `episodes Int[]`(migration `20260606173856_asset_episodes`,applied + db:generate)。
+- **prompt**:`script_breakdown_full` 加「每资产输出 episodes(据 ===第N集===)」+ 排序规则(人物 主演>配角>群演 再按首集;场景/道具按首集)。已 `db:sync:prompts` 强更进 DB。
+- **前端**:三板块按规则排序;列表行显示「主演 · 第1·3集」;详情加「出场集」可编辑字段。审阅对话框显示「第N集」徽章 + 透传。
+- **重新拆解默认全选覆盖**(用户拍板):审阅对话框 `selected:true`,重跑即用最新内容覆盖已存在(原默认不勾 → 旧资产出场集永远填不上的卡点)。
+
+### 三、文本框 auto-grow + 美术紧凑化
+- 抽共享 `components/auto-grow-textarea.tsx`(**useLayoutEffect + rAF**,修首测高度偏小截断);剧本拆解 pane + 美术人物编辑 描述/小传/提示词 完整显示。
+- 人物编辑左栏 280→360px、弹窗 1280→1360px。
+- 美术工坊紧凑:网格 `grid-cols-2…xl:5` → `auto-fill minmax(150px)`;人物卡图比 9:16→3:4;间距收紧。
+
+### 四、#2 参考音频(用户:加参考音频,AIGC 同步图也同步声)
+- **UI**(asset-edit-dialog `VoiceField`):上传 audio(media.upload kind=AUDIO → voiceMediaId)+ `<audio>` 试听(media.getSignedUrl)+ 替换/清除。复用 `lib/file-to-base64.ts`。
+- **AIGC 自动带声**(`core/video-generation/compile.ts`):refs 由 map → flatMap,**绑定 CHARACTER 形象时若有 voiceMediaId 自动追加一条 AUDIO ref**;`aigc.ts` refAudioUrls 去重 → 视频生成绑角色即带其配音参考。
+
+### 五、#3 图生图升级(用户拍板:直接升级 adapter)
+- 研究确认当前 image adapter 走 `/images/generations`(纯文生图);图生图标准 = `/images/edits`。
+- **adapter**(`openai-compat-image`):有 `refImageUrls` → 走 `/images/edits`(multipart/form-data,fetch 参考图 bytes 作 image[],≤16)+ req.extra 透传;响应兼容 url 与 b64_json(抽 `extractImageUrls`)。无参考图保持文生图不变。
+- **backend**(`asset.generateImage`):input + `refImageIds/strength/extraNegative`;refImageIds → 签名 URL(getStorageAdapter)→ provider;extraNegative → compileAssetPrompt;strength 经 extra 透传。
+- **UI**(GenerationPanel):参考图拖入/上传 + 缩略图 + 移除 + 强度滑块 + 负面词输入。
+
+**问题/待决策**
+- ❓ **#3 图生图 `/images/edits` 在 moyu 对 Seedream/GPT-Image 的确切入参未真打验证**(image vs image[] 字段名、是否支持 edits/strength)→ 已实现标准 OpenAI 兼容路径,**待真打报错读日志迭代格式**(本次在线调试核心)。
+- ❓ #2 视频"真带语音"端到端需起 worker + 真 seedance;本次验语音上传/试听 + compile 链路接通。
+- ❓ 出场集:旧资产需重跑「从完整剧本拆解」(默认全选覆盖)才填上。
+- ❓ 本批 UI/特性 typecheck 16/16 + test 过,**真打验证进行中**(dev 在跑,#1 描述/美术紧凑已目视确认;#2/#3 待用户真打)。
+
+**下次接着做**
+- 📌 真打 #3 图生图:拖参考图生成 → 读日志看 `/images/edits` 请求/响应 → 迭代 edits 格式(Seedream/GPT-Image 差异)。
+- 📌 #2:起 worker + 真 seedance,端到端验"绑角色生视频自动带语音"。
+- 📌 出场集重跑拆解验证 + 美术工坊/人物编辑真打微调。
+
+---
+
 ## 2026-06-07(周日,mac-studio · 五七次收工)— 剧本拆解模块重新设计(LLM 从完整剧本拆富设定)+ 拆解超时修复 + API 链路三遍巡检优化
 
 **完成 — typecheck 16/16 + test 全过 · 1 migration · 新 prompt 入库 · 6 active provider API 实测**

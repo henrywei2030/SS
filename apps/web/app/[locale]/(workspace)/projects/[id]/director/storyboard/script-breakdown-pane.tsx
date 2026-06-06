@@ -53,6 +53,7 @@ import {
   type LifeNode,
 } from '@/components/asset-profile-fields';
 import { cn } from '@/lib/utils';
+import { AutoGrowTextarea } from '@/components/auto-grow-textarea';
 
 import { BreakdownReviewDialog } from './breakdown-review-dialog';
 
@@ -74,6 +75,44 @@ const CHARACTER_ROLES = [
   '配角-中性',
   '群演',
 ] as const;
+
+// 五七-3:排序 + 出场集 helpers
+//   人物按重要性(主演>配角>群演)再按首次出场集;场景/道具按首次出场集
+const ROLE_RANK: Record<string, number> = {
+  '主演-男主': 0,
+  '主演-女主': 0,
+  '主演-反派': 0,
+  '配角-正派': 1,
+  '配角-反派': 1,
+  '配角-中性': 1,
+  群演: 2,
+};
+function firstEpisode(a: { episodes?: number[] | null }): number {
+  return a.episodes && a.episodes.length > 0 ? Math.min(...a.episodes) : 99999;
+}
+function roleShort(role?: string | null): string {
+  if (!role) return '';
+  if (role.startsWith('主演')) return '主演';
+  if (role.startsWith('配角')) return '配角';
+  return role; // 群演
+}
+function episodesLabel(eps?: number[] | null): string {
+  if (!eps || eps.length === 0) return '';
+  return [...eps].sort((x, y) => x - y).join('·');
+}
+function sortBreakdownAssets(list: AssetItem[], type: AssetType): AssetItem[] {
+  return [...list].sort((a, b) => {
+    if (type === 'CHARACTER') {
+      const ra = ROLE_RANK[a.characterRole ?? ''] ?? 3;
+      const rb = ROLE_RANK[b.characterRole ?? ''] ?? 3;
+      if (ra !== rb) return ra - rb;
+    }
+    const fa = firstEpisode(a);
+    const fb = firstEpisode(b);
+    if (fa !== fb) return fa - fb;
+    return a.name.localeCompare(b.name);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // 主组件
@@ -171,6 +210,8 @@ function TypePanel({
   const utils = trpc.useUtils();
   const { data, isLoading } = trpc.asset.list.useQuery({ projectId, type });
   const assets = React.useMemo(() => data?.assets ?? [], [data]);
+  // 五七-3:人物按重要性+首次出场排,场景/道具按首次出场排
+  const sortedAssets = React.useMemo(() => sortBreakdownAssets(assets, type), [assets, type]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [adding, setAdding] = React.useState(false);
   const [newName, setNewName] = React.useState('');
@@ -257,28 +298,47 @@ function TypePanel({
               </div>
             ) : (
               <ul>
-                {assets.map((a) => (
-                  <li key={a.id}>
-                    <button
-                      onClick={() => setSelectedId(a.id)}
-                      className={cn(
-                        'flex w-full items-center gap-1 px-2 py-1.5 text-left',
-                        selectedId === a.id
-                          ? 'bg-[hsl(var(--color-accent)/0.1)]'
-                          : 'hover:bg-[hsl(var(--color-secondary)/0.5)]',
-                      )}
-                    >
-                      <span className="flex-1 truncate text-[11px]" title={a.name}>
-                        {a.name}
-                      </span>
-                      {a.syncedToArtAt ? (
-                        <CheckCircle2 className="size-2.5 shrink-0 text-[hsl(var(--color-success))]" />
-                      ) : (
-                        <Circle className="size-2.5 shrink-0 text-[hsl(var(--color-muted-foreground)/0.5)]" />
-                      )}
-                    </button>
-                  </li>
-                ))}
+                {sortedAssets.map((a) => {
+                  const eps = episodesLabel(a.episodes);
+                  const meta = [
+                    type === 'CHARACTER' ? roleShort(a.characterRole) : '',
+                    eps ? `第${eps}集` : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ');
+                  return (
+                    <li key={a.id}>
+                      <button
+                        onClick={() => setSelectedId(a.id)}
+                        className={cn(
+                          'flex w-full flex-col gap-0.5 px-2 py-1.5 text-left transition-colors',
+                          selectedId === a.id
+                            ? 'bg-[hsl(var(--color-accent)/0.1)]'
+                            : 'hover:bg-[hsl(var(--color-secondary)/0.5)]',
+                        )}
+                      >
+                        <span className="flex items-center gap-1">
+                          <span className="flex-1 truncate text-[11px]" title={a.name}>
+                            {a.name}
+                          </span>
+                          {a.syncedToArtAt ? (
+                            <CheckCircle2 className="size-2.5 shrink-0 text-[hsl(var(--color-success))]" />
+                          ) : (
+                            <Circle className="size-2.5 shrink-0 text-[hsl(var(--color-muted-foreground)/0.5)]" />
+                          )}
+                        </span>
+                        {meta && (
+                          <span
+                            className="truncate text-[9px] text-[hsl(var(--color-muted-foreground))]"
+                            title={meta}
+                          >
+                            {meta}
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
@@ -343,6 +403,7 @@ function SettingEditor({
     monologue: string;
     lifeNodes: LifeNode[];
     voiceLabel: string;
+    episodes: string; // 五七-3:逗号分隔集号,保存时转 number[]
   } | null>(null);
 
   React.useEffect(() => {
@@ -365,6 +426,7 @@ function SettingEditor({
       monologue: asset.monologue ?? '',
       lifeNodes: p.lifeNodes,
       voiceLabel: p.voiceLabel,
+      episodes: (asset.episodes ?? []).join(', '),
     });
   }, [asset]);
 
@@ -407,10 +469,20 @@ function SettingEditor({
   }
 
   const save = (): void => {
+    // 五七-3:出场集 string → number[](去重升序)
+    const parsedEpisodes = Array.from(
+      new Set(
+        form.episodes
+          .split(/[,，、\s]+/)
+          .map((s) => parseInt(s, 10))
+          .filter((n) => Number.isFinite(n) && n > 0),
+      ),
+    ).sort((a, b) => a - b);
     update.mutate({
       assetId,
       patch: {
         name: form.name,
+        episodes: parsedEpisodes,
         characterRole: isChar ? (form.characterRole === '' ? null : (form.characterRole as never)) : undefined,
         gender: isChar ? (form.gender === '' ? null : form.gender) : undefined,
         age: isChar ? (form.age === '' ? null : Number(form.age)) : undefined,
@@ -499,6 +571,14 @@ function SettingEditor({
 
       {/* 名称 */}
       <FieldText label="名称" value={form.name} onChange={(v) => setForm({ ...form, name: v })} rows={1} />
+
+      {/* 五七-3:出场集(排序 + 标注用)*/}
+      <FieldText
+        label="出场集(逗号分隔集号)"
+        value={form.episodes}
+        onChange={(v) => setForm({ ...form, episodes: v })}
+        rows={1}
+      />
 
       {/* 人物基础 */}
       {isChar && (
@@ -711,17 +791,20 @@ function FieldText({
   aiLoading?: boolean;
 }): React.ReactElement {
   const cls =
-    'w-full rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 py-1 text-[11px]';
+    'w-full rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 py-1 text-[11px]';
   return (
     <FieldWrap label={label} onAI={onAI} aiLoading={aiLoading}>
       {rows <= 1 ? (
         <input className={cls} value={value} onChange={(e) => onChange(e.target.value)} />
       ) : (
-        <textarea
-          className={cn(cls, 'resize-y', mono && 'font-mono')}
-          style={{ minHeight: `${rows * 18}px` }}
+        <AutoGrowTextarea
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={onChange}
+          minRows={rows}
+          className={cn(
+            'w-full rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 py-1 text-[11px] leading-relaxed',
+            mono && 'font-mono',
+          )}
         />
       )}
     </FieldWrap>

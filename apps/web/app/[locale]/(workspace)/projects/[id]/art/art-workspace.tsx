@@ -228,7 +228,7 @@ export function ArtWorkspace({ projectId, locale, initialType }: Props): React.R
       </div>
 
       {/* 主区 */}
-      <div className="flex-1 overflow-auto p-5">
+      <div className="flex-1 overflow-auto p-4">
         {isLoading ? (
           <div className="flex h-64 items-center justify-center">
             <Loader2 className="size-6 animate-spin text-[hsl(var(--color-muted-foreground))]" />
@@ -242,15 +242,15 @@ export function ArtWorkspace({ projectId, locale, initialType }: Props): React.R
             onCreate={() => setCreating(true)}
           />
         ) : (
-          <div className="space-y-6">
+          <div className="space-y-4">
             {grouped.map((g) => (
               <div key={g.label || 'default'}>
                 {g.label && (
-                  <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
+                  <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
                     {g.label} · {g.items.length}
                   </h3>
                 )}
-                <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2.5">
                   {g.items.map((a) => {
                     const heroMediaId =
                       a.type === 'CHARACTER'

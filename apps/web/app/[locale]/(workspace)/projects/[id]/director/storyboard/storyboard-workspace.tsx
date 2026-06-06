@@ -94,55 +94,65 @@ export function StoryboardWorkspace({
   const selectEpisode = (id: string): void => updateUrl({ ep: id });
   const selectTab = (t: Tab): void => updateUrl({ tab: t });
 
+  // 五七-2:分集列表仅 剧本管理 / 分镜工坊 需要(灵感创作/剧本拆解项目级)
+  const showSidebar = tab !== 'inspiration' && tab !== 'breakdown';
+
   return (
+    // 五七-2 布局重构:顶部 TopBar(4 tab + 操作)提到全宽行,tab 永远最左对齐;
+    //   分集列表移到下方 grid 内,不再把 tab 挤右。外层 flex-col。
     <div
-      className={`grid h-[calc(100vh-2.75rem)] gap-0 overflow-hidden bg-[hsl(var(--color-background))] ${
-        // 五六收工:剧本拆解 tab 也项目级(资产是项目维度,不挂集),跟灵感创作一样隐藏左栏
-        tab === 'inspiration' || tab === 'breakdown' ? 'grid-cols-1' : 'grid-cols-[260px_1fr]'
-      }`}
+      className="flex h-[calc(100vh-2.75rem)] flex-col overflow-hidden bg-[hsl(var(--color-background))]"
       style={{ ['--storyboard-fs' as string]: `${fontSize}px` }}
     >
-      {/* 左栏：分集列表 — 灵感创作 / 剧本拆解 tab 不显示(项目级,不依赖选中集) */}
-      {tab !== 'inspiration' && tab !== 'breakdown' && (
-        <EpisodeSidebar
-          episodes={episodes ?? []}
-          selectedId={selectedEpisodeId}
-          onSelect={selectEpisode}
-          onAfterArchive={(archivedId) => {
-            // 删的是当前选中集 → 清 URL 上的 ep,让 selectedId 落到第一集
-            if (archivedId === selectedEpisodeId) {
-              const params = new URLSearchParams(window.location.search);
-              params.delete('ep');
-              router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-            }
-          }}
-        />
-      )}
+      <TopBar
+        projectId={projectId}
+        episodeId={selectedEpisodeId}
+        episodeNumber={selectedEpisode?.number}
+        tab={tab}
+        onTabChange={selectTab}
+        fontSize={fontSize}
+        onFontSizeChange={changeFontSize}
+        onAfterAction={() => void refetchEpisodes()}
+      />
 
-      {/* 右侧：顶部 bar + tab 内容 */}
-      <div className="flex h-full min-h-0 flex-col overflow-hidden">
-        <TopBar
-          projectId={projectId}
-          episodeId={selectedEpisodeId}
-          episodeNumber={selectedEpisode?.number}
-          tab={tab}
-          onTabChange={selectTab}
-          fontSize={fontSize}
-          onFontSizeChange={changeFontSize}
-          onAfterAction={() => void refetchEpisodes()}
-        />
-        <div className="min-h-0 flex-1 overflow-auto">
+      <div
+        className={`grid min-h-0 flex-1 gap-0 overflow-hidden ${
+          showSidebar ? 'grid-cols-[260px_1fr]' : 'grid-cols-1'
+        }`}
+      >
+        {/* 左栏：分集列表 — 仅 剧本管理 / 分镜工坊 */}
+        {showSidebar && (
+          <EpisodeSidebar
+            episodes={episodes ?? []}
+            selectedId={selectedEpisodeId}
+            onSelect={selectEpisode}
+            onAfterArchive={(archivedId) => {
+              // 删的是当前选中集 → 清 URL 上的 ep,让 selectedId 落到第一集
+              if (archivedId === selectedEpisodeId) {
+                const params = new URLSearchParams(window.location.search);
+                params.delete('ep');
+                router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+              }
+            }}
+          />
+        )}
+
+        <div className="min-h-0 overflow-auto">
           {tab === 'inspiration' ? (
             // 灵感创作是项目级(不依赖选中集)— 想法 → LLM 生成多集剧本草稿
             <InspirationPane projectId={projectId} />
           ) : tab === 'breakdown' ? (
             // 五六收工:剧本拆解 = 项目级三栏文字界面(资产列表 + 档案编辑 + 关联)
-            //   asset.list/update/createRelation/listRelations/generateProfileField/syncToArt
             <ScriptBreakdownPane projectId={projectId} />
           ) : !selectedEpisodeId ? (
             <EmptyEpisodeState projectId={projectId} locale={locale} />
           ) : tab === 'script' ? (
-            <ScriptPane episodeId={selectedEpisodeId} projectId={projectId} />
+            // 五七-2:传 onSelectEpisode 供「拆解来源」选项目剧本时跳集
+            <ScriptPane
+              episodeId={selectedEpisodeId}
+              projectId={projectId}
+              onSelectEpisode={selectEpisode}
+            />
           ) : (
             <ShotsPane episodeId={selectedEpisodeId} />
           )}

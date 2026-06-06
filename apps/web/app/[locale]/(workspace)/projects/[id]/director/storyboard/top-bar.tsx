@@ -162,9 +162,9 @@ function TabButton({
     <button
       onClick={onClick}
       className={cn(
-        'flex h-7 items-center gap-1.5 rounded px-2.5 text-[13px]',
+        'flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[13px] transition-colors',
         active
-          ? 'bg-[hsl(var(--color-accent)/0.12)] text-[hsl(var(--color-accent))]'
+          ? 'bg-[hsl(var(--color-accent)/0.12)] font-medium text-[hsl(var(--color-accent))] shadow-sm'
           : 'text-[hsl(var(--color-muted-foreground))] hover:bg-[hsl(var(--color-secondary)/0.5)]',
       )}
     >

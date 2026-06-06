@@ -1371,7 +1371,8 @@ export const aigcRouter = router({
           `[generateVideo] provider ${providerId} 不支持 refAudio,丢弃 ${droppedAudio} 个音频 URL`,
         );
       }
-      const refAudioUrls = allAudioUrls;
+      // 五七-3:去重(角色形象绑定自动带的 voiceMediaId 可能与显式 SOUND_VOICE 绑定重复)
+      const refAudioUrls = Array.from(new Set(allAudioUrls));
 
       // 三十六收工 R2:入队 + 失败时回滚 attempt + REFUND 抽到 enqueueVideoJobOrRefund helper
       // (同 failPlaceholder/refundPrepayForAttempt 单一真相源,enqueue 失败统一走 helper)

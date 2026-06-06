@@ -11,6 +11,8 @@ import {
   CheckCircle2,
   Check,
   Info,
+  Upload,
+  Music,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { inferRouterOutputs } from '@trpc/server';
@@ -33,6 +35,8 @@ import {
   type LifeNode,
 } from '@/components/asset-profile-fields';
 import { cn } from '@/lib/utils';
+import { AutoGrowTextarea } from '@/components/auto-grow-textarea';
+import { fileToBase64 } from '@/lib/file-to-base64';
 
 // ---------------------------------------------------------------------------
 // 类型 + 槽位定义
@@ -155,7 +159,7 @@ function UpdateMode({
 
   return (
     <DialogShell onClose={onClose}>
-      <div className="grid h-full grid-cols-[280px_1fr_300px] divide-x divide-[hsl(var(--color-border))]">
+      <div className="grid h-full grid-cols-[360px_1fr_300px] divide-x divide-[hsl(var(--color-border))]">
         <InfoPanel asset={asset} onChanged={handleAfterChange} />
         <GenerationPanel
           asset={asset}
@@ -356,7 +360,7 @@ function DialogShell({
       onClick={onClose}
     >
       <div
-        className="relative h-[90vh] w-full max-w-[1280px] overflow-hidden rounded-lg border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] shadow-2xl"
+        className="relative h-[90vh] w-full max-w-[1360px] overflow-hidden rounded-lg border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <button
@@ -611,12 +615,12 @@ function InfoPanel({
           <Label className="text-[10px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
             描述
           </Label>
-          <textarea
+          <AutoGrowTextarea
             value={editing.description}
-            onChange={(e) => setEditing({ ...editing, description: e.target.value })}
+            onChange={(v) => setEditing({ ...editing, description: v })}
             disabled={isLocked}
-            rows={2}
-            className="rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 py-1.5 text-xs"
+            minRows={2}
+            className="rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 py-1.5 text-xs leading-relaxed"
           />
         </div>
 
@@ -624,12 +628,12 @@ function InfoPanel({
           <Label className="text-[10px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
             提示词
           </Label>
-          <textarea
+          <AutoGrowTextarea
             value={editing.prompt}
-            onChange={(e) => setEditing({ ...editing, prompt: e.target.value })}
+            onChange={(v) => setEditing({ ...editing, prompt: v })}
             disabled={isLocked}
-            rows={6}
-            className="rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 py-1.5 font-mono text-[11px]"
+            minRows={4}
+            className="rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 py-1.5 font-mono text-[11px] leading-relaxed"
           />
         </div>
 
@@ -733,13 +737,11 @@ function InfoPanel({
               <Label className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
                 内心独白
               </Label>
-              <textarea
+              <AutoGrowTextarea
                 value={editing.monologue}
-                onChange={(e) =>
-                  setEditing({ ...editing, monologue: e.target.value.slice(0, 2000) })
-                }
-                rows={2}
-                className="rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 py-1.5 text-xs"
+                onChange={(v) => setEditing({ ...editing, monologue: v.slice(0, 2000) })}
+                minRows={2}
+                className="rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 py-1.5 text-xs leading-relaxed"
               />
             </div>
 
@@ -766,6 +768,14 @@ function InfoPanel({
                 className="h-8 text-sm"
               />
             </div>
+
+            {/* 五七-3:参考音频(配音参考)— 视频生成时绑该角色自动带上 */}
+            <VoiceField
+              assetId={asset.id}
+              projectId={asset.projectId}
+              voiceMediaId={asset.voiceMediaId}
+              onChanged={onChanged}
+            />
           </div>
         )}
 
@@ -801,6 +811,118 @@ function InfoPanel({
 }
 
 // ---------------------------------------------------------------------------
+// 五七-3:参考音频字段(配音参考)— 上传 audio → voiceMediaId;视频生成绑该角色自动带上
+// ---------------------------------------------------------------------------
+
+function VoiceField({
+  assetId,
+  projectId,
+  voiceMediaId,
+  onChanged,
+}: {
+  assetId: string;
+  projectId: string;
+  voiceMediaId: string | null;
+  onChanged: () => void;
+}): React.ReactElement {
+  const fileRef = React.useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = React.useState(false);
+  const upload = trpc.media.upload.useMutation();
+  const updateMut = trpc.asset.update.useMutation();
+  const { data: signed } = trpc.media.getSignedUrl.useQuery(
+    { mediaId: voiceMediaId ?? '', expiresInSeconds: 3600 },
+    { enabled: !!voiceMediaId },
+  );
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setBusy(true);
+    try {
+      const base64 = await fileToBase64(file);
+      const media = await upload.mutateAsync({
+        filename: file.name,
+        fileBase64: base64,
+        kind: 'AUDIO',
+        scope: 'PROJECT',
+        projectId,
+        mimeType: file.type || undefined,
+      });
+      await updateMut.mutateAsync({ assetId, patch: { voiceMediaId: media.id } });
+      toast.success('参考音频已上传');
+      onChanged();
+    } catch (err) {
+      toast.error(`上传失败:${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clear = async (): Promise<void> => {
+    setBusy(true);
+    try {
+      await updateMut.mutateAsync({ assetId, patch: { voiceMediaId: null } });
+      toast.success('已清除参考音频');
+      onChanged();
+    } catch (err) {
+      toast.error(`清除失败:${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="grid gap-1">
+      <Label className="flex items-center gap-1 text-[10px] text-[hsl(var(--color-muted-foreground))]">
+        <Music className="size-3" />
+        参考音频(配音参考 · 视频生成绑该角色时自动带上)
+      </Label>
+      <input ref={fileRef} type="file" accept="audio/*" className="hidden" onChange={handleFile} />
+      {voiceMediaId ? (
+        <div className="flex items-center gap-2">
+          {signed?.url ? (
+            // eslint-disable-next-line jsx-a11y/media-has-caption
+            <audio controls src={signed.url} className="h-8 min-w-0 flex-1" />
+          ) : (
+            <span className="flex-1 text-[11px] text-[hsl(var(--color-muted-foreground))]">
+              已上传(加载试听…)
+            </span>
+          )}
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={busy}
+            className="shrink-0 rounded p-1 text-[hsl(var(--color-muted-foreground))] hover:bg-[hsl(var(--color-secondary)/0.5)]"
+            title="替换"
+          >
+            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
+          </button>
+          <button
+            onClick={clear}
+            disabled={busy}
+            className="shrink-0 rounded p-1 text-[hsl(var(--color-muted-foreground))] hover:bg-[hsl(var(--color-destructive)/0.1)] hover:text-[hsl(var(--color-destructive))]"
+            title="清除"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      ) : (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => fileRef.current?.click()}
+          disabled={busy}
+          className="h-8 gap-1.5 text-xs"
+        >
+          {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
+          上传参考音频
+        </Button>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // 中:生成 + 预览 + 候选备用区
 // ---------------------------------------------------------------------------
 
@@ -821,6 +943,52 @@ function GenerationPanel({
   const [sizePx, setSizePx] = React.useState<string>('2K (2048)');
   const [extraInstruction, setExtraInstruction] = React.useState('');
   const [count, setCount] = React.useState(1);
+  // 五七-3:图生图参考图 + 强度 + 负面词
+  const [refImageIds, setRefImageIds] = React.useState<string[]>([]);
+  const [refPreviews, setRefPreviews] = React.useState<Record<string, string>>({});
+  const [strength, setStrength] = React.useState(0.6);
+  const [extraNegative, setExtraNegative] = React.useState('');
+  const [refUploading, setRefUploading] = React.useState(false);
+  const refFileRef = React.useRef<HTMLInputElement>(null);
+  const uploadRef = trpc.media.upload.useMutation();
+
+  const handleRefFiles = async (files: File[]): Promise<void> => {
+    const imgs = files.filter((f) => f.type.startsWith('image/'));
+    if (imgs.length === 0) return;
+    setRefUploading(true);
+    try {
+      for (const file of imgs) {
+        if (refImageIds.length >= 16) break;
+        const base64 = await fileToBase64(file);
+        const media = await uploadRef.mutateAsync({
+          filename: file.name,
+          fileBase64: base64,
+          kind: 'IMAGE',
+          scope: 'PROJECT',
+          projectId: asset.projectId,
+          mimeType: file.type || undefined,
+        });
+        const objUrl = URL.createObjectURL(file);
+        setRefImageIds((prev) => [...prev, media.id].slice(0, 16));
+        setRefPreviews((prev) => ({ ...prev, [media.id]: objUrl }));
+      }
+      toast.success('参考图已上传');
+    } catch (err) {
+      toast.error(`参考图上传失败:${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setRefUploading(false);
+    }
+  };
+  const removeRef = (id: string): void => {
+    setRefImageIds((prev) => prev.filter((x) => x !== id));
+    setRefPreviews((prev) => {
+      const next = { ...prev };
+      const u = next[id];
+      if (u) URL.revokeObjectURL(u);
+      delete next[id];
+      return next;
+    });
+  };
 
   const { data: candidates, refetch: refetchCandidates } = trpc.asset.listCandidates.useQuery({
     assetId: asset.id,
@@ -956,6 +1124,89 @@ function GenerationPanel({
           </select>
         </div>
 
+        {/* 五七-3:参考图(图生图)+ 强度 + 负面词 */}
+        <div
+          className="mt-2 rounded-md border border-dashed border-[hsl(var(--color-border))] p-2"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            void handleRefFiles(Array.from(e.dataTransfer.files));
+          }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
+              参考图(图生图 · 拖入或选择,≤16 张 · 视模型支持)
+            </span>
+            <button
+              type="button"
+              onClick={() => refFileRef.current?.click()}
+              disabled={refUploading}
+              className="flex items-center gap-1 text-[10px] text-[hsl(var(--color-accent))] hover:underline disabled:opacity-50"
+            >
+              {refUploading ? <Loader2 className="size-2.5 animate-spin" /> : <Upload className="size-2.5" />}
+              添加
+            </button>
+          </div>
+          <input
+            ref={refFileRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              void handleRefFiles(Array.from(e.target.files ?? []));
+              e.target.value = '';
+            }}
+          />
+          {refImageIds.length > 0 && (
+            <>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {refImageIds.map((id) => (
+                  <div
+                    key={id}
+                    className="group relative size-12 overflow-hidden rounded border border-[hsl(var(--color-border))]"
+                  >
+                    {refPreviews[id] ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={refPreviews[id]} alt="" className="size-full object-cover" />
+                    ) : (
+                      <ImageIcon className="m-auto size-4 opacity-40" />
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeRef(id)}
+                      className="absolute right-0 top-0 rounded-bl bg-black/60 p-0.5 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                    >
+                      <X className="size-2.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-1.5 flex items-center gap-2">
+                <span className="text-[10px] text-[hsl(var(--color-muted-foreground))]">参考强度</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={strength}
+                  onChange={(e) => setStrength(Number(e.target.value))}
+                  className="flex-1 accent-[hsl(var(--color-accent))]"
+                />
+                <span className="w-8 text-right font-mono text-[10px] text-[hsl(var(--color-muted-foreground))]">
+                  {strength.toFixed(2)}
+                </span>
+              </div>
+            </>
+          )}
+          <Input
+            value={extraNegative}
+            onChange={(e) => setExtraNegative(e.target.value)}
+            placeholder="负面词(逗号分隔,如&quot;模糊,多手,变形&quot;)"
+            className="mt-1.5 h-7 text-xs"
+          />
+        </div>
+
         <div className="mt-2 flex gap-2">
           <Input
             value={extraInstruction}
@@ -973,6 +1224,15 @@ function GenerationPanel({
                 aspectRatio,
                 sizePx,
                 extraInstruction: extraInstruction || undefined,
+                refImageIds: refImageIds.length > 0 ? refImageIds : undefined,
+                strength: refImageIds.length > 0 ? strength : undefined,
+                extraNegative: extraNegative.trim()
+                  ? extraNegative
+                      .split(/[,，]/)
+                      .map((s) => s.trim())
+                      .filter(Boolean)
+                      .slice(0, 20)
+                  : undefined,
               })
             }
             disabled={generateMut.isPending}

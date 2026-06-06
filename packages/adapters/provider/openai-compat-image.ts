@@ -79,6 +79,13 @@ function aspectRatioToSize(aspect: string | undefined, fallback: string): string
   return map[aspect] ?? fallback;
 }
 
+/** 解析 OpenAI 图像响应 → URL 列表(兼容 url 直链 与 b64_json,后者转 data URL)*/
+function extractImageUrls(resp: OpenAIImageResponse): string[] {
+  return (resp.data ?? [])
+    .map((d) => d.url ?? (d.b64_json ? `data:image/png;base64,${d.b64_json}` : undefined))
+    .filter((u): u is string => typeof u === 'string' && u.length > 0);
+}
+
 export class OpenAICompatImageProvider extends BaseProvider implements IImageProvider {
   readonly info: ProviderInfo;
 
@@ -105,6 +112,11 @@ export class OpenAICompatImageProvider extends BaseProvider implements IImagePro
     const size = aspectRatioToSize(req.aspectRatio, this.cfg.defaultSize ?? '1024x1024');
 
     await this.checkBudget(ctx.projectId, this.estimateCost(req));
+
+    // 五七-3:有参考图 → 走图生图 /images/edits(multipart);否则保持文生图 /images/generations
+    if (req.refImageUrls && req.refImageUrls.length > 0) {
+      return this.generateViaEdits(req, ctx, modelId, n, size);
+    }
 
     const body: Record<string, unknown> = {
       model: modelId,
@@ -154,9 +166,7 @@ export class OpenAICompatImageProvider extends BaseProvider implements IImagePro
       this.wrapCallError(e);
     }
 
-    const imageUrls = (resp.data ?? [])
-      .map((d) => d.url)
-      .filter((u): u is string => typeof u === 'string' && u.length > 0);
+    const imageUrls = extractImageUrls(resp);
 
     if (imageUrls.length === 0) {
       throw new ProviderError(this.info.id, 'No image URLs in response (data 数组为空)');
@@ -185,6 +195,108 @@ export class OpenAICompatImageProvider extends BaseProvider implements IImagePro
       imageUrls,
       width,
       height,
+      costCny,
+      rawResponse: resp,
+    };
+  }
+
+  /**
+   * 五七-3:图生图 — POST /images/edits(multipart/form-data)。
+   * fetch 每张参考图 bytes 作 image[](OpenAI gpt-image 兼容,上限 16),prompt/model/size/n + req.extra 透传。
+   * ⚠️ 各中转站对 Seedream/GPT-Image 的 edits 入参可能不同(字段名 image vs image[]、是否支持 strength)—
+   *    错误信息透出便于真打迭代。响应兼容 url 与 b64_json。
+   */
+  private async generateViaEdits(
+    req: ImageRequest,
+    ctx: CallContext,
+    modelId: string,
+    n: number,
+    size: string,
+  ): Promise<ImageResult> {
+    const form = new FormData();
+    form.append('model', modelId);
+    form.append('prompt', req.prompt);
+    form.append('n', String(n));
+    form.append('size', size);
+    if (req.extra) {
+      for (const [k, v] of Object.entries(req.extra)) {
+        if (v != null) form.append(k, String(v));
+      }
+    }
+    // 取参考图 bytes(最多 16 张)
+    const refs = (req.refImageUrls ?? []).slice(0, 16);
+    for (let i = 0; i < refs.length; i++) {
+      const u = refs[i]!;
+      const imgResp = await fetch(u, { signal: AbortSignal.timeout(30_000) });
+      if (!imgResp.ok) {
+        throw new ProviderError(
+          this.info.id,
+          `参考图下载失败(HTTP ${imgResp.status}): ${u.slice(0, 80)}`,
+        );
+      }
+      const blob = await imgResp.blob();
+      form.append('image[]', blob, `ref-${i}.png`);
+    }
+
+    let resp: OpenAIImageResponse;
+    try {
+      const r = await fetch(`${this.cfg.apiUrl}/images/edits`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${this.cfg.apiKey}` },
+        body: form,
+        signal: AbortSignal.timeout(180_000),
+      });
+      const text = await r.text();
+      if (!r.ok) {
+        let parsed: OpenAIErrorResponse | null = null;
+        try {
+          parsed = JSON.parse(text) as OpenAIErrorResponse;
+        } catch {
+          /* not json */
+        }
+        throw new ProviderError(
+          this.info.id,
+          parsed?.error?.message ?? `图生图 HTTP ${r.status}: ${text.slice(0, 300)}`,
+        );
+      }
+      resp = JSON.parse(text) as OpenAIImageResponse;
+    } catch (e) {
+      await this.recordLedger({
+        ctx,
+        providerId: modelId,
+        modelId,
+        action: 'image.generate',
+        inputUnits: n,
+        outputUnits: 0,
+        unitPriceCny: this.cfg.unitPriceCny,
+        success: false,
+      });
+      this.wrapCallError(e);
+    }
+
+    const imageUrls = extractImageUrls(resp);
+    if (imageUrls.length === 0) {
+      throw new ProviderError(this.info.id, '图生图返回无图(data 数组为空)');
+    }
+    const actualN = imageUrls.length;
+    const costCny = actualN * this.cfg.unitPriceCny;
+
+    await this.recordLedger({
+      ctx,
+      providerId: modelId,
+      modelId,
+      action: 'image.generate',
+      inputUnits: n,
+      outputUnits: actualN,
+      unitPriceCny: this.cfg.unitPriceCny,
+      success: true,
+    });
+
+    const [widthStr, heightStr] = (resp.data?.[0]?.size ?? size).split('x');
+    return {
+      imageUrls,
+      width: Number(widthStr) || undefined,
+      height: Number(heightStr) || undefined,
       costCny,
       rawResponse: resp,
     };

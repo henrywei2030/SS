@@ -75,7 +75,8 @@ export function AssetCard({ asset, heroUrl, bindings, onClick }: Props): React.R
         : asset.mainMediaId;
 
   // 卡片比例 — 人物 9:16,场景/道具 16:9
-  const aspectClass = asset.type === 'CHARACTER' ? 'aspect-[9/16]' : 'aspect-[16/9]';
+  // 五七-3:紧凑视图 — 人物卡缩略用 3:4(原 9:16 太高),场景/道具 16:9
+  const aspectClass = asset.type === 'CHARACTER' ? 'aspect-[3/4]' : 'aspect-[16/9]';
 
   // 主标签 — 优先角色 > importance > type
   const primaryBadge =
@@ -145,9 +146,9 @@ export function AssetCard({ asset, heroUrl, bindings, onClick }: Props): React.R
       </div>
 
       {/* 卡片底部信息 */}
-      <div className="flex flex-col gap-1 p-2.5">
+      <div className="flex flex-col gap-0.5 p-2">
         <div className="flex items-baseline justify-between gap-2">
-          <div className="truncate text-[13px] font-medium">{asset.name}</div>
+          <div className="truncate text-[12px] font-medium">{asset.name}</div>
           {asset.archetypeKey && asset.archetypeKey !== asset.name && (
             <span
               title={`原型:${asset.archetypeKey}`}
