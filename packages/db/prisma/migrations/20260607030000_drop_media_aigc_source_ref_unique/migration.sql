@@ -1,0 +1,12 @@
+-- 五八-fix:删除 MediaItem.sourceRef 的 AIGC partial unique 约束
+--
+-- 背景:20260524 加它(media_items_aigc_source_ref_uniq:UNIQUE(sourceRef) WHERE source='AIGC' AND sourceRef IS NOT NULL AND deletedAt IS NULL)
+--   初衷是防 provider 重试/双写时"同 sourceRef=attemptId 重复 mediaItem.create"。
+-- 问题:现 asset.generateImage 用 sourceRef=asset.id(供 confirmCandidate 校验候选归属),
+--   导致同一资产**第二次生成候选**即撞该唯一约束 →
+--   "Invalid prisma.mediaItem.create() invocation: Unique constraint failed on the fields: (sourceRef)"
+--   (用户实测:已生成并确认一张后,再次点"开始生成"必失败)。
+-- 结论:候选池语义本就是"一资产多候选/可多次重生";
+--   listCandidates 靠 GenerationAttempt.outputMediaIds 关联、confirmCandidate 靠 sourceRef===asset.id 值校验(非唯一),
+--   都不依赖该唯一约束。单次调用内的双写已由 $transaction 防住。故删除此唯一索引。
+DROP INDEX IF EXISTS "media_items_aigc_source_ref_uniq";

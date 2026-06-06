@@ -63,20 +63,25 @@ interface OpenAIErrorResponse {
   };
 }
 
-/** 把 aspectRatio (如 '16:9') 映射到 size 字符串 (像素) */
+/**
+ * 把 aspectRatio (如 '16:9') 映射到 size 字符串 (像素)。
+ * ⚠️ 五八-fix:Seedream 5.0 要求图像 ≥3,686,400 像素(≈2.5K),原映射(1080x1920=2.07M)太小被拒。
+ *   统一提到 ~2.5K 档,各比例总像素均 ≥3.69M。(注:gpt-image/DALL-E 只接受固定 1024 档 —
+ *   当前 binding 是 Seedream;真正的 per-model 尺寸映射留 Phase 2,届时按 cfg.defaultModel 分支。)
+ */
 function aspectRatioToSize(aspect: string | undefined, fallback: string): string {
   if (!aspect) return fallback;
-  // 常见映射(seedream / DALL-E 都支持这些 sizes)
   const map: Record<string, string> = {
-    '1:1': '1024x1024',
-    '16:9': '1920x1080',
-    '9:16': '1080x1920',
-    '4:3': '1024x768',
-    '3:4': '768x1024',
-    '2:3': '768x1152',
-    '3:2': '1152x768',
+    '1:1': '2048x2048', //  4.19M
+    '16:9': '2688x1512', // 4.06M
+    '9:16': '1512x2688', // 4.06M
+    '4:3': '2304x1728', //  3.98M
+    '3:4': '1728x2304', //  3.98M
+    '2:3': '1664x2496', //  4.15M
+    '3:2': '2496x1664', //  4.15M
+    '2:1': '2912x1456', //  4.24M(全景)
   };
-  return map[aspect] ?? fallback;
+  return map[aspect] ?? '2048x2048';
 }
 
 /** 解析 OpenAI 图像响应 → URL 列表(兼容 url 直链 与 b64_json,后者转 data URL)*/

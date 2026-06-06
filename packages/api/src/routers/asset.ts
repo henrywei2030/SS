@@ -1660,8 +1660,9 @@ export const assetRouter = router({
             count: input.count,
             aspectRatio,
             mode: input.slot === 'three_view' ? 'three_view' : input.slot === 'panorama' ? 'panorama_360' : 'standard',
-            model: input.modelId,
-            // 五七-3:有参考图 → adapter 走 /images/edits 图生图;strength 经 extra 透传(视模型支持)
+            // 五八-fix:不要把 input.modelId(= providerId,带 moyu- 前缀)当 model 名发给中转站!
+            //   providerId 只用于上面 getImageProvider() 选配置;真实模型名由该配置 defaultModel 提供
+            //   (adapter:req.model ?? cfg.defaultModel)。原来误传 providerId → moyu 找不到模型 → 无可用渠道(从没到引擎)。
             refImageUrls,
             ...(input.strength != null ? { extra: { strength: input.strength } } : {}),
           },

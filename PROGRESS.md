@@ -11,6 +11,12 @@
 
 承五七真打,用户连环 UI/特性反馈,边测边改(dev 起在 :3000,日志 /tmp/ss-dev.log 我实时盯)。
 
+### 0、真打追修(五八-fix · 收工后在线调试,均已验证出图)
+- **图片生成打通**:真打报错定位两个真因 —— ① `generateImage` 把 `input.modelId`(= providerId `moyu-doubao-seedream-5-0`,带前缀)当 `model` 名发给 moyu → 路由层「无可用渠道」拒(**moyu 后台无引擎调用记录**即此)→ 删 `model: input.modelId`,改由 adapter 用配置 `defaultModel`(真实名 `doubao-seedream-5-0-260128`);② Seedream 5.0 要求图 ≥3,686,400 像素,`aspectRatioToSize` 映射太小(9:16=2.07M)被拒 → 提到 ~2.5K 档(均 ≥3.69M)。两修后**文生图成功出图**(林默形象图)。
+- **再次生成失败修复**:`MediaItem.sourceRef` 的 AIGC partial unique(`media_items_aigc_source_ref_uniq`,20260524 为防双写加)挡住同资产第二张候选(`sourceRef=asset.id` 撞唯一)→ 新 migration `20260607030000_drop_media_aigc_source_ref_unique` 删之(已 deploy)。候选池本就一资产多候选;listCandidates 靠 outputMediaIds、confirmCandidate 靠 sourceRef 值校验,不依赖唯一。
+- **三视图一步到位**:「已确认三视图」tab 下加按钮「用形象图生成三视图」—— 以已确认 portrait 为参考图(图生图 /images/edits)+ 三视图 prompt 生成。**临时脚本真打验证 /images/edits 对 moyu Seedream 走通**(image[] multipart,出图 cost 0.22,无需调格式)。
+- **美术缩图**:候选卡 + 已确认槽改 `object-contain` + 限高(52vh/44vh)→ 一屏看完整图。
+
 ### 一、剧本管理界面重构(用户:4 tab 不齐 + 拆解来源应是仓库 + UI 质感)
 - **导演 4 tab 统一靠左**(根因:`storyboard-workspace` 把 TopBar 渲染在 grid 右列 → 剧本管理/分镜工坊被 260px 侧栏挤右)→ 改 flex-col,**TopBar 提到 grid 之上全宽行**,tab 永远最左。
 - **拆解来源仓库化**(`script-pane` BreakdownSourceView):两组 = ① 灵感创作顶置草稿(`inspiration.listDrafts pinnedOnly`)② 项目正式剧本(`script.list`)。**草稿点「导入为正式剧本」→ 确认 → linkInspirationEpisodes 转正 → 集列表+内容统一更新**(用户拍板:选中即自动关联转正);项目剧本点击 → 跳到该集(onSelectEpisode)。

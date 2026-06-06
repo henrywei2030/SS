@@ -1074,6 +1074,46 @@ function GenerationPanel({
           ))}
         </div>
 
+        {/* 五八:三视图一步到位 — 以已确认人物形象图为参考(图生图)直接生成三视图 */}
+        {selectedSlot === 'three_view' && asset.portraitMediaId && (
+          <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-[hsl(var(--color-accent)/0.4)] bg-[hsl(var(--color-accent)/0.08)] px-2.5 py-2">
+            <span className="text-[11px] text-[hsl(var(--color-foreground))]">
+              一步到位:以已确认的人物形象图为参考,直接生成三视图
+            </span>
+            <Button
+              size="sm"
+              onClick={() =>
+                generateMut.mutate({
+                  assetId: asset.id,
+                  slot: 'three_view',
+                  count: 1,
+                  aspectRatio: '16:9',
+                  sizePx,
+                  refImageIds: [asset.portraitMediaId!],
+                  strength,
+                  extraInstruction: extraInstruction || undefined,
+                  extraNegative: extraNegative.trim()
+                    ? extraNegative
+                        .split(/[,，]/)
+                        .map((x) => x.trim())
+                        .filter(Boolean)
+                        .slice(0, 20)
+                    : undefined,
+                })
+              }
+              disabled={generateMut.isPending}
+              className="shrink-0 gap-1.5"
+            >
+              {generateMut.isPending ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="size-3.5" />
+              )}
+              用形象图生成三视图
+            </Button>
+          </div>
+        )}
+
         {/* 生成参数 */}
         <div className="mt-2 grid grid-cols-4 gap-2">
           <select
@@ -1344,13 +1384,14 @@ function CandidateCard({
       <div
         onClick={onOpenInfo}
         className={cn(
-          'relative flex cursor-pointer items-center justify-center bg-[hsl(var(--color-secondary)/0.3)]',
+          // 五八:限高 + object-contain → 一屏看完整图,不被竖图撑爆
+          'relative flex max-h-[52vh] cursor-pointer items-center justify-center bg-[hsl(var(--color-secondary)/0.3)]',
           aspectClass,
         )}
       >
         {url ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={url} alt="" className="absolute inset-0 size-full object-cover" />
+          <img src={url} alt="" className="absolute inset-0 size-full object-contain" />
         ) : (
           <ImageIcon className="size-8 text-[hsl(var(--color-muted-foreground)/0.4)]" />
         )}
@@ -1433,7 +1474,8 @@ function ConfirmedSlotsPanel({
               </div>
               <div
                 className={cn(
-                  'relative flex items-center justify-center overflow-hidden rounded border bg-[hsl(var(--color-secondary)/0.3)]',
+                  // 五八:限高 + 下面 object-contain → 已确认槽位也一屏看完整
+                  'relative flex max-h-[44vh] items-center justify-center overflow-hidden rounded border bg-[hsl(var(--color-secondary)/0.3)]',
                   s.aspectClass,
                   mediaId
                     ? 'border-[hsl(var(--color-accent)/0.5)]'
@@ -1447,7 +1489,7 @@ function ConfirmedSlotsPanel({
                     const url = media?.cdnUrl ?? media?.storageKey;
                     return url ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={url} alt={s.label} className="absolute inset-0 size-full object-cover" />
+                      <img src={url} alt={s.label} className="absolute inset-0 size-full object-contain" />
                     ) : (
                       <div className="flex flex-col items-center gap-1 text-[10px] text-[hsl(var(--color-muted-foreground))]">
                         <CheckCircle2 className="size-5 text-[hsl(var(--color-accent))]" />
