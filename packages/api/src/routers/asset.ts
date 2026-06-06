@@ -15,6 +15,7 @@ import { z } from 'zod';
 
 import {
   breakdownAssets,
+  breakdownFullSettings,
   type AssetDraft,
   compileAssetPrompt,
 } from '@ss/core/asset';
@@ -46,6 +47,35 @@ async function loadAssetWithAccess(ctx: Context, assetId: string) {
   if (!asset) throw new TRPCError({ code: 'NOT_FOUND', message: '资产不存在' });
   await assertProjectAccess(ctx, asset.projectId);
   return asset;
+}
+
+/**
+ * 聚合项目「完整剧本」(五六-2 剧本拆解 / 定点重生成的输入)。
+ * 取所有集 isCurrent 剧本(含项目级 episodeId=null),按集号拼接,带集标题分隔。
+ * maxChars 截断防超 context(剧本拆解传大值用全文,定点重生成传小值省 token)。
+ */
+async function loadProjectFullScript(
+  ctx: Context,
+  projectId: string,
+  maxChars = 200_000,
+): Promise<{ text: string; scriptCount: number; truncated: boolean }> {
+  const scripts = await ctx.prisma.script.findMany({
+    where: { projectId, isCurrent: true, deletedAt: null },
+    select: { content: true, episode: { select: { number: true, title: true } } },
+  });
+  if (scripts.length === 0) return { text: '', scriptCount: 0, truncated: false };
+  const sorted = [...scripts].sort(
+    (a, b) => (a.episode?.number ?? 1e9) - (b.episode?.number ?? 1e9),
+  );
+  const full = sorted
+    .map((s) => {
+      const ep = s.episode;
+      const header = ep ? `=== 第${ep.number}集${ep.title ? ' ' + ep.title : ''} ===` : '=== 剧本 ===';
+      return `${header}\n${s.content}`;
+    })
+    .join('\n\n');
+  const truncated = full.length > maxChars;
+  return { text: truncated ? full.slice(0, maxChars) : full, scriptCount: scripts.length, truncated };
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +156,8 @@ const ProfileFieldsSchema = {
   mbti: z.string().max(8).optional(),
   personalityTags: z.array(z.string().max(30)).max(20).optional(),
   monologue: z.string().max(2000).optional(),
+  // 五六-2:人物小传(背景故事,LLM 拆解生成 + 人工微调)
+  bio: z.string().max(4000).optional(),
   profileJson: ProfileJsonSchema.optional(),
 };
 
@@ -476,6 +508,7 @@ export const assetRouter = router({
             mbti: z.string().max(8).nullable().optional(),
             personalityTags: z.array(z.string().max(30)).max(20).optional(),
             monologue: z.string().max(2000).nullable().optional(),
+            bio: z.string().max(4000).nullable().optional(),
             profileJson: ProfileJsonSchema.optional(),
             voiceMediaId: z.string().cuid().nullable().optional(),
             voiceModelId: z.string().max(100).nullable().optional(),
@@ -761,7 +794,9 @@ export const assetRouter = router({
           {
             system: '你是资深编剧 / 人物设定师。基于已知人物信息补全指定字段。严格只输出要求的内容,不要解释。',
             prompt: `【已知人物信息】\n${known}\n\n【任务】${spec.task}`,
-            maxTokens: 1000,
+            // 五六-2:放宽到 4000 给 thinking 模型(如 gemini-3-flash)留推理预算 —— 实测小 maxTokens
+            //   会被 thinking token 耗尽返空文本;非 thinking 模型产短字段会提前停,cap 大不浪费
+            maxTokens: 4000,
             temperature: 0.85,
             ...(spec.json ? { jsonSchema: {} } : {}),
           },
@@ -832,6 +867,129 @@ export const assetRouter = router({
         value,
         warning: parseFailed ? 'AI 输出解析失败,请重试' : undefined,
       };
+    }),
+
+  /**
+   * 五六-2:定点(重)生成某资产的某段设定(description 形象/场景/道具描述 · prompt 生图词 · bio 人物小传)。
+   * 用「完整剧本」+「该资产已知设定」做上下文,支撑前端每段的「AI 重新生成」。建 attempt 审计。
+   */
+  generateAssetText: protectedProcedure
+    .meta({
+      agentTool: {
+        description: '基于完整剧本 + 已知设定,(重)生成资产的 description/prompt/bio',
+        sideEffects: ['extern.api:TextProvider', 'cost.deduct', 'db.create:GenerationAttempt'],
+        costEstimateCny: 0.05,
+        requireConfirm: false,
+      },
+    })
+    .input(
+      z.object({
+        assetId: z.string().cuid(),
+        field: z.enum(['description', 'prompt', 'bio']),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const asset = await loadAssetWithAccess(ctx, input.assetId);
+      if (input.field === 'bio' && asset.type !== 'CHARACTER') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: '人物小传仅人物资产适用' });
+      }
+      const settings = await loadSystemSettings(ctx.prisma, ['binding.asset.breakdown.modelId']);
+      const modelId = settings['binding.asset.breakdown.modelId'];
+      if (!modelId) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '资产设定 AI 生成未配置 LLM — 去 /admin/bindings 配 binding.asset.breakdown.modelId',
+        });
+      }
+      const provider = await getTextProvider(modelId);
+      const { text: scriptText } = await loadProjectFullScript(ctx, asset.projectId, 40_000);
+
+      const typeLabel = asset.type === 'CHARACTER' ? '人物' : asset.type === 'SCENE' ? '场景' : '道具';
+      const known = [
+        `姓名/名称:${asset.name}`,
+        asset.characterRole ? `角色定位:${asset.characterRole}` : null,
+        asset.gender ? `性别:${asset.gender}` : null,
+        asset.age != null ? `年龄:${asset.age}` : null,
+        asset.description ? `现有外形/描述:${asset.description}` : null,
+        asset.bio ? `现有小传:${asset.bio}` : null,
+      ]
+        .filter(Boolean)
+        .join('\n');
+
+      const FIELD_TASK: Record<typeof input.field, string> = {
+        description:
+          asset.type === 'CHARACTER'
+            ? '人物形象设定(120-200字:脸型/五官/眼神 + 体型身高 + 发型发色 + 典型服饰款式材质配饰 + 标志特征/气质,稳定视觉锚,利于生图一致)'
+            : asset.type === 'SCENE'
+              ? '场景设定描述(120-200字:空间结构 + 陈设布局 + 材质色调 + 时段天气 + 光影方向质感 + 氛围情绪,尽量完善利于生图)'
+              : '道具设定描述(80-150字:外形尺寸 + 材质工艺 + 年代磨损使用痕迹 + 颜色纹理 + 戏剧功能与象征)',
+        prompt: '生图提示词(把视觉设定浓缩为可直接送图像模型的 spec,不含镜头/构图/机位词)',
+        bio: '人物小传(200-400字:出身家世 + 核心动机/欲望/创伤 + 贯穿全剧人物弧光 + 与主要人物关系,基于剧本合理推演)',
+      };
+
+      const attemptStartedAt = new Date();
+      const attempt = await ctx.prisma.generationAttempt.create({
+        data: {
+          projectId: asset.projectId,
+          assetId: asset.id,
+          providerId: modelId,
+          modelId,
+          action: 'TEXT',
+          inputJson: { kind: 'asset.generateAssetText', field: input.field },
+          outputMediaIds: [],
+          inputUnits: 0,
+          outputUnits: 0,
+          unitPriceCny: '0',
+          costCny: '0',
+          status: 'RUNNING',
+          startedAt: attemptStartedAt,
+          createdBy: ctx.user.id,
+        },
+      });
+
+      let result;
+      try {
+        result = await provider.generate(
+          {
+            system:
+              '你是顶级影视制作设计 + 编剧。基于【完整剧本】和【已知设定】(重新)生成指定字段。严格只输出该字段正文,不要解释 / markdown / 字段名前缀。',
+            prompt: `【完整剧本】\n${scriptText || '(暂无剧本,仅据已知设定专业发挥)'}\n\n【该${typeLabel}已知设定】\n${known}\n\n【任务】为「${asset.name}」生成${FIELD_TASK[input.field]}。`,
+            // 五六-2:放宽到 4000 给 thinking 模型留推理预算(同 generateProfileField)
+            maxTokens: 4000,
+            temperature: 0.5,
+          },
+          { userId: ctx.user.id, projectId: asset.projectId, assetId: asset.id, attemptId: attempt.id },
+        );
+      } catch (e) {
+        const failedAt = new Date();
+        console.error('[asset.generateAssetText] LLM failed (raw):', e);
+        const errMsg = sanitizeErrorMsg(e);
+        await ctx.prisma.generationAttempt.update({
+          where: { id: attempt.id },
+          data: {
+            status: 'FAILED',
+            errorMsg: errMsg,
+            finishedAt: failedAt,
+            durationMs: failedAt.getTime() - attemptStartedAt.getTime(),
+          },
+        });
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: errMsg || 'AI 生成失败', cause: e });
+      }
+
+      const finishedAt = new Date();
+      await ctx.prisma.generationAttempt.update({
+        where: { id: attempt.id },
+        data: {
+          status: 'SUCCESS',
+          inputUnits: result.inputTokens,
+          outputUnits: result.outputTokens,
+          costCny: result.costCny.toFixed(4),
+          finishedAt,
+          durationMs: finishedAt.getTime() - attemptStartedAt.getTime(),
+        },
+      });
+
+      return { field: input.field, value: result.text.trim() };
     }),
 
   // ---- 同步到美术工坊(2026-06 P1:剧本拆解文字定稿 → 翻转同步闸)----
@@ -1069,6 +1227,258 @@ export const assetRouter = router({
         modelId,
         scriptId: script.id,
         warning: result.warning,
+      };
+    }),
+
+  /**
+   * 五六-2:从「完整剧本」拆解富设定 → 返回草稿(不写库,草稿审阅再应用)。
+   * 聚合项目所有集当前剧本喂 LLM,产人物(形象 + 小传)/ 场景 / 道具富设定;
+   * 每条附 matchedAssetId(按 archetypeKey/name 匹配已有资产),前端据此区分 新建/更新。
+   */
+  breakdownProject: protectedProcedure
+    .meta({
+      agentTool: {
+        description: '从完整剧本拆解人物/场景/道具完整文字设定(形象+小传),返回草稿不入库',
+        sideEffects: ['extern.api:TextProvider', 'cost.deduct', 'db.create:GenerationAttempt'],
+        costEstimateCny: 0.5,
+        requireConfirm: false,
+      },
+    })
+    .input(
+      z.object({
+        projectId: z.string().cuid(),
+        modelId: z.string().max(100).optional(),
+        // 五六-2:分类型拆(整本剧本作上下文,只产一类)避免单请求超时;不传=一次全拆
+        type: z.enum(['CHARACTER', 'SCENE', 'PROP']).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId);
+      const { text: scriptText, scriptCount } = await loadProjectFullScript(ctx, input.projectId);
+      if (!scriptText.trim()) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: '本项目还没有剧本 — 先在「剧本管理」上传,或从「灵感创作」关联剧本',
+        });
+      }
+
+      const project = await ctx.prisma.project.findUnique({
+        where: { id: input.projectId },
+        include: { style: true },
+      });
+      const settings = await loadSystemSettings(ctx.prisma, ['binding.asset.breakdown.modelId']);
+      const modelId = input.modelId ?? settings['binding.asset.breakdown.modelId'] ?? '';
+      if (!modelId) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '剧本拆解未配置 LLM — 去 /admin/bindings 配 binding.asset.breakdown.modelId',
+        });
+      }
+
+      const attemptStartedAt = new Date();
+      const attempt = await ctx.prisma.generationAttempt.create({
+        data: {
+          projectId: input.projectId,
+          providerId: modelId,
+          modelId,
+          action: 'TEXT',
+          inputJson: { kind: 'asset.breakdownProject', scriptCount, focusType: input.type, styleSlug: project?.style?.slug },
+          outputMediaIds: [],
+          inputUnits: 0,
+          outputUnits: 0,
+          unitPriceCny: '0',
+          costCny: '0',
+          status: 'RUNNING',
+          startedAt: attemptStartedAt,
+          createdBy: ctx.user.id,
+        },
+      });
+
+      let result;
+      try {
+        result = await breakdownFullSettings({
+          scriptText,
+          projectType: project?.type,
+          styleSlug: project?.style?.slug,
+          modelId,
+          maxCharacters: 40,
+          focusType: input.type,
+          ctx: { userId: ctx.user.id, projectId: input.projectId, attemptId: attempt.id },
+        });
+      } catch (e) {
+        const failedAt = new Date();
+        console.error('[asset.breakdownProject] LLM failed (raw):', e);
+        const errMsg = sanitizeErrorMsg(e);
+        await ctx.prisma.generationAttempt.update({
+          where: { id: attempt.id },
+          data: {
+            status: 'FAILED',
+            errorMsg: errMsg,
+            finishedAt: failedAt,
+            durationMs: failedAt.getTime() - attemptStartedAt.getTime(),
+          },
+        });
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: errMsg || '剧本拆解失败', cause: e });
+      }
+
+      const finishedAt = new Date();
+      await ctx.prisma.generationAttempt.update({
+        where: { id: attempt.id },
+        data: {
+          status: result.warning ? 'FAILED' : 'SUCCESS',
+          errorMsg: result.warning ?? null,
+          costCny: result.cost.toFixed(4),
+          finishedAt,
+          durationMs: finishedAt.getTime() - attemptStartedAt.getTime(),
+        },
+      });
+
+      // 匹配已有资产(archetypeKey 优先,其次 name + 同 type)→ 前端区分 新建/更新
+      const existing = await ctx.prisma.asset.findMany({
+        where: { projectId: input.projectId, deletedAt: null },
+        select: { id: true, name: true, archetypeKey: true, type: true },
+      });
+      const matchOf = (
+        name: string,
+        archetypeKey: string | undefined,
+        type: 'CHARACTER' | 'SCENE' | 'PROP',
+      ): string | undefined => {
+        if (archetypeKey) {
+          const m = existing.find((a) => a.archetypeKey === archetypeKey && a.type === type);
+          if (m) return m.id;
+        }
+        return existing.find((a) => a.name === name && a.type === type)?.id;
+      };
+
+      await logOperation(ctx, 'asset.breakdownProject', 'project', input.projectId, null, {
+        scriptCount,
+        characters: result.characters.length,
+        scenes: result.scenes.length,
+        props: result.props.length,
+        cost: result.cost,
+        modelId,
+      });
+
+      return {
+        characters: result.characters.map((d) => ({
+          ...d,
+          type: 'CHARACTER' as const,
+          matchedAssetId: matchOf(d.name, d.archetypeKey, 'CHARACTER'),
+        })),
+        scenes: result.scenes.map((d) => ({
+          ...d,
+          type: 'SCENE' as const,
+          matchedAssetId: matchOf(d.name, d.archetypeKey, 'SCENE'),
+        })),
+        props: result.props.map((d) => ({
+          ...d,
+          type: 'PROP' as const,
+          matchedAssetId: matchOf(d.name, d.archetypeKey, 'PROP'),
+        })),
+        cost: result.cost,
+        modelId,
+        scriptCount,
+        warning: result.warning,
+      };
+    }),
+
+  /**
+   * 五六-2:应用拆解草稿 — 逐条 create 新的 / update 匹配的(草稿审阅再应用)。
+   * create 跳过重名;update 跳过已锁定;只写用户审阅过的字段。
+   */
+  applyBreakdown: protectedProcedure
+    .input(
+      z.object({
+        projectId: z.string().cuid(),
+        items: z
+          .array(
+            DraftInputSchema.extend({
+              mode: z.enum(['create', 'update']),
+              assetId: z.string().cuid().optional(),
+            }),
+          )
+          .min(1)
+          .max(200),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId);
+      const creates = input.items.filter((i) => i.mode === 'create');
+      const updates = input.items.filter((i) => i.mode === 'update' && i.assetId);
+
+      // 创建:跳过同项目重名
+      const existing = await ctx.prisma.asset.findMany({
+        where: { projectId: input.projectId, deletedAt: null },
+        select: { name: true },
+      });
+      const names = new Set(existing.map((a) => a.name));
+      const toCreate = creates.filter((i) => {
+        if (names.has(i.name)) return false;
+        names.add(i.name);
+        return true;
+      });
+      const skippedNames = creates.filter((i) => !toCreate.includes(i)).map((i) => i.name);
+
+      // 更新:校验存在 + 同项目 + 未删 + 未锁
+      const updIds = updates.map((u) => u.assetId!).filter(Boolean);
+      const valid =
+        updIds.length > 0
+          ? await ctx.prisma.asset.findMany({
+              where: { id: { in: updIds }, projectId: input.projectId, deletedAt: null },
+              select: { id: true, lockedAt: true },
+            })
+          : [];
+      const validMap = new Map(valid.map((a) => [a.id, a]));
+
+      const result = await ctx.prisma.$transaction(async (tx) => {
+        const created =
+          toCreate.length > 0
+            ? await tx.asset.createManyAndReturn({
+                data: toCreate.map(({ mode: _m, assetId: _a, profileJson, ...d }) => ({
+                  projectId: input.projectId,
+                  ...d,
+                  ...(profileJson !== undefined
+                    ? { profileJson: profileJson as Prisma.InputJsonValue }
+                    : {}),
+                })),
+                select: { id: true, name: true, type: true },
+              })
+            : [];
+        let updatedCount = 0;
+        const skippedLocked: string[] = [];
+        for (const u of updates) {
+          const v = validMap.get(u.assetId!);
+          if (!v) continue;
+          if (v.lockedAt) {
+            skippedLocked.push(u.name);
+            continue;
+          }
+          const { mode: _m, assetId, profileJson, ...patch } = u;
+          await tx.asset.update({
+            where: { id: assetId! },
+            data: {
+              ...patch,
+              ...(profileJson !== undefined
+                ? { profileJson: profileJson as Prisma.InputJsonValue }
+                : {}),
+            },
+          });
+          updatedCount++;
+        }
+        return { created, updatedCount, skippedLocked };
+      });
+
+      await logOperation(ctx, 'asset.applyBreakdown', 'project', input.projectId, null, {
+        created: result.created.length,
+        updated: result.updatedCount,
+        skippedNames,
+        skippedLocked: result.skippedLocked,
+      });
+      return {
+        created: result.created,
+        updated: result.updatedCount,
+        skippedNames,
+        skippedLocked: result.skippedLocked,
       };
     }),
 

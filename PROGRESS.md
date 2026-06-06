@@ -5,6 +5,51 @@
 
 ---
 
+## 2026-06-07(周日,mac-studio · 五七次收工)— 剧本拆解模块重新设计(LLM 从完整剧本拆富设定)+ 拆解超时修复 + API 链路三遍巡检优化
+
+**完成 — typecheck 16/16 + test 全过 · 1 migration · 新 prompt 入库 · 6 active provider API 实测**
+
+承五六(剧本拆解只是"建资产壳"),用户指出**真实定位**:剧本拆解 = 由后端 LLM 从「关联的完整剧本」自动拆解 + 打磨 人物/场景/道具 的文字设定(人物要形象设定+小传、场景利于生图、道具细节),完后可选同步美术工坊。据图2 重新设计。
+
+### 一、剧本拆解模块重新设计(规划走 plan mode + 3 决策拍板)
+**决策**(用户拍):① 小传存 Asset 新增 `bio @db.Text`(+migration)② 重新拆解 = **草稿审阅再应用**(不自动覆盖)③ **整部剧本一次拆**(全集上下文,保小传/弧光质量)。
+- **schema**:Asset + `bio`(人物小传)+ migration `20260606150159_asset_bio`(additive,已应用 + db:generate)
+- **顶级设定 prompt** `script_breakdown_full`(category ASSET_BREAKDOWN):研究全网影视圣经法(角色三段式 形象/小传/心理 + 生图 spec-sheet 场景环境光影氛围/道具 hero-prop),1855 字注册进 seed.ts → **/admin/prompts「资产拆解」组可编辑**(db:sync 已入库);同份作代码 fallback
+- **core** `breakdownFullSettings`(maxTokens 16000)+ `AssetDraft.bio/personalityTags` + parseDraftArray 扩展;旧轻量 breakdownAssets 不动(美术工坊快速建用)
+- **router**:`breakdownProject`(聚合所有集 isCurrent 剧本拼完整剧本 → 富草稿 + matchedAssetId,不写库)+ `applyBreakdown`(create 新/update 匹配,跳重名跳锁定)+ `generateAssetText`(剧本上下文定点重生成 description/prompt/bio);均建 GenerationAttempt 审计
+- **前端 `script-breakdown-pane.tsx` 三板块重写**(图2):顶栏「从完整剧本拆解」+「同步全部」;人物/场景/道具三并排,每板块 左选择列表(名称+完成度 X/Y + 内联新建 + 同步标)| 右设定内容编辑器(人物:基础+形象+小传+心理折叠;场景/道具:描述+生图词,每段「AI 生成」)。删图1 大新建弹窗作主入口
+- **拆解审阅对话框**(新 breakdown-review-dialog.tsx):草稿分组 + 新建/更新徽章 + 勾选 + 内联编辑 → 应用
+- **剧本管理「拆解来源」视图**(script-pane):script.list 列所有当前剧本 + 来源徽章(灵感/上传)+ 字数 + 可看正文 = 拆解输入
+
+### 二、拆解超时根因修复(用户真打报 Headers Timeout)
+真打报 `[claude-sonnet-4-6] Headers Timeout Error`。根因:整本+16000 token+三类全拆 = **单次请求**生成超 300s(moyu 非流式,全生成完才返 headers)。修:**分类型拆**(core 加 `focusType`,每次仍喂整本剧本作上下文但只产一类),前端审阅对话框循环 3 类。
+
+### 三、API 链路三遍巡检 + 优化(用户指令)
+3 agent 广度扫(adapters/routers/worker+core)→ 对抗复核排优先级 → ground-truth 实施。大改(流式 LLM/Redis 缓存/Seedance 自适应轮询/webhook/SSE 进度/provider config 缓存)判 Phase 2,本次落 **3 项高价值低风险**:
+- **并行拆解**:breakdown-review-dialog 3 类从串行 await 改 **Promise.all 并行**(墙钟 ~3×→≈最慢一类)+ 增量显示 + 部分失败容错(对齐 storyboard LLM_CONCURRENCY=3)
+- **图像 headersTimeout 60s→180s**(openai-compat-image):图像非流式生成 2-3min 必撞 60s → 畅通修复
+- **小字段 maxTokens 1000/2000→4000**(generateProfileField/generateAssetText):防 thinking 模型(gemini-3-flash)被推理 token 耗尽返空(cap 大、非 thinking 模型提前停不浪费)
+
+### 四、后台 6 个 active Provider API 实测(生产同款 adapter 真调)
+- TEXT×3:claude-haiku-4-5 / claude-sonnet-4-6 真调出文 ✓;**gemini-3-flash 是 thinking 模型**:maxTokens ≤64 返空、≥800 正常(→ 已放宽小字段 maxTokens)
+- IMAGE×2(seedream-5-0/gpt-image-2)+ VIDEO×1(seedance-2.0-fast):配置 + 密钥解密 OK(未真生成防扣钱)
+- 结论:moyu token 有效、TEXT 全可用;IMAGE/VIDEO 待 /art /aigc 真跑确认出图/出视频
+
+### 〇、环境
+开工 `pnpm: command not found` 根因 nvm 多版本(node 切 v24.16.0,pnpm 装在 v24.14.0 下不跟随)→ `corepack enable` + `prepare pnpm@9.12.0`(各机独立,不入 git;以后切新 node 版本要重跑)
+
+**问题/待决策**
+- ❓ 剧本拆解端到端真打:provider 已通(sonnet),需真跑确认富设定质量 + 审阅应用 + 同步美术工坊整链(本次 typecheck/test + ground-truth 自检 + provider 实测)
+- ❓ 超长卡司单类人物拆解仍可能偏久(每类喂整本剧本 ×3 输入 token)→ 靠每条「AI 重新生成」补深;Phase 2 可加分批/流式
+- ❓ Phase 2 链路大优化清单(流式 LLM / Redis 分布式缓存 / Seedance 自适应轮询 + webhook / 长调用 SSE 进度 / provider config TTL 缓存 / GenerationAttempt 统一框架)留 follow-up
+
+**下次接着做**
+- 📌 `pnpm start` 浏览器端到端真打剧本拆解(并行拆解 → 审阅应用 → 三板块 → 同步美术工坊)
+- 📌 IMAGE/VIDEO 真生成确认(/art /aigc · headersTimeout 已修)
+- 📌 Phase 2 API 链路优化(按 PROGRESS 清单择优)
+
+---
+
 ## 2026-06-06(周六,mac-studio · 五六次收工)— 剧本拆解板块 P2 前端全套 + 美术工坊接同份 Asset + 环境修复(pnpm 缺失)
 
 **完成 — typecheck 16/16 + test 25/25 · 改 8 文件 + 新建 2 文件 · 承五五 P1 后端,P2 前端全落地**

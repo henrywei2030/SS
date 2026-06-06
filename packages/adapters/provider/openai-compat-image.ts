@@ -124,7 +124,9 @@ export class OpenAICompatImageProvider extends BaseProvider implements IImagePro
         },
         body: JSON.stringify(body),
         bodyTimeout: 180_000,
-        headersTimeout: 60_000,
+        // 五六-2 链路优化:图像非流式生成(多 GPU kernel)常需 1-3min,headers 只在生成完才返,
+        //   原 60s 必撞 Headers Timeout → 提到 180s 与 bodyTimeout 对齐(对照文本 LLM 的 300s 调优)
+        headersTimeout: 180_000,
       });
       const text = await respBody.text();
       if (statusCode >= 400) {

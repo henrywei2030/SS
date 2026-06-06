@@ -1,6 +1,6 @@
 'use client';
 import * as React from 'react';
-import { Loader2, Edit3, Save, X, Trash2 } from 'lucide-react';
+import { Loader2, Edit3, Save, X, Trash2, ScrollText, ChevronDown, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { trpc } from '@/lib/trpc/client';
@@ -89,6 +89,8 @@ export function ScriptPane({ episodeId, projectId }: Props): React.ReactElement 
   const current = versions?.find((v) => v.isCurrent);
   const [selectedId, setSelectedId] = React.useState<string | undefined>();
   const [showDeleteAll, setShowDeleteAll] = React.useState(false);
+  // 五六-2:拆解来源视图(项目级所有当前剧本 = 剧本拆解的输入)
+  const [showSource, setShowSource] = React.useState(false);
 
   // 切集时重置选中版本,避免拿到上一集的 scriptId 显示串集
   React.useEffect(() => {
@@ -151,6 +153,16 @@ export function ScriptPane({ episodeId, projectId }: Props): React.ReactElement 
           ))}
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          <Button
+            variant={showSource ? 'secondary' : 'ghost'}
+            size="sm"
+            onClick={() => setShowSource((v) => !v)}
+            className="h-7 gap-1 text-xs"
+            title="查看本项目所有当前剧本(灵感生成 / 上传)= 剧本拆解的输入来源"
+          >
+            <ScrollText className="size-3" />
+            拆解来源
+          </Button>
           <ClearAllProjectButton projectId={projectId} />
           <Button
             variant="ghost"
@@ -164,6 +176,9 @@ export function ScriptPane({ episodeId, projectId }: Props): React.ReactElement 
           </Button>
         </div>
       </div>
+
+      {/* 五六-2:拆解来源(项目级所有当前剧本)*/}
+      {showSource && <BreakdownSourceView projectId={projectId} onClose={() => setShowSource(false)} />}
 
       {/* 剧本内容 */}
       {selectedVersionId && (
@@ -201,6 +216,84 @@ export function ScriptPane({ episodeId, projectId }: Props): React.ReactElement 
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 五六-2:拆解来源视图 — 项目级所有当前剧本(灵感生成 / 上传)= 剧本拆解的输入
+// ---------------------------------------------------------------------------
+
+const SOURCE_LABEL: Record<string, string> = {
+  UPLOAD: '上传',
+  AI_GENERATED: '灵感生成',
+  IMPORTED: '导入',
+};
+
+function BreakdownSourceView({
+  projectId,
+  onClose,
+}: {
+  projectId: string;
+  onClose: () => void;
+}): React.ReactElement {
+  const { data, isLoading } = trpc.script.list.useQuery({ projectId, onlyCurrent: true });
+  const [expandedId, setExpandedId] = React.useState<string | null>(null);
+
+  return (
+    <div className="border-b border-[hsl(var(--color-border))] bg-[hsl(var(--color-secondary)/0.2)]">
+      <div className="flex items-center justify-between px-4 py-2">
+        <div className="flex items-center gap-1.5 text-xs font-medium">
+          <ScrollText className="size-3.5" />
+          拆解来源 · 全部当前剧本(= 剧本拆解的输入)
+        </div>
+        <button
+          onClick={onClose}
+          className="rounded p-0.5 text-[hsl(var(--color-muted-foreground))] hover:bg-[hsl(var(--color-secondary)/0.5)]"
+          aria-label="收起"
+        >
+          <X className="size-3.5" />
+        </button>
+      </div>
+      <div className="max-h-64 space-y-1 overflow-y-auto px-4 pb-2">
+        {isLoading ? (
+          <div className="flex items-center gap-1.5 py-2 text-[11px] text-[hsl(var(--color-muted-foreground))]">
+            <Loader2 className="size-3 animate-spin" /> 加载…
+          </div>
+        ) : !data || data.length === 0 ? (
+          <div className="py-2 text-[11px] text-[hsl(var(--color-muted-foreground))]">
+            本项目还没有剧本 — 去「灵感创作」生成或「上传剧本」导入
+          </div>
+        ) : (
+          data.map((s) => {
+            const expanded = expandedId === s.id;
+            return (
+              <div key={s.id} className="rounded border border-[hsl(var(--color-border))]">
+                <button
+                  onClick={() => setExpandedId(expanded ? null : s.id)}
+                  className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[11px] hover:bg-[hsl(var(--color-secondary)/0.4)]"
+                >
+                  {expanded ? <ChevronDown className="size-3 shrink-0" /> : <ChevronRight className="size-3 shrink-0" />}
+                  <span className="truncate font-medium">
+                    {s.episode ? `第${s.episode.number}集${s.episode.title ? ' · ' + s.episode.title : ''}` : '项目剧本'}
+                  </span>
+                  <Badge variant="secondary" className="shrink-0 px-1 text-[9px]">
+                    {SOURCE_LABEL[s.source] ?? s.source}
+                  </Badge>
+                  <span className="ml-auto shrink-0 font-mono text-[10px] text-[hsl(var(--color-muted-foreground))]">
+                    {s.content.length.toLocaleString()} 字 · v{s.version}
+                  </span>
+                </button>
+                {expanded && (
+                  <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap border-t border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 py-1.5 text-[10px] leading-relaxed">
+                    {s.content}
+                  </pre>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }
