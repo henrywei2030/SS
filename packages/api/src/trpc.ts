@@ -169,7 +169,6 @@ export const rateLimit = (opts: RateLimitOpts) =>
 // ---------------------------------------------------------------------------
 
 export const router = t.router;
-export const mergeRouters = t.mergeRouters;
 
 /** 公开 — 任何人都可访问（登录页用） */
 export const publicProcedure = t.procedure.use(wrapErrors);

@@ -7,10 +7,6 @@
  *   - 结果：xxxResultSchema
  */
 export * from './project.js';
-export * from './shot.js';
-export * from './asset.js';
-export * from './generation.js';
-export * from './episode.js';
-export * from './compliance.js';
-export * from './voice.js';
-export * from './team.js';
+// 7 遍检查清死代码:episode/shot/asset/generation/compliance/voice/team schema 全废弃
+//   (路由层改为内联 z.object 后零消费;同名 Input 类型由各 router/core 另行定义)→ 已删文件。
+//   只 project.js 仍活(aspectRatioSchema / create·updateProjectSchema)。

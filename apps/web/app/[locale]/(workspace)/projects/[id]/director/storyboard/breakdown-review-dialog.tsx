@@ -8,7 +8,7 @@
  * 「草稿审阅再应用」:用户拍板,LLM 产出永远先过人眼再落库。
  */
 import * as React from 'react';
-import { Loader2, Sparkles, Check, ChevronDown, ChevronRight } from 'lucide-react';
+import { Loader2, Check, ChevronDown, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 
 import type { inferRouterOutputs } from '@trpc/server';

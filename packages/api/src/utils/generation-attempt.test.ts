@@ -9,7 +9,7 @@ import { runTextGenerationAttempt } from './generation-attempt.js';
 import type { Context } from '../context.js';
 
 function makeCtx() {
-  const create = vi.fn(async (args: unknown) => ({ id: 'att-1' }));
+  const create = vi.fn(async (_args: unknown) => ({ id: 'att-1' }));
   const update = vi.fn(async (_args: unknown) => ({}));
   const ctx = {
     user: { id: 'u1' },
@@ -23,7 +23,7 @@ const OPTS = { projectId: 'p1', modelId: 'm1', inputJson: { kind: 'x' }, failPre
 describe('runTextGenerationAttempt', () => {
   it('成功:建 RUNNING → runFn 拿到 attemptId → SUCCESS 回写真实 tokens/cost → 返回业务值', async () => {
     const { ctx, create, update } = makeCtx();
-    const runFn = vi.fn(async (id: string) => ({
+    const runFn = vi.fn(async (_id: string) => ({
       inputTokens: 10,
       outputTokens: 20,
       costCny: 0.5,
