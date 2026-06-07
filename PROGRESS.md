@@ -18,6 +18,7 @@
 - ✅ P1 `031314d`:抽 `pricing.ts` 集中计费公式(computeText/ImageCostCny)+ 12 单测锁 moyu 实收口径 —— 根除"sonnet 倍率漂移"那类 bug 的土壤
 - ✅ P1 `c129192`:`sanitizeErrorMsg` 安全脱敏 12 单测锁规则(adapters 测试 19→31)
 - ✅ **P2 全量拆 7 个 god 文件**(用户选"全量拆";委派 agent 精确搬运 + 我逐个门控验证提交):4 路由(asset 2636→35 / aigc 1847→33 / storyboard 1846→35 / script 1145→28)+ 3 组件(asset-edit-dialog 1791→294 / providers-table 1349→225 / top-bar 1287→175)。**全部 byte-identical 纯搬运 + procedure/export 名集合不变 + typecheck 16/16 + test 全绿**;对外签名零变化(root.ts / 调用方 import 不动)。helper/schema → `*-shared`,procedure/子组件 → sibling,主文件只组装。
+- ✅ **P3(部分)`3bf7816`**(用户拍板"先补测试再去重"):抽 `runTextGenerationAttempt`(GenerationAttempt 状态机)+ 4 单测锁行为 → 收敛 **inspiration 3 处**无 ledger 样板(行为保持)。**剩**:asset/storyboard 带 CostLedger+$transaction 的样板(billing 关键,需扩 helper+测试再逐处做)、EventBus 删除(待核是否 Phase-2 占位)。
 
 **安全原则**:纯重构 + typecheck/test 护栏 + 阶段提交回滚点;**不在 live app 单次手工重排 2600 行**(类型检查盖不住"运行时漏 procedure"这类回归)→ 大拆分留作有界、逐块验证的独立改动。
 
