@@ -15,7 +15,7 @@ import { z } from 'zod';
 import { getTextProvider } from '@ss/adapters/provider';
 import { loadPromptTemplate } from '@ss/core/shared';
 import { Prisma } from '@ss/db';
-import { sanitizeErrorMsg } from '@ss/shared';
+import { runTextGenerationAttempt } from '../utils/generation-attempt.js';
 
 import { router, protectedProcedure } from '../trpc.js';
 import type { Context } from '../context.js';
@@ -255,81 +255,52 @@ export const inspirationRouter = router({
       const system = await loadPromptTemplate('inspiration_outline', OUTLINE_FALLBACK);
       const userPrompt = buildOutlinePrompt(input.idea, input.params);
 
-      const attempt = await ctx.prisma.generationAttempt.create({
-        data: {
+      // P3:状态机走 runTextGenerationAttempt(RUNNING→SUCCESS/FAILED 统一,有单测锁)
+      const draft = await runTextGenerationAttempt(
+        ctx,
+        {
           projectId: input.projectId,
-          providerId: modelId,
           modelId,
-          action: 'TEXT',
           inputJson: { kind: 'inspiration.outline', params: input.params },
-          outputMediaIds: [],
-          inputUnits: 0,
-          outputUnits: 0,
-          unitPriceCny: '0',
-          costCny: '0',
-          status: 'RUNNING',
-          startedAt: new Date(),
-          createdBy: ctx.user.id,
+          failPrefix: '生成大纲失败',
         },
-      });
-
-      let result;
-      try {
-        result = await provider.generate(
-          { system, prompt: userPrompt, maxTokens: 4096, temperature: 0.8, jsonSchema: {} },
-          { userId: ctx.user.id, projectId: input.projectId, attemptId: attempt.id },
-        );
-      } catch (e) {
-        await ctx.prisma.generationAttempt.update({
-          where: { id: attempt.id },
-          data: { status: 'FAILED', errorMsg: sanitizeErrorMsg(e), finishedAt: new Date() },
-        });
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: `生成大纲失败:${sanitizeErrorMsg(e)}`,
-        });
-      }
-
-      const parsed = parseOutline(result.json, result.text);
-      if (parsed.episodes.length === 0) {
-        await ctx.prisma.generationAttempt.update({
-          where: { id: attempt.id },
-          data: { status: 'FAILED', errorMsg: 'LLM 未产出可解析大纲', finishedAt: new Date() },
-        });
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'LLM 未产出可解析的分集大纲,请调整想法或重试',
-        });
-      }
-
-      const draft = await ctx.prisma.inspirationDraft.create({
-        data: {
-          projectId: input.projectId,
-          title: parsed.title,
-          idea: input.idea,
-          params: input.params,
-          outline: parsed.episodes as unknown as Prisma.InputJsonValue,
-          episodes: [],
-          status: 'OUTLINE_DONE',
-          modelId,
-          createdBy: ctx.user.id,
+        async (attemptId) => {
+          const result = await provider.generate(
+            { system, prompt: userPrompt, maxTokens: 4096, temperature: 0.8, jsonSchema: {} },
+            { userId: ctx.user.id, projectId: input.projectId, attemptId },
+          );
+          const parsed = parseOutline(result.json, result.text);
+          if (parsed.episodes.length === 0) {
+            throw new TRPCError({
+              code: 'INTERNAL_SERVER_ERROR',
+              message: 'LLM 未产出可解析的分集大纲,请调整想法或重试',
+            });
+          }
+          const created = await ctx.prisma.inspirationDraft.create({
+            data: {
+              projectId: input.projectId,
+              title: parsed.title,
+              idea: input.idea,
+              params: input.params,
+              outline: parsed.episodes as unknown as Prisma.InputJsonValue,
+              episodes: [],
+              status: 'OUTLINE_DONE',
+              modelId,
+              createdBy: ctx.user.id,
+            },
+          });
+          await logOperation(ctx, 'inspiration.outline', 'inspirationDraft', created.id, null, {
+            title: parsed.title,
+            episodes: parsed.episodes.length,
+          });
+          return {
+            inputTokens: result.inputTokens,
+            outputTokens: result.outputTokens,
+            costCny: result.costCny,
+            value: created,
+          };
         },
-      });
-
-      await ctx.prisma.generationAttempt.update({
-        where: { id: attempt.id },
-        data: {
-          status: 'SUCCESS',
-          costCny: result.costCny.toFixed(4),
-          inputUnits: result.inputTokens,
-          outputUnits: result.outputTokens,
-          finishedAt: new Date(),
-        },
-      });
-      await logOperation(ctx, 'inspiration.outline', 'inspirationDraft', draft.id, null, {
-        title: parsed.title,
-        episodes: parsed.episodes.length,
-      });
+      );
       return draft;
     }),
 
@@ -361,80 +332,57 @@ export const inspirationRouter = router({
         draft.params as Record<string, unknown>,
       );
 
-      const attempt = await ctx.prisma.generationAttempt.create({
-        data: {
+      // P3:状态机走 runTextGenerationAttempt(provider + 并发锁事务在 runFn 内)
+      const updated = await runTextGenerationAttempt(
+        ctx,
+        {
           projectId: draft.projectId,
-          providerId: modelId,
           modelId,
-          action: 'TEXT',
           inputJson: { kind: 'inspiration.episode', draftId: draft.id, episodeNumber: input.episodeNumber },
-          outputMediaIds: [],
-          inputUnits: 0,
-          outputUnits: 0,
-          unitPriceCny: '0',
-          costCny: '0',
-          status: 'RUNNING',
-          startedAt: new Date(),
-          createdBy: ctx.user.id,
+          failPrefix: `生成第${input.episodeNumber}集失败`,
         },
-      });
-
-      let result;
-      try {
-        result = await provider.generate(
-          { system, prompt: userPrompt, maxTokens: 8192, temperature: 0.8 },
-          { userId: ctx.user.id, projectId: draft.projectId, attemptId: attempt.id },
-        );
-      } catch (e) {
-        await ctx.prisma.generationAttempt.update({
-          where: { id: attempt.id },
-          data: { status: 'FAILED', errorMsg: sanitizeErrorMsg(e), finishedAt: new Date() },
-        });
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: `生成第${input.episodeNumber}集失败:${sanitizeErrorMsg(e)}`,
-        });
-      }
-
-      const content = result.text?.trim() || '';
-      // 并发锁收口:LLM 在锁外跑;"读最新 episodes → 合并本集 → 落库"放进 advisory-lock 事务,
-      //   锁内重读最新快照(LLM 调用期间别的 generate* 请求可能已写入其它集),避免老快照覆盖丢集
-      const updated = await ctx.prisma.$transaction(async (tx) => {
-        await tx.$executeRawUnsafe(
-          `SELECT pg_advisory_xact_lock(hashtext('insp_draft:' || $1)::bigint)`,
-          draft.id,
-        );
-        const fresh = await tx.inspirationDraft.findUnique({
-          where: { id: draft.id },
-          select: { episodes: true },
-        });
-        const episodes = ((fresh?.episodes as unknown as DraftEp[]) ?? []).filter(
-          (e) => e.number !== input.episodeNumber,
-        );
-        episodes.push({ number: input.episodeNumber, title: epOutline.title, content });
-        episodes.sort((a, b) => a.number - b.number);
-        const allDone = outline.every((o) => episodes.some((e) => e.number === o.number && e.content));
-        return tx.inspirationDraft.update({
-          where: { id: draft.id },
-          data: {
-            episodes: episodes as unknown as Prisma.InputJsonValue,
-            status: allDone ? 'DONE' : 'OUTLINE_DONE',
-          },
-        });
-      });
-      await ctx.prisma.generationAttempt.update({
-        where: { id: attempt.id },
-        data: {
-          status: 'SUCCESS',
-          costCny: result.costCny.toFixed(4),
-          inputUnits: result.inputTokens,
-          outputUnits: result.outputTokens,
-          finishedAt: new Date(),
+        async (attemptId) => {
+          const result = await provider.generate(
+            { system, prompt: userPrompt, maxTokens: 8192, temperature: 0.8 },
+            { userId: ctx.user.id, projectId: draft.projectId, attemptId },
+          );
+          const content = result.text?.trim() || '';
+          // 并发锁收口:LLM 在锁外跑;"读最新 episodes → 合并本集 → 落库"放进 advisory-lock 事务,
+          //   锁内重读最新快照(LLM 调用期间别的 generate* 请求可能已写入其它集),避免老快照覆盖丢集
+          const written = await ctx.prisma.$transaction(async (tx) => {
+            await tx.$executeRawUnsafe(
+              `SELECT pg_advisory_xact_lock(hashtext('insp_draft:' || $1)::bigint)`,
+              draft.id,
+            );
+            const fresh = await tx.inspirationDraft.findUnique({
+              where: { id: draft.id },
+              select: { episodes: true },
+            });
+            const episodes = ((fresh?.episodes as unknown as DraftEp[]) ?? []).filter(
+              (e) => e.number !== input.episodeNumber,
+            );
+            episodes.push({ number: input.episodeNumber, title: epOutline.title, content });
+            episodes.sort((a, b) => a.number - b.number);
+            const allDone = outline.every((o) => episodes.some((e) => e.number === o.number && e.content));
+            return tx.inspirationDraft.update({
+              where: { id: draft.id },
+              data: {
+                episodes: episodes as unknown as Prisma.InputJsonValue,
+                status: allDone ? 'DONE' : 'OUTLINE_DONE',
+              },
+            });
+          });
+          await logOperation(ctx, 'inspiration.episode', 'inspirationDraft', draft.id, null, {
+            episodeNumber: input.episodeNumber,
+          });
+          return {
+            inputTokens: result.inputTokens,
+            outputTokens: result.outputTokens,
+            costCny: result.costCny,
+            value: written,
+          };
         },
-      });
-      await logOperation(ctx, 'inspiration.episode', 'inspirationDraft', draft.id, null, {
-        episodeNumber: input.episodeNumber,
-      });
+      );
       return updated;
     }),
 
@@ -480,92 +428,69 @@ export const inspirationRouter = router({
         draft.params as Record<string, unknown>,
       );
 
-      const attempt = await ctx.prisma.generationAttempt.create({
-        data: {
+      // P3:状态机走 runTextGenerationAttempt(provider + 解析 + 并发锁事务在 runFn,返回本块新增集数)
+      const chunkAdded = await runTextGenerationAttempt(
+        ctx,
+        {
           projectId: draft.projectId,
-          providerId: modelId,
           modelId,
-          action: 'TEXT',
           inputJson: {
             kind: 'inspiration.episodes_batch',
             draftId: draft.id,
             episodeNumbers: chunk.map((c) => c.number),
           },
-          outputMediaIds: [],
-          inputUnits: 0,
-          outputUnits: 0,
-          unitPriceCny: '0',
-          costCny: '0',
-          status: 'RUNNING',
-          startedAt: new Date(),
-          createdBy: ctx.user.id,
+          failPrefix: `生成第 ${chunk.map((c) => c.number).join('、')} 集失败`,
         },
-      });
-
-      let result;
-      try {
-        result = await provider.generate(
-          { system, prompt: userPrompt, maxTokens: 16_000, temperature: 0.8 },
-          { userId: ctx.user.id, projectId: draft.projectId, attemptId: attempt.id },
-        );
-      } catch (e) {
-        await ctx.prisma.generationAttempt.update({
-          where: { id: attempt.id },
-          data: { status: 'FAILED', errorMsg: sanitizeErrorMsg(e), finishedAt: new Date() },
-        });
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: `生成第 ${chunk.map((c) => c.number).join('、')} 集失败:${sanitizeErrorMsg(e)}`,
-        });
-      }
-
-      // 解析本块 → 锁内重读最新 episodes → 合并 → 落库(并发安全,见 generateEpisode 同款 advisory-lock 注释)
-      const parsed = parseEpisodesBatch(result.text ?? '');
-      let chunkAdded = 0;
-      await ctx.prisma.$transaction(async (tx) => {
-        await tx.$executeRawUnsafe(
-          `SELECT pg_advisory_xact_lock(hashtext('insp_draft:' || $1)::bigint)`,
-          draft.id,
-        );
-        const fresh = await tx.inspirationDraft.findUnique({
-          where: { id: draft.id },
-          select: { episodes: true },
-        });
-        const byNum = new Map(
-          ((fresh?.episodes as unknown as DraftEp[]) ?? []).map((e) => [e.number, e] as const),
-        );
-        chunkAdded = 0;
-        for (const o of chunk) {
-          const body = parsed.get(o.number);
-          if (body?.trim()) {
-            byNum.set(o.number, { number: o.number, title: o.title, content: body.trim() });
-            chunkAdded += 1;
-          }
-        }
-        const episodes = [...byNum.values()].sort((a, b) => a.number - b.number);
-        const allDone = outline.every((o) => episodes.some((e) => e.number === o.number && e.content));
-        await tx.inspirationDraft.update({
-          where: { id: draft.id },
-          data: {
-            episodes: episodes as unknown as Prisma.InputJsonValue,
-            status: allDone ? 'DONE' : 'OUTLINE_DONE',
-          },
-        });
-      });
-      await ctx.prisma.generationAttempt.update({
-        where: { id: attempt.id },
-        data: {
-          status: 'SUCCESS',
-          costCny: result.costCny.toFixed(4),
-          inputUnits: result.inputTokens,
-          outputUnits: result.outputTokens,
-          finishedAt: new Date(),
+        async (attemptId) => {
+          const result = await provider.generate(
+            { system, prompt: userPrompt, maxTokens: 16_000, temperature: 0.8 },
+            { userId: ctx.user.id, projectId: draft.projectId, attemptId },
+          );
+          // 解析本块 → 锁内重读最新 episodes → 合并 → 落库(并发安全,见 generateEpisode 同款 advisory-lock 注释)
+          const parsed = parseEpisodesBatch(result.text ?? '');
+          let added = 0;
+          await ctx.prisma.$transaction(async (tx) => {
+            await tx.$executeRawUnsafe(
+              `SELECT pg_advisory_xact_lock(hashtext('insp_draft:' || $1)::bigint)`,
+              draft.id,
+            );
+            const fresh = await tx.inspirationDraft.findUnique({
+              where: { id: draft.id },
+              select: { episodes: true },
+            });
+            const byNum = new Map(
+              ((fresh?.episodes as unknown as DraftEp[]) ?? []).map((e) => [e.number, e] as const),
+            );
+            added = 0;
+            for (const o of chunk) {
+              const body = parsed.get(o.number);
+              if (body?.trim()) {
+                byNum.set(o.number, { number: o.number, title: o.title, content: body.trim() });
+                added += 1;
+              }
+            }
+            const episodes = [...byNum.values()].sort((a, b) => a.number - b.number);
+            const allDone = outline.every((o) => episodes.some((e) => e.number === o.number && e.content));
+            await tx.inspirationDraft.update({
+              where: { id: draft.id },
+              data: {
+                episodes: episodes as unknown as Prisma.InputJsonValue,
+                status: allDone ? 'DONE' : 'OUTLINE_DONE',
+              },
+            });
+          });
+          await logOperation(ctx, 'inspiration.episodes_batch', 'inspirationDraft', draft.id, null, {
+            chunk: chunk.map((c) => c.number),
+            generated: added,
+          });
+          return {
+            inputTokens: result.inputTokens,
+            outputTokens: result.outputTokens,
+            costCny: result.costCny,
+            value: added,
+          };
         },
-      });
-      await logOperation(ctx, 'inspiration.episodes_batch', 'inspirationDraft', draft.id, null, {
-        chunk: chunk.map((c) => c.number),
-        generated: chunkAdded,
-      });
+      );
       // remaining = 本块后还剩多少未展开(前端据此续跑 + 进度条)
       const remaining = pending.length - chunkAdded;
       return { generated: chunkAdded, remaining, total: outline.length };
