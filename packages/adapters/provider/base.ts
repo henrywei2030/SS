@@ -18,7 +18,7 @@
  *   - 加 costCnyOverride:PREPAY/REFUND/ADJUSTMENT 不算 cost,直接传金额落库
  */
 import { prisma, Prisma } from '@ss/db';
-import { ProviderError, BudgetExceededError } from '@ss/shared';
+import { ProviderError, BudgetExceededError, billingCycle } from '@ss/shared';
 
 import type { CallContext, ProviderInfo } from './types.js';
 
@@ -105,7 +105,7 @@ export abstract class BaseProvider {
           entryType: opts.entryType ?? 'NORMAL',
           refundReason: opts.refundReason ?? null,
           parentEntryId: opts.parentEntryId ?? null,
-          billingCycle: new Date().toISOString().slice(0, 7), // YYYY-MM
+          billingCycle: billingCycle(), // YYYY-MM
         },
       });
     } catch (e) {

@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@ss/db';
 import type { Prisma } from '@ss/db';
+import { billingCycle } from '@ss/shared';
 
 /**
  * Idempotent refund:查 attempt 的 PREPAY entry,若未退过则写 REFUND 抵消。
@@ -64,7 +65,7 @@ export async function refundPrepayForAttempt(
       entryType: 'REFUND',
       refundReason: args.reason,
       parentEntryId: prepay.id,
-      billingCycle: new Date().toISOString().slice(0, 7),
+      billingCycle: billingCycle(),
     },
   });
   return true;

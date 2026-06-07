@@ -8,3 +8,5 @@ export * from './relay-catalog.js';
 export * from './prompt-utils.js';
 // 二十九收工 S8:type guards 替原 `as Record<string, unknown>` 不安全模式
 export * from './type-guards.js';
+// P3 收尾(2026-06-06):billingCycle() 收敛裸写 toISOString().slice(0,7)
+export * from './billing.js';

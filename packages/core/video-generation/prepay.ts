@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@ss/db';
 import type { Prisma } from '@ss/db';
+import { billingCycle } from '@ss/shared';
 
 /**
  * 创建占位 attempt(status=QUEUED)+ PREPAY ledger 同事务写入
@@ -60,7 +61,7 @@ export async function createPlaceholderAttemptWithPrepay(
       costCny: args.prepayEstimateCny.toFixed(4),
       success: true, // PREPAY 永远 success=true;task 成败用 attempt.status,后续 REFUND 抵消
       entryType: 'PREPAY',
-      billingCycle: new Date().toISOString().slice(0, 7),
+      billingCycle: billingCycle(),
     },
     select: { id: true },
   });

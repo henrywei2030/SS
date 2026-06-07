@@ -10,7 +10,7 @@ import { compileAssetPrompt } from "@ss/core/asset";
 import { getImageProvider, getTextProvider } from "@ss/adapters/provider";
 import { getStorageAdapter } from "@ss/adapters/storage";
 import { getEventBus } from "@ss/adapters/eventbus";
-import { asRecord, EVENTS, sanitizeErrorMsg } from "@ss/shared";
+import { asRecord, EVENTS, sanitizeErrorMsg, billingCycle } from "@ss/shared";
 import { protectedProcedure } from "../trpc.js";
 import { logOperation } from "../middleware/audit.js";
 import { loadSystemSettings } from "../utils/system-bindings.js";
@@ -500,7 +500,7 @@ export const generateProcedures = {
             unitPriceCny: '0',
             costCny: '0',
             success: false,
-            billingCycle: new Date().toISOString().slice(0, 7),
+            billingCycle: billingCycle(),
           },
         });
 
@@ -611,7 +611,7 @@ export const generateProcedures = {
             unitPriceCny: realUnitPriceCny,
             costCny: imageResult.costCny.toFixed(4),
             success: true,
-            billingCycle: new Date().toISOString().slice(0, 7),
+            billingCycle: billingCycle(),
           },
         });
         return { mediaIds: ids, attempt: attemptRow };

@@ -29,7 +29,7 @@ import {
 } from '@ss/queue/types';
 import { EVENTS } from '@ss/shared/events';
 // 第 18 轮 audit P1:errorMsg 入库 + SSE + OperationLog 前脱敏,防真接 Provider 后 URL/token 泄漏
-import { sanitizeErrorMsg } from '@ss/shared';
+import { sanitizeErrorMsg, billingCycle } from '@ss/shared';
 
 /**
  * P0-3 idempotency check 结果(processor 入口防 stalled re-queue / BullMQ retry 双写)
@@ -225,7 +225,7 @@ export async function processVideoGenJob(
               entryType: 'REFUND',
               refundReason: 'video_task_failed_full_refund',
               parentEntryId: prepayEntry?.id,
-              billingCycle: new Date().toISOString().slice(0, 7),
+              billingCycle: billingCycle(),
             },
           });
         }
@@ -364,7 +364,7 @@ export async function processVideoGenJob(
                 ? 'video_task_overcharge_refund'
                 : 'video_task_underestimate_adjustment',
             parentEntryId: prepayEntry?.id,
-            billingCycle: new Date().toISOString().slice(0, 7),
+            billingCycle: billingCycle(),
           },
         });
       }
