@@ -5,7 +5,7 @@
 
 ---
 
-## 2026-06-07(周日,mac-studio · 代码健康审计 + 渐进优化 P0/P1)— 全面体检:不是屎山,执行安全优化
+## 2026-06-07(周日,mac-studio · 代码健康审计 + 渐进优化 P0→P3)— 全面体检:不是屎山,执行安全优化(15 commit)
 
 **3 agent 审计 47.7k 行源码 → 结论:骨架优秀、局部有债、"已救一半"的工程(非屎山)。完整结论 + 路线见 ADR-31。**
 
@@ -25,8 +25,9 @@
 **待续(ADR-31 路线表)**:P2 拆 god 文件(先抽 `*-shared` → 按分区线移 procedure 组,逐组验证 + procedure 计数校验)· P3 收编排(`runGenerationAttempt`/`writeLedgerEntry` 收 13 处样板 + worker refund 改调已测 core)· 删死 EventBus(0 订阅,通知走 Redis)· `resolveMediaFetchUrl`。
 
 **下次接着做**
-- 📌 P2 起步:asset.ts 抽 `asset-shared.ts`(helper/schema,typecheck 安全)→ 逐组移 procedure
-- 📌 P3:先抽 inspiration 3 处最规整的 GenerationAttempt 样板验证 helper 形状,再推广
+- 📌 P3 剩余(billing 样板):asset-generate / asset-breakdown / storyboard-generate 带 CostLedger+$transaction 的 GenerationAttempt 样板 —— 先扩 `runTextGenerationAttempt` 支持 ledger(或抽 `writeLedgerEntry`)+ 补 ledger 写入测试,再逐处套用(碰钱,慢工细活)
+- 📌 死 EventBus 删除:先核 ADR-26/27 是否承诺 Phase-2 用途,确认无承诺再删 12 publish + 模块
+- 📌 P0-2 已跳过(providers-table 是 callback 模式,强套 adminMutationHandlers 会改行为);billingCycle 折进 P3 的 writeLedgerEntry 一起做
 
 ---
 
