@@ -50,6 +50,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { fileToBase64 } from '@/lib/file-to-base64';
 
 // 五六收工:加 'breakdown' tab
 type TabKey = 'inspiration' | 'script' | 'breakdown' | 'shots';
@@ -553,32 +554,6 @@ function ScriptActions({
       </Dialog>
     </>
   );
-}
-
-/**
- * 用浏览器原生 FileReader 把文件编为 base64
- *
- * 比手写 `String.fromCharCode(...subarray)` 分块 + btoa 更安全：
- *   - 不在 JS 堆里分配中间 binary string（避免 15MB 文件 → 80MB 临时峰值）
- *   - 不受 V8 spread 栈大小限制
- *   - 大文件时 FileReader 用 IO 缓冲，浏览器内部 streamy 处理
- */
-async function fileToBase64(file: File): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result;
-      if (typeof result !== 'string') {
-        reject(new Error('FileReader 返回非字符串'));
-        return;
-      }
-      // dataURL 形式 "data:<mime>;base64,<...>" — 取逗号后部分
-      const idx = result.indexOf(',');
-      resolve(idx >= 0 ? result.slice(idx + 1) : result);
-    };
-    reader.onerror = () => reject(reader.error ?? new Error('FileReader 失败'));
-    reader.readAsDataURL(file);
-  });
 }
 
 // ---------------------------------------------------------------------------

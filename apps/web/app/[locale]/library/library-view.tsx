@@ -19,6 +19,7 @@ import {
 import { trpc } from '@/lib/trpc/client';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { BackButton } from '@/components/ui/back-button';
+import { fileToBase64 } from '@/lib/file-to-base64';
 
 type MediaKind = 'IMAGE' | 'VIDEO' | 'AUDIO' | 'THREE_D' | 'OTHER';
 type MediaScope = 'PUBLIC' | 'PROJECT' | 'PERSONAL';
@@ -66,15 +67,6 @@ function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
-}
-
-async function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(new Error('FileReader failed'));
-    reader.readAsDataURL(file);
-  });
 }
 
 export function LibraryView(): React.ReactElement {
