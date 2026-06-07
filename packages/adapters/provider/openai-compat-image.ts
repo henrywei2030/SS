@@ -19,6 +19,7 @@ import { request } from 'undici';
 import { ProviderError } from '@ss/shared';
 
 import { BaseProvider } from './base.js';
+import { computeImageCostCny } from './pricing.js';
 import type {
   CallContext,
   IImageProvider,
@@ -108,7 +109,7 @@ export class OpenAICompatImageProvider extends BaseProvider implements IImagePro
 
   estimateCost(req: ImageRequest): number {
     const n = req.count ?? 1;
-    return n * this.cfg.unitPriceCny;
+    return computeImageCostCny(n, this.cfg.unitPriceCny);
   }
 
   async generate(req: ImageRequest, ctx: CallContext): Promise<ImageResult> {
@@ -178,7 +179,7 @@ export class OpenAICompatImageProvider extends BaseProvider implements IImagePro
     }
 
     const actualN = imageUrls.length;
-    const costCny = actualN * this.cfg.unitPriceCny;
+    const costCny = computeImageCostCny(actualN, this.cfg.unitPriceCny);
 
     await this.recordLedger({
       ctx,
@@ -284,7 +285,7 @@ export class OpenAICompatImageProvider extends BaseProvider implements IImagePro
       throw new ProviderError(this.info.id, '图生图返回无图(data 数组为空)');
     }
     const actualN = imageUrls.length;
-    const costCny = actualN * this.cfg.unitPriceCny;
+    const costCny = computeImageCostCny(actualN, this.cfg.unitPriceCny);
 
     await this.recordLedger({
       ctx,

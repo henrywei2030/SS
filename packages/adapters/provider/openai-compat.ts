@@ -33,6 +33,8 @@ import { Agent, request, setGlobalDispatcher } from 'undici';
 
 import { ProviderError } from '@ss/shared';
 
+import { computeTextCostCny } from './pricing.js';
+
 // 性能优化 r8:全局 undici Agent · keep-alive + 连接池
 // 默认 undici 每个请求新建 socket,TLS handshake 50-200ms/次浪费严重
 // 用 Agent keep-alive 复用 socket,大幅降低 LLM 调用 latency
@@ -138,21 +140,8 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
     // 全盘审查 #7:不再钳 4096 — storyboard 实传 maxTokens=16000,钳死会让事前预算护栏
     //   把大输出请求的成本系统性低估 ~3/4(真实记账走 calcCost 用实际 usage,不受影响)
     const approxOut = req.maxTokens ?? 4096;
-    // Phase 1.5 P0-2:modelRate 非空时优先 2 倍率公式
-    if (this.cfg.modelRate != null && this.cfg.modelRate > 0) {
-      const oRate = this.cfg.outputRate ?? 1;
-      return (
-        (approxIn / 1_000_000) * this.cfg.modelRate +
-        (approxOut / 1_000_000) * this.cfg.modelRate * oRate
-      );
-    }
-    if (this.cfg.inputUnitPriceCny != null && this.cfg.outputUnitPriceCny != null) {
-      return (
-        (approxIn / 1000) * this.cfg.inputUnitPriceCny +
-        (approxOut / 1000) * this.cfg.outputUnitPriceCny
-      );
-    }
-    return ((approxIn + approxOut) / 1000) * this.cfg.unitPriceCny;
+    // 五八-P1:计费公式集中到 pricing.computeTextCostCny(估算/记账共用同一份,防漂移 + 有单测锁口径)
+    return computeTextCostCny(approxIn, approxOut, this.cfg);
   }
 
   async generate(req: TextRequest, ctx: CallContext): Promise<TextResult> {
@@ -284,21 +273,8 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
   }
 
   private calcCost(inTokens: number, outTokens: number): number {
-    // Phase 1.5 P0-2:modelRate 非空时优先 2 倍率公式(主次重审 v2.1)
-    if (this.cfg.modelRate != null && this.cfg.modelRate > 0) {
-      const oRate = this.cfg.outputRate ?? 1;
-      return (
-        (inTokens / 1_000_000) * this.cfg.modelRate +
-        (outTokens / 1_000_000) * this.cfg.modelRate * oRate
-      );
-    }
-    if (this.cfg.inputUnitPriceCny != null && this.cfg.outputUnitPriceCny != null) {
-      return (
-        (inTokens / 1000) * this.cfg.inputUnitPriceCny +
-        (outTokens / 1000) * this.cfg.outputUnitPriceCny
-      );
-    }
-    return ((inTokens + outTokens) / 1000) * this.cfg.unitPriceCny;
+    // 五八-P1:与 estimateCost 共用 pricing.computeTextCostCny(单一真相源 + 单测锁 moyu 口径)
+    return computeTextCostCny(inTokens, outTokens, this.cfg);
   }
 
   /** ledger 行的 unitPriceCny 字段(per token,Decimal 处理用) */
