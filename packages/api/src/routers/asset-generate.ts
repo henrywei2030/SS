@@ -14,6 +14,7 @@ import { asRecord, EVENTS, sanitizeErrorMsg } from "@ss/shared";
 import { protectedProcedure } from "../trpc.js";
 import { logOperation } from "../middleware/audit.js";
 import { loadSystemSettings } from "../utils/system-bindings.js";
+import { runTextGenerationAttempt } from "../utils/generation-attempt.js";
 import { loadAssetWithAccess, loadProjectFullScript, SlotSchema } from "./asset-shared.js";
 
 export const generateProcedures = {
@@ -70,105 +71,79 @@ export const generateProcedures = {
       // 五六收工:补 GenerationAttempt 审计行(对齐 asset.breakdown 的 TEXT 链路)。
       //   原本调 LLM 不留 attempt,BaseProvider 写的 ledger 行 attemptId 为空、无法回溯。
       //   建 attempt + 传 attemptId 让 ledger 关联;不传 skipLedger(保持原计费,纯增审计)。
-      const attemptStartedAt = new Date();
-      const attempt = await ctx.prisma.generationAttempt.create({
-        data: {
+      // P3-A:状态机走 runTextGenerationAttempt(create RUNNING / SUCCESS / 软失败 FAILED 统一,有单测锁)。
+      return runTextGenerationAttempt(
+        ctx,
+        {
           projectId: asset.projectId,
           assetId: asset.id,
-          providerId: modelId,
           modelId,
-          action: 'TEXT',
           inputJson: { kind: 'asset.generateProfileField', field: input.field },
-          outputMediaIds: [],
-          inputUnits: 0,
-          outputUnits: 0,
-          unitPriceCny: '0',
-          costCny: '0',
-          status: 'RUNNING',
-          startedAt: attemptStartedAt,
-          createdBy: ctx.user.id,
-        },
-      });
-
-      let result;
-      try {
-        result = await provider.generate(
-          {
-            system: '你是资深编剧 / 人物设定师。基于已知人物信息补全指定字段。严格只输出要求的内容,不要解释。',
-            prompt: `【已知人物信息】\n${known}\n\n【任务】${spec.task}`,
-            // 五六-2:放宽到 4000 给 thinking 模型(如 gemini-3-flash)留推理预算 —— 实测小 maxTokens
-            //   会被 thinking token 耗尽返空文本;非 thinking 模型产短字段会提前停,cap 大不浪费
-            maxTokens: 4000,
-            temperature: 0.85,
-            ...(spec.json ? { jsonSchema: {} } : {}),
+          failPrefix: 'AI 生成失败',
+          wrapError: (e, sanitized) => {
+            // 对齐 breakdown:errMsg 入库 + throw 前脱敏(防真接 Provider 泄漏 URL/token)
+            console.error('[asset.generateProfileField] LLM failed (raw):', e);
+            return new TRPCError({
+              code: 'INTERNAL_SERVER_ERROR',
+              message: sanitized || 'AI 生成失败',
+              cause: e,
+            });
           },
-          { userId: ctx.user.id, projectId: asset.projectId, assetId: asset.id, attemptId: attempt.id },
-        );
-      } catch (e) {
-        const failedAt = new Date();
-        // 对齐 breakdown:errMsg 入库 + throw 前脱敏(防真接 Provider 泄漏 URL/token)
-        console.error('[asset.generateProfileField] LLM failed (raw):', e);
-        const errMsg = sanitizeErrorMsg(e);
-        await ctx.prisma.generationAttempt.update({
-          where: { id: attempt.id },
-          data: {
-            status: 'FAILED',
-            errorMsg: errMsg,
-            finishedAt: failedAt,
-            durationMs: failedAt.getTime() - attemptStartedAt.getTime(),
-          },
-        });
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: errMsg || 'AI 生成失败',
-          cause: e,
-        });
-      }
-
-      // json 字段解析失败(result.json == null)记 FAILED,但仍返回让前端拿 warning 重试
-      const parseFailed = spec.json && result.json == null;
-      const finishedAt = new Date();
-      await ctx.prisma.generationAttempt.update({
-        where: { id: attempt.id },
-        data: {
-          status: parseFailed ? 'FAILED' : 'SUCCESS',
-          errorMsg: parseFailed ? 'AI 输出解析失败' : null,
-          inputUnits: result.inputTokens,
-          outputUnits: result.outputTokens,
-          costCny: result.costCny.toFixed(4),
-          finishedAt,
-          durationMs: finishedAt.getTime() - attemptStartedAt.getTime(),
         },
-      });
+        async (attemptId) => {
+          const result = await provider.generate(
+            {
+              system: '你是资深编剧 / 人物设定师。基于已知人物信息补全指定字段。严格只输出要求的内容,不要解释。',
+              prompt: `【已知人物信息】\n${known}\n\n【任务】${spec.task}`,
+              // 五六-2:放宽到 4000 给 thinking 模型(如 gemini-3-flash)留推理预算 —— 实测小 maxTokens
+              //   会被 thinking token 耗尽返空文本;非 thinking 模型产短字段会提前停,cap 大不浪费
+              maxTokens: 4000,
+              temperature: 0.85,
+              ...(spec.json ? { jsonSchema: {} } : {}),
+            },
+            { userId: ctx.user.id, projectId: asset.projectId, assetId: asset.id, attemptId },
+          );
 
-      let value: unknown;
-      if (input.field === 'mbti' || input.field === 'monologue') {
-        value = result.text.trim().replace(/^["'「」]+|["'「」]+$/g, '');
-      } else if (input.field === 'personalityTags') {
-        const obj = asRecord(result.json);
-        value = Array.isArray(obj?.tags)
-          ? obj.tags.filter((t): t is string => typeof t === 'string').slice(0, 10)
-          : [];
-      } else {
-        const obj = asRecord(result.json);
-        const arr = Array.isArray(obj?.lifeNodes) ? obj.lifeNodes : [];
-        value = arr
-          .map((n) => {
-            const r = asRecord(n);
-            if (!r) return null;
-            return {
-              year: typeof r.year === 'string' ? r.year : String(r.year ?? ''),
-              title: typeof r.title === 'string' ? r.title : '',
-              desc: typeof r.desc === 'string' ? r.desc : '',
-            };
-          })
-          .filter((n): n is { year: string; title: string; desc: string } => n !== null);
-      }
-      return {
-        field: input.field,
-        value,
-        warning: parseFailed ? 'AI 输出解析失败,请重试' : undefined,
-      };
+          // json 字段解析失败(result.json == null)记 FAILED,但仍返回让前端拿 warning 重试
+          const parseFailed = spec.json && result.json == null;
+
+          let value: unknown;
+          if (input.field === 'mbti' || input.field === 'monologue') {
+            value = result.text.trim().replace(/^["'「」]+|["'「」]+$/g, '');
+          } else if (input.field === 'personalityTags') {
+            const obj = asRecord(result.json);
+            value = Array.isArray(obj?.tags)
+              ? obj.tags.filter((t): t is string => typeof t === 'string').slice(0, 10)
+              : [];
+          } else {
+            const obj = asRecord(result.json);
+            const arr = Array.isArray(obj?.lifeNodes) ? obj.lifeNodes : [];
+            value = arr
+              .map((n) => {
+                const r = asRecord(n);
+                if (!r) return null;
+                return {
+                  year: typeof r.year === 'string' ? r.year : String(r.year ?? ''),
+                  title: typeof r.title === 'string' ? r.title : '',
+                  desc: typeof r.desc === 'string' ? r.desc : '',
+                };
+              })
+              .filter((n): n is { year: string; title: string; desc: string } => n !== null);
+          }
+          return {
+            inputTokens: result.inputTokens,
+            outputTokens: result.outputTokens,
+            costCny: result.costCny,
+            // 软失败:attempt.errorMsg='AI 输出解析失败';但返回给前端的 warning 带「请重试」
+            warning: parseFailed ? 'AI 输出解析失败' : undefined,
+            value: {
+              field: input.field,
+              value,
+              warning: parseFailed ? 'AI 输出解析失败,请重试' : undefined,
+            },
+          };
+        },
+      );
     }),
 
 
@@ -230,69 +205,40 @@ export const generateProcedures = {
         bio: '人物小传(200-400字:出身家世 + 核心动机/欲望/创伤 + 贯穿全剧人物弧光 + 与主要人物关系,基于剧本合理推演)',
       };
 
-      const attemptStartedAt = new Date();
-      const attempt = await ctx.prisma.generationAttempt.create({
-        data: {
+      // P3-A:状态机走 runTextGenerationAttempt(create RUNNING / SUCCESS 统一,有单测锁)。
+      return runTextGenerationAttempt(
+        ctx,
+        {
           projectId: asset.projectId,
           assetId: asset.id,
-          providerId: modelId,
           modelId,
-          action: 'TEXT',
           inputJson: { kind: 'asset.generateAssetText', field: input.field },
-          outputMediaIds: [],
-          inputUnits: 0,
-          outputUnits: 0,
-          unitPriceCny: '0',
-          costCny: '0',
-          status: 'RUNNING',
-          startedAt: attemptStartedAt,
-          createdBy: ctx.user.id,
-        },
-      });
-
-      let result;
-      try {
-        result = await provider.generate(
-          {
-            system:
-              '你是顶级影视制作设计 + 编剧。基于【完整剧本】和【已知设定】(重新)生成指定字段。严格只输出该字段正文,不要解释 / markdown / 字段名前缀。',
-            prompt: `【完整剧本】\n${scriptText || '(暂无剧本,仅据已知设定专业发挥)'}\n\n【该${typeLabel}已知设定】\n${known}\n\n【任务】为「${asset.name}」生成${FIELD_TASK[input.field]}。`,
-            // 五六-2:放宽到 4000 给 thinking 模型留推理预算(同 generateProfileField)
-            maxTokens: 4000,
-            temperature: 0.5,
+          failPrefix: 'AI 生成失败',
+          wrapError: (e, sanitized) => {
+            console.error('[asset.generateAssetText] LLM failed (raw):', e);
+            return new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: sanitized || 'AI 生成失败', cause: e });
           },
-          { userId: ctx.user.id, projectId: asset.projectId, assetId: asset.id, attemptId: attempt.id },
-        );
-      } catch (e) {
-        const failedAt = new Date();
-        console.error('[asset.generateAssetText] LLM failed (raw):', e);
-        const errMsg = sanitizeErrorMsg(e);
-        await ctx.prisma.generationAttempt.update({
-          where: { id: attempt.id },
-          data: {
-            status: 'FAILED',
-            errorMsg: errMsg,
-            finishedAt: failedAt,
-            durationMs: failedAt.getTime() - attemptStartedAt.getTime(),
-          },
-        });
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: errMsg || 'AI 生成失败', cause: e });
-      }
-
-      const finishedAt = new Date();
-      await ctx.prisma.generationAttempt.update({
-        where: { id: attempt.id },
-        data: {
-          status: 'SUCCESS',
-          inputUnits: result.inputTokens,
-          outputUnits: result.outputTokens,
-          costCny: result.costCny.toFixed(4),
-          finishedAt,
-          durationMs: finishedAt.getTime() - attemptStartedAt.getTime(),
         },
-      });
-
-      return { field: input.field, value: result.text.trim() };
+        async (attemptId) => {
+          const result = await provider.generate(
+            {
+              system:
+                '你是顶级影视制作设计 + 编剧。基于【完整剧本】和【已知设定】(重新)生成指定字段。严格只输出该字段正文,不要解释 / markdown / 字段名前缀。',
+              prompt: `【完整剧本】\n${scriptText || '(暂无剧本,仅据已知设定专业发挥)'}\n\n【该${typeLabel}已知设定】\n${known}\n\n【任务】为「${asset.name}」生成${FIELD_TASK[input.field]}。`,
+              // 五六-2:放宽到 4000 给 thinking 模型留推理预算(同 generateProfileField)
+              maxTokens: 4000,
+              temperature: 0.5,
+            },
+            { userId: ctx.user.id, projectId: asset.projectId, assetId: asset.id, attemptId },
+          );
+          return {
+            inputTokens: result.inputTokens,
+            outputTokens: result.outputTokens,
+            costCny: result.costCny,
+            value: { field: input.field, value: result.text.trim() },
+          };
+        },
+      );
     }),
 
 

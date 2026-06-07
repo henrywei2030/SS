@@ -44,10 +44,16 @@ describe('runTextGenerationAttempt', () => {
     // update:SUCCESS + 真实计量
     const updateData = (update.mock.calls[0]![0] as { data: Record<string, unknown> }).data;
     expect(updateData.status).toBe('SUCCESS');
+    expect(updateData.errorMsg).toBeNull();
     expect(updateData.inputUnits).toBe(10);
     expect(updateData.outputUnits).toBe(20);
     expect(updateData.costCny).toBe('0.5000');
     expect(updateData.finishedAt).toBeInstanceOf(Date);
+    // durationMs:真实耗时(number / ≥0)
+    expect(typeof updateData.durationMs).toBe('number');
+    expect(updateData.durationMs as number).toBeGreaterThanOrEqual(0);
+    // create 也记 startedAt(durationMs 的基准)
+    expect(createData.startedAt).toBeInstanceOf(Date);
   });
 
   it('runFn 抛普通 Error → FAILED 回写脱敏 errorMsg + 抛 TRPCError(带 failPrefix)', async () => {
@@ -64,6 +70,69 @@ describe('runTextGenerationAttempt', () => {
     expect(updateData.status).toBe('FAILED');
     expect(updateData.errorMsg).toContain('boom detail');
     expect(updateData.finishedAt).toBeInstanceOf(Date);
+    // 失败路径也写真实耗时(asset api-usage「耗时」列对账靠它)
+    expect(typeof updateData.durationMs).toBe('number');
+    expect(updateData.durationMs as number).toBeGreaterThanOrEqual(0);
+  });
+
+  it('软失败:runFn 返回 warning → FAILED(errorMsg=warning)+ 仍写 tokens/cost/durationMs + 正常返回 value(不 throw)', async () => {
+    const { ctx, update } = makeCtx();
+    const runFn = vi.fn(async () => ({
+      inputTokens: 7,
+      outputTokens: 3,
+      costCny: 0.12,
+      value: { field: 'mbti', value: '' },
+      warning: 'AI 输出解析失败',
+    }));
+
+    // 不 throw,正常返回业务值
+    const out = await runTextGenerationAttempt(ctx, OPTS, runFn);
+    expect(out).toEqual({ field: 'mbti', value: '' });
+
+    const updateData = (update.mock.calls[0]![0] as { data: Record<string, unknown> }).data;
+    expect(updateData.status).toBe('FAILED');
+    expect(updateData.errorMsg).toBe('AI 输出解析失败');
+    // 生成确实跑了、花了钱 → tokens/cost 照写
+    expect(updateData.inputUnits).toBe(7);
+    expect(updateData.outputUnits).toBe(3);
+    expect(updateData.costCny).toBe('0.1200');
+    expect(typeof updateData.durationMs).toBe('number');
+    expect(updateData.durationMs as number).toBeGreaterThanOrEqual(0);
+    expect(updateData.finishedAt).toBeInstanceOf(Date);
+  });
+
+  it('opts.assetId / episodeId → 写进 create 关联列(asset 路径)', async () => {
+    const { ctx, create } = makeCtx();
+    const runFn = vi.fn(async () => ({ inputTokens: 1, outputTokens: 1, costCny: 0, value: 'x' }));
+    await runTextGenerationAttempt(
+      ctx,
+      { ...OPTS, assetId: 'a1', episodeId: 'e1' },
+      runFn,
+    );
+    const createData = (create.mock.calls[0]![0] as { data: Record<string, unknown> }).data;
+    expect(createData.assetId).toBe('a1');
+    expect(createData.episodeId).toBe('e1');
+  });
+
+  it('opts.wrapError:runFn 抛普通 Error → 用自定义包裹(保留 cause / 文案),不走默认 failPrefix', async () => {
+    const { ctx, update } = makeCtx();
+    const raw = new Error('provider boom');
+    const runFn = vi.fn(async () => {
+      throw raw;
+    });
+    const wrapError = vi.fn(
+      (e: unknown, sanitized: string) =>
+        new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: sanitized || '资产拆解失败', cause: e }),
+    );
+
+    await expect(
+      runTextGenerationAttempt(ctx, { ...OPTS, wrapError }, runFn),
+    ).rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR', message: 'provider boom', cause: raw });
+    // FAILED 仍由 helper 写(errorMsg = 脱敏 + durationMs)
+    const updateData = (update.mock.calls[0]![0] as { data: Record<string, unknown> }).data;
+    expect(updateData.status).toBe('FAILED');
+    expect(updateData.errorMsg).toContain('provider boom');
+    expect(wrapError).toHaveBeenCalledTimes(1);
   });
 
   it('runFn 抛 TRPCError(如解析失败自定义消息)→ 原样重抛,不二次包 failPrefix', async () => {

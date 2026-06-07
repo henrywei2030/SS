@@ -8,10 +8,10 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { type AssetDraft, breakdownAssets, breakdownFullSettings } from "@ss/core/asset";
 import { Prisma } from "@ss/db";
-import { sanitizeErrorMsg } from "@ss/shared";
 import { protectedProcedure } from "../trpc.js";
 import { logOperation } from "../middleware/audit.js";
 import { loadSystemSettings } from "../utils/system-bindings.js";
+import { runTextGenerationAttempt } from "../utils/generation-attempt.js";
 import { assertProjectAccess } from "../middleware/access.js";
 import { DraftInputSchema, loadProjectFullScript } from "./asset-shared.js";
 
@@ -98,14 +98,14 @@ export const breakdownProcedures = {
       const maxCharacters = Number(settings['asset.breakdown.maxCharacters'] ?? '20');
 
       // W1-W5 audit P0(B1):写 GenerationAttempt(action=TEXT),Phase 1 资产拆解扣费回溯链路
-      const attemptStartedAt = new Date();
-      const attempt = await ctx.prisma.generationAttempt.create({
-        data: {
+      // P3-A:状态机走 runTextGenerationAttempt(create RUNNING / SUCCESS / 软失败 result.warning→FAILED 统一,有单测锁)。
+      //   breakdown 引擎不返回 token 数 → 传 inputTokens/outputTokens=0(与原 update 不写这两列等价)。
+      return runTextGenerationAttempt(
+        ctx,
+        {
           projectId: input.projectId,
           episodeId: input.episodeId,
-          providerId: modelId,
           modelId,
-          action: 'TEXT',
           inputJson: {
             kind: 'asset.breakdown',
             scriptId: script.id,
@@ -113,92 +113,67 @@ export const breakdownProcedures = {
             styleSlug: project?.style?.slug,
             maxCharacters,
           },
-          outputMediaIds: [],
-          inputUnits: 0,
-          outputUnits: 0,
-          unitPriceCny: '0',
-          costCny: '0',
-          status: 'RUNNING',
-          startedAt: attemptStartedAt,
-          createdBy: ctx.user.id,
-        },
-      });
-
-      let result;
-      try {
-        result = await breakdownAssets({
-          scriptText: script.content,
-          projectType: project?.type,
-          styleSlug: project?.style?.slug,
-          modelId,
-          maxCharacters,
-          ctx: {
-            userId: ctx.user.id,
-            projectId: input.projectId,
-            episodeId: input.episodeId,
-            attemptId: attempt.id,
+          failPrefix: '资产拆解失败',
+          wrapError: async (e, sanitized) => {
+            // 第 18 轮 audit P1:errMsg 入 attempt.errorMsg(helper 写)+ TRPCError + log 前脱敏
+            console.error('[asset.breakdown] LLM failed (raw):', e);
+            await logOperation(ctx, 'asset.breakdown.failed', 'project', input.projectId, null, {
+              error: sanitized,
+              scriptId: script.id,
+            });
+            return new TRPCError({
+              code: 'INTERNAL_SERVER_ERROR',
+              message: sanitized || '资产拆解失败',
+              cause: e, // W7 audit R9
+            });
           },
-        });
-      } catch (e) {
-        const finishedAt = new Date();
-        // 第 18 轮 audit P1:errMsg 入 attempt.errorMsg + TRPCError + log 前脱敏
-        console.error('[asset.breakdown] LLM failed (raw):', e);
-        const errMsg = sanitizeErrorMsg(e);
-        await ctx.prisma.generationAttempt.update({
-          where: { id: attempt.id },
-          data: {
-            status: 'FAILED',
-            errorMsg: errMsg,
-            finishedAt,
-            durationMs: finishedAt.getTime() - attemptStartedAt.getTime(),
-          },
-        });
-        await logOperation(ctx, 'asset.breakdown.failed', 'project', input.projectId, null, {
-          error: errMsg,
-          scriptId: script.id,
-        });
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: errMsg || '资产拆解失败',
-          cause: e, // W7 audit R9
-        });
-      }
-
-      const finishedAt = new Date();
-      await ctx.prisma.generationAttempt.update({
-        where: { id: attempt.id },
-        data: {
-          status: result.warning ? 'FAILED' : 'SUCCESS',
-          errorMsg: result.warning ?? null,
-          costCny: result.cost.toFixed(4),
-          finishedAt,
-          durationMs: finishedAt.getTime() - attemptStartedAt.getTime(),
         },
-      });
+        async (attemptId) => {
+          const result = await breakdownAssets({
+            scriptText: script.content,
+            projectType: project?.type,
+            styleSlug: project?.style?.slug,
+            modelId,
+            maxCharacters,
+            ctx: {
+              userId: ctx.user.id,
+              projectId: input.projectId,
+              episodeId: input.episodeId,
+              attemptId,
+            },
+          });
 
-      await logOperation(ctx, 'asset.breakdown', 'project', input.projectId, null, {
-        scriptId: script.id,
-        characters: result.characters.length,
-        scenes: result.scenes.length,
-        props: result.props.length,
-        cost: result.cost,
-        modelId,
-      });
+          await logOperation(ctx, 'asset.breakdown', 'project', input.projectId, null, {
+            scriptId: script.id,
+            characters: result.characters.length,
+            scenes: result.scenes.length,
+            props: result.props.length,
+            cost: result.cost,
+            modelId,
+          });
 
-      // 把 drafts 标记 type(给前端 batchCreate 时复用)
-      const charactersTyped: AssetDraft[] = result.characters;
-      const scenesTyped: AssetDraft[] = result.scenes;
-      const propsTyped: AssetDraft[] = result.props;
+          // 把 drafts 标记 type(给前端 batchCreate 时复用)
+          const charactersTyped: AssetDraft[] = result.characters;
+          const scenesTyped: AssetDraft[] = result.scenes;
+          const propsTyped: AssetDraft[] = result.props;
 
-      return {
-        characters: charactersTyped.map((d) => ({ ...d, type: 'CHARACTER' as const })),
-        scenes: scenesTyped.map((d) => ({ ...d, type: 'SCENE' as const })),
-        props: propsTyped.map((d) => ({ ...d, type: 'PROP' as const })),
-        cost: result.cost,
-        modelId,
-        scriptId: script.id,
-        warning: result.warning,
-      };
+          return {
+            inputTokens: 0,
+            outputTokens: 0,
+            costCny: result.cost,
+            warning: result.warning,
+            value: {
+              characters: charactersTyped.map((d) => ({ ...d, type: 'CHARACTER' as const })),
+              scenes: scenesTyped.map((d) => ({ ...d, type: 'SCENE' as const })),
+              props: propsTyped.map((d) => ({ ...d, type: 'PROP' as const })),
+              cost: result.cost,
+              modelId,
+              scriptId: script.id,
+              warning: result.warning,
+            },
+          };
+        },
+      );
     }),
 
 
@@ -247,111 +222,86 @@ export const breakdownProcedures = {
         });
       }
 
-      const attemptStartedAt = new Date();
-      const attempt = await ctx.prisma.generationAttempt.create({
-        data: {
+      // P3-A:状态机走 runTextGenerationAttempt(create RUNNING / SUCCESS / 软失败 result.warning→FAILED 统一,有单测锁)。
+      //   breakdownFullSettings 引擎不返回 token 数 → 传 inputTokens/outputTokens=0(与原 update 不写这两列等价)。
+      return runTextGenerationAttempt(
+        ctx,
+        {
           projectId: input.projectId,
-          providerId: modelId,
           modelId,
-          action: 'TEXT',
           inputJson: { kind: 'asset.breakdownProject', scriptCount, focusType: input.type, styleSlug: project?.style?.slug },
-          outputMediaIds: [],
-          inputUnits: 0,
-          outputUnits: 0,
-          unitPriceCny: '0',
-          costCny: '0',
-          status: 'RUNNING',
-          startedAt: attemptStartedAt,
-          createdBy: ctx.user.id,
-        },
-      });
-
-      let result;
-      try {
-        result = await breakdownFullSettings({
-          scriptText,
-          projectType: project?.type,
-          styleSlug: project?.style?.slug,
-          modelId,
-          maxCharacters: 40,
-          focusType: input.type,
-          ctx: { userId: ctx.user.id, projectId: input.projectId, attemptId: attempt.id },
-        });
-      } catch (e) {
-        const failedAt = new Date();
-        console.error('[asset.breakdownProject] LLM failed (raw):', e);
-        const errMsg = sanitizeErrorMsg(e);
-        await ctx.prisma.generationAttempt.update({
-          where: { id: attempt.id },
-          data: {
-            status: 'FAILED',
-            errorMsg: errMsg,
-            finishedAt: failedAt,
-            durationMs: failedAt.getTime() - attemptStartedAt.getTime(),
+          failPrefix: '剧本拆解失败',
+          wrapError: (e, sanitized) => {
+            console.error('[asset.breakdownProject] LLM failed (raw):', e);
+            return new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: sanitized || '剧本拆解失败', cause: e });
           },
-        });
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: errMsg || '剧本拆解失败', cause: e });
-      }
-
-      const finishedAt = new Date();
-      await ctx.prisma.generationAttempt.update({
-        where: { id: attempt.id },
-        data: {
-          status: result.warning ? 'FAILED' : 'SUCCESS',
-          errorMsg: result.warning ?? null,
-          costCny: result.cost.toFixed(4),
-          finishedAt,
-          durationMs: finishedAt.getTime() - attemptStartedAt.getTime(),
         },
-      });
+        async (attemptId) => {
+          const result = await breakdownFullSettings({
+            scriptText,
+            projectType: project?.type,
+            styleSlug: project?.style?.slug,
+            modelId,
+            maxCharacters: 40,
+            focusType: input.type,
+            ctx: { userId: ctx.user.id, projectId: input.projectId, attemptId },
+          });
 
-      // 匹配已有资产(archetypeKey 优先,其次 name + 同 type)→ 前端区分 新建/更新
-      const existing = await ctx.prisma.asset.findMany({
-        where: { projectId: input.projectId, deletedAt: null },
-        select: { id: true, name: true, archetypeKey: true, type: true },
-      });
-      const matchOf = (
-        name: string,
-        archetypeKey: string | undefined,
-        type: 'CHARACTER' | 'SCENE' | 'PROP',
-      ): string | undefined => {
-        if (archetypeKey) {
-          const m = existing.find((a) => a.archetypeKey === archetypeKey && a.type === type);
-          if (m) return m.id;
-        }
-        return existing.find((a) => a.name === name && a.type === type)?.id;
-      };
+          // 匹配已有资产(archetypeKey 优先,其次 name + 同 type)→ 前端区分 新建/更新
+          const existing = await ctx.prisma.asset.findMany({
+            where: { projectId: input.projectId, deletedAt: null },
+            select: { id: true, name: true, archetypeKey: true, type: true },
+          });
+          const matchOf = (
+            name: string,
+            archetypeKey: string | undefined,
+            type: 'CHARACTER' | 'SCENE' | 'PROP',
+          ): string | undefined => {
+            if (archetypeKey) {
+              const m = existing.find((a) => a.archetypeKey === archetypeKey && a.type === type);
+              if (m) return m.id;
+            }
+            return existing.find((a) => a.name === name && a.type === type)?.id;
+          };
 
-      await logOperation(ctx, 'asset.breakdownProject', 'project', input.projectId, null, {
-        scriptCount,
-        characters: result.characters.length,
-        scenes: result.scenes.length,
-        props: result.props.length,
-        cost: result.cost,
-        modelId,
-      });
+          await logOperation(ctx, 'asset.breakdownProject', 'project', input.projectId, null, {
+            scriptCount,
+            characters: result.characters.length,
+            scenes: result.scenes.length,
+            props: result.props.length,
+            cost: result.cost,
+            modelId,
+          });
 
-      return {
-        characters: result.characters.map((d) => ({
-          ...d,
-          type: 'CHARACTER' as const,
-          matchedAssetId: matchOf(d.name, d.archetypeKey, 'CHARACTER'),
-        })),
-        scenes: result.scenes.map((d) => ({
-          ...d,
-          type: 'SCENE' as const,
-          matchedAssetId: matchOf(d.name, d.archetypeKey, 'SCENE'),
-        })),
-        props: result.props.map((d) => ({
-          ...d,
-          type: 'PROP' as const,
-          matchedAssetId: matchOf(d.name, d.archetypeKey, 'PROP'),
-        })),
-        cost: result.cost,
-        modelId,
-        scriptCount,
-        warning: result.warning,
-      };
+          return {
+            inputTokens: 0,
+            outputTokens: 0,
+            costCny: result.cost,
+            warning: result.warning,
+            value: {
+              characters: result.characters.map((d) => ({
+                ...d,
+                type: 'CHARACTER' as const,
+                matchedAssetId: matchOf(d.name, d.archetypeKey, 'CHARACTER'),
+              })),
+              scenes: result.scenes.map((d) => ({
+                ...d,
+                type: 'SCENE' as const,
+                matchedAssetId: matchOf(d.name, d.archetypeKey, 'SCENE'),
+              })),
+              props: result.props.map((d) => ({
+                ...d,
+                type: 'PROP' as const,
+                matchedAssetId: matchOf(d.name, d.archetypeKey, 'PROP'),
+              })),
+              cost: result.cost,
+              modelId,
+              scriptCount,
+              warning: result.warning,
+            },
+          };
+        },
+      );
     }),
 
 
