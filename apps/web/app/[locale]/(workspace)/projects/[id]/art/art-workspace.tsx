@@ -22,8 +22,10 @@ import { cn } from '@/lib/utils';
 
 import { AssetCard } from './asset-card';
 import { AssetEditDialog } from './asset-edit-dialog';
+import { ArtBatchGenerate, type BatchTarget } from './art-batch-generate';
 import { BreakdownDialog } from './breakdown-dialog';
 import { GapDetectionDialog } from './gap-detection-dialog';
+import type { Slot } from './asset-edit-shared';
 
 type AssetType = 'CHARACTER' | 'SCENE' | 'PROP' | 'STYLE_REFERENCE';
 
@@ -33,6 +35,14 @@ const TYPES: Array<{ value: AssetType; label: string; icon: React.ElementType }>
   { value: 'PROP', label: '道具', icon: Package },
   { value: 'STYLE_REFERENCE', label: '风格参考', icon: Palette },
 ];
+
+// 各类型「主图」槽位 — 同步生成 / 缺图判定用(对齐网格 hero 取图逻辑)
+const PRIMARY_SLOT: Record<AssetType, Slot> = {
+  CHARACTER: 'portrait',
+  SCENE: 'scene_main',
+  PROP: 'main',
+  STYLE_REFERENCE: 'main',
+};
 
 // 五六收工:同步闸筛选(剧本拆解 syncToArt 翻转 syncedToArtAt)。默认 all 不回归,
 //   让美术工坊能选「只看剧本拆解已同步过来的」/「未同步(美术侧直接建的)」。
@@ -79,6 +89,22 @@ export function ArtWorkspace({ projectId, locale, initialType }: Props): React.R
     { projectId, assetIds },
     { enabled: assetIds.length > 0 },
   );
+
+  // 「同步生成」目标 — 当前分类下「缺主图」的资产(主图取图逻辑对齐下方网格 hero)
+  const batchTargets: BatchTarget[] = React.useMemo(() => {
+    if (!assets) return [];
+    return assets
+      .filter((a) => {
+        const hero =
+          a.type === 'CHARACTER'
+            ? a.portraitMediaId
+            : a.type === 'SCENE'
+              ? a.sceneMainMediaId ?? a.mainMediaId
+              : a.mainMediaId;
+        return !hero;
+      })
+      .map((a) => ({ id: a.id, name: a.name, slot: PRIMARY_SLOT[a.type as AssetType] }));
+  }, [assets]);
 
   const selectType = (t: AssetType): void => {
     const params = new URLSearchParams(window.location.search);
@@ -211,6 +237,11 @@ export function ArtWorkspace({ projectId, locale, initialType }: Props): React.R
             <ListChecks className="size-3.5" />
             按集补充
           </Button>
+          <ArtBatchGenerate
+            type={currentType}
+            targets={batchTargets}
+            onDone={() => void refetch()}
+          />
           <Button
             size="sm"
             variant="outline"

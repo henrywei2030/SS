@@ -21,6 +21,8 @@ export interface MergeableShot {
   content: string;
   prompt: string;
   positionIdx: number;
+  /** 所属场景 id(剧本场号对应的 Scene)— requireSameScene 时作严格场景边界 */
+  sceneId?: string | null;
   /** 镜头中出现的人物 / 场景 ID（用于合并判断） */
   refAssetIds?: string[];
   /** 优先级 — 同一组里若有 S 级，提示加重 */
@@ -44,8 +46,14 @@ export interface MergedShotGroup {
 export interface MergeOptions {
   /** 视频 Provider 的最大单次生成时长（秒） */
   maxDurationS: number;
-  /** 合并时是否要求场景一致（通过 refAssetIds 重叠） */
+  /** 合并时是否要求场景一致（通过 refAssetIds 重叠 — 松散启发式） */
   requireSceneContinuity?: boolean;
+  /**
+   * 仅合并同一场景(sceneId 相同)的相邻镜头 — 跨场景强制开新组。
+   * 严格场景边界,区别于 requireSceneContinuity 的资产重叠启发式。
+   * (2026-06 用户需求:自动整合只在同场景内合并)
+   */
+  requireSameScene?: boolean;
   /** S 级镜头是否禁止合并（保留单独抽卡） */
   isolateSPriority?: boolean;
 }
@@ -57,7 +65,8 @@ export interface MergeOptions {
  *   1. 按 positionIdx 排序
  *   2. 累积时长，未超过 maxDurationS 就继续合并
  *   3. requireSceneContinuity 时，refAssetIds 必须有交集
- *   4. isolateSPriority 时，S 级强制单独成组
+ *   4. requireSameScene 时，sceneId 不同强制开新组（严格场景边界）
+ *   5. isolateSPriority 时，S 级强制单独成组
  */
 export function mergeShots(
   shots: MergeableShot[],
@@ -71,6 +80,7 @@ export function mergeShots(
   let current: MergeableShot[] = [];
   let currentDuration = 0;
   let currentAssets = new Set<string>();
+  let currentSceneId: string | null = null;
 
   function flush(): void {
     if (current.length === 0) return;
@@ -78,10 +88,12 @@ export function mergeShots(
     current = [];
     currentDuration = 0;
     currentAssets = new Set();
+    currentSceneId = null;
   }
 
   for (const shot of sorted) {
     const shotAssets = new Set(shot.refAssetIds ?? []);
+    const shotSceneId = shot.sceneId ?? null;
 
     // 单 shot 自己就超长 — 算法只能让它独立成组并发出告警，由调用方决定是否拆镜
     if (shot.durationS > maxD) {
@@ -97,6 +109,9 @@ export function mergeShots(
       opts.requireSceneContinuity &&
       current.length > 0 &&
       !hasOverlap(currentAssets, shotAssets);
+    // 用户规则(2026-06):仅同一场景(sceneId 相同)的相邻镜头可合并,跨场景强制开新组
+    const sceneChange =
+      opts.requireSameScene && current.length > 0 && shotSceneId !== currentSceneId;
 
     if (isolatedS) {
       flush();
@@ -104,10 +119,11 @@ export function mergeShots(
       continue;
     }
 
-    if (tooLong || sceneBreak) {
+    if (tooLong || sceneBreak || sceneChange) {
       flush();
     }
 
+    if (current.length === 0) currentSceneId = shotSceneId;
     current.push(shot);
     currentDuration += shot.durationS;
     shotAssets.forEach((a) => currentAssets.add(a));
@@ -150,12 +166,13 @@ function extractLast(num: string): string {
 }
 
 function mergePrompts(shots: MergeableShot[]): string {
+  // 需求(2026-06):段落之间只留空行,不要 `---` 分隔符(分镜工坊提示词更干净)。
   return shots
     .map((s, i) => {
       const header = `[${i + 1}/${shots.length}] ${s.framing ?? ''} ${s.angle ?? ''}`.trim();
       return `${header}\n${s.prompt}`;
     })
-    .join('\n\n---\n\n');
+    .join('\n\n');
 }
 
 function hasOverlap(a: Set<string>, b: Set<string>): boolean {

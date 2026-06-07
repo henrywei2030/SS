@@ -179,6 +179,13 @@ export async function generateStoryboard(
     input.maxShotDurationS ?? 15,
   );
 
+  // 需求(2026-06):每个分镜 prompt 前注明所在场号(+ 场地名),给「同场景自动整合」一个
+  //   可见的统一标准 —— 同场镜头标记一致、跨场不同,一眼可辨。
+  const sceneTag = buildSceneTag(input.scene.number, input.scene.place);
+  const taggedShots = shots.map((s) =>
+    s.prompt && !s.prompt.startsWith(sceneTag) ? { ...s, prompt: `${sceneTag}${s.prompt}` } : s,
+  );
+
   let warning: string | undefined;
   if (!result.json) {
     // 全盘审查 #5:区分"被 maxTokens 截断"(调大上限 / 减内容可重试成功)vs"模型格式问题"
@@ -193,7 +200,7 @@ export async function generateStoryboard(
   }
 
   return {
-    shots,
+    shots: taggedShots,
     cost: result.costCny,
     modelId,
     raw: result.json,
@@ -204,6 +211,16 @@ export async function generateStoryboard(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * 分镜场景标记 — `【场{场号}{ 场地名}】`,贴在每个分镜 prompt 前。
+ * 用途:给「同场景自动整合」一个可见统一标准(同场一致、跨场不同)。
+ * place 为空或占位「未指定」时省略,只留场号。纯函数,可单测。
+ */
+export function buildSceneTag(sceneNumber: string, place?: string | null): string {
+  const p = place?.trim();
+  return `【场${sceneNumber}${p && p !== '未指定' ? ` ${p}` : ''}】`;
+}
 
 function buildUserPrompt(input: GenerateStoryboardInput): string {
   const { scene, styleSlug, stylePrompt, knownCharacters, presets } = input;

@@ -183,9 +183,9 @@ export const groupProcedures = {
     }),
 
   /**
-   * 自动整合(2026-06 用户需求):对当前集所有「单一分镜」(未入组)按 positionIdx 顺序
-   * 贪心合并 — 累加时长 ≤ maxDurationS 就并入同组,超则封口开新组。**严格顺序,不任意组合**。
-   * 复用 core/storyboard/merge.ts 的 mergeShots 算法(与手动合并同一真相源)。
+   * 自动整合(2026-06 用户需求):对当前集所有「单一分镜」(未入组)按 positionIdx 顺序贪心合并。
+   * 规则三条:①每组累计时长 ≤ maxDurationS(默认 15s)②**仅同一场景(sceneId 相同)的相邻镜头可合并**,
+   * 跨场景强制开新组 ③严格按顺序,不任意组合。复用 core/storyboard/merge.ts(与手动合并同一真相源)。
    */
   autoMergeEpisode: protectedProcedure
     .meta({
@@ -224,7 +224,8 @@ export const groupProcedures = {
         return { groupsCreated: 0, shotsMerged: 0, message: '没有可整合的单一分镜(需 ≥2 个未入组镜头)' };
       }
 
-      // 贪心合并(merge.ts:按 positionIdx 顺序累加 ≤maxD 就并,超则封口开新组 — 严格顺序,不任意组合)
+      // 贪心合并(merge.ts):规则(2026-06 用户)= ①每组累计 ≤maxD ②仅同一场景(sceneId)相邻镜头可并,
+      //   跨场景强制开新组 ③严格按 positionIdx 顺序,不任意组合。
       const { groups } = mergeShots(
         standalone.map((s) => ({
           id: s.id,
@@ -235,9 +236,10 @@ export const groupProcedures = {
           content: s.content,
           prompt: s.prompt,
           positionIdx: s.positionIdx,
+          sceneId: s.sceneId,
           priority: (s.priority ?? undefined) as 'S' | 'A' | 'B' | 'C' | undefined,
         })),
-        { maxDurationS: maxD },
+        { maxDurationS: maxD, requireSameScene: true },
       );
       // 只对 ≥2 镜的组建 ShotGroup(单镜保持 standalone,发布时再 1:1 成组)
       const mergeable = groups.filter((g) => g.shots.length >= 2);
@@ -245,7 +247,7 @@ export const groupProcedures = {
         return {
           groupsCreated: 0,
           shotsMerged: 0,
-          message: `按 ≤${maxD}s 整合后没有可合并的相邻镜头(均超单镜时长或已成组)`,
+          message: `按「同场景 + ≤${maxD}s」整合后没有可合并的相邻镜头(均跨场景/超单镜时长/已成组)`,
         };
       }
 
@@ -288,7 +290,7 @@ export const groupProcedures = {
       return {
         groupsCreated: mergeable.length,
         shotsMerged,
-        message: `已按 ≤${maxD}s 顺序整合为 ${mergeable.length} 组(共 ${shotsMerged} 镜)`,
+        message: `已按「同场景 + ≤${maxD}s」顺序整合为 ${mergeable.length} 组(共 ${shotsMerged} 镜)`,
       };
     }),
 

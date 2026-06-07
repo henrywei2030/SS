@@ -80,6 +80,43 @@ describe('storyboard/merge', () => {
     expect(groups[1]?.shots.map((s) => s.id)).toEqual(['c', 'd']);
   });
 
+  it('requireSameScene:仅同一 sceneId 相邻镜头合并,跨场景强制开新组', () => {
+    const shots = [
+      shot('a', '1', 2, 0, { sceneId: 'sc1' }),
+      shot('b', '2', 2, 1, { sceneId: 'sc1' }),
+      shot('c', '3', 2, 2, { sceneId: 'sc2' }), // 换场景
+      shot('d', '4', 2, 3, { sceneId: 'sc2' }),
+    ];
+    // maxDurationS 设大,确保只有「场景边界」触发分组(隔离场景规则)
+    const { groups } = mergeShots(shots, { maxDurationS: 100, requireSameScene: true });
+    expect(groups).toHaveLength(2);
+    expect(groups[0]?.shots.map((s) => s.id)).toEqual(['a', 'b']);
+    expect(groups[1]?.shots.map((s) => s.id)).toEqual(['c', 'd']);
+  });
+
+  it('requireSameScene + maxDuration:同场景内按时长封顶分组,跨场景再切', () => {
+    const shots = [
+      shot('a', '1', 4, 0, { sceneId: 'sc1' }),
+      shot('b', '2', 4, 1, { sceneId: 'sc1' }), // a+b=8 ≤10 同组
+      shot('c', '3', 4, 2, { sceneId: 'sc1' }), // +c=12>10 → 同场景内开新组
+      shot('d', '4', 3, 3, { sceneId: 'sc2' }), // 换场景 → 开新组
+      shot('e', '5', 3, 4, { sceneId: 'sc2' }), // d+e=6 ≤10 同组
+    ];
+    const { groups } = mergeShots(shots, { maxDurationS: 10, requireSameScene: true });
+    expect(groups.map((g) => g.shots.map((s) => s.id))).toEqual([
+      ['a', 'b'],
+      ['c'],
+      ['d', 'e'],
+    ]);
+  });
+
+  it('requireSameScene:无 sceneId(未分场)视为同一组,可彼此合并', () => {
+    const shots = [shot('a', '1', 2, 0), shot('b', '2', 2, 1)];
+    const { groups } = mergeShots(shots, { maxDurationS: 10, requireSameScene: true });
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.shots.map((s) => s.id)).toEqual(['a', 'b']);
+  });
+
   it('按 positionIdx 而非数组顺序排列', () => {
     const shots = [
       shot('c', '3', 2, 2),
@@ -107,5 +144,13 @@ describe('storyboard/merge', () => {
     ];
     const { groups } = mergeShots(shots, { maxDurationS: 10 });
     expect(groups[0]?.refAssetIds.sort()).toEqual(['x', 'y', 'z']);
+  });
+
+  it('合并提示词:段落间用空行,不含 --- 分隔符', () => {
+    const shots = [shot('a', '1', 2, 0), shot('b', '2', 2, 1)];
+    const { groups } = mergeShots(shots, { maxDurationS: 10 });
+    expect(groups[0]?.mergedPrompt).not.toContain('---');
+    expect(groups[0]?.mergedPrompt).toContain('prompt a');
+    expect(groups[0]?.mergedPrompt).toContain('prompt b');
   });
 });

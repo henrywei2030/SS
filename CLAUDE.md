@@ -157,6 +157,11 @@ git rev-list --left-right --count main...origin/main  # 输出格式: "<ahead>\t
 - `.env.example` 改了 → 提示对比 `.env.local` 看是否需要补字段
 - `CLAUDE.md` 改了 → 提示重新阅读规范
 
+#### Step 3.5:同步数据库(每次开工固定执行 · 2026-06-08 新增)
+跑 `pnpm db:sync` —— 把 seed.ts 的结构性数据(prompt 模板 / binding KEY / 风格 / 系统设置)增量补进本机 DB(insert-if-missing,**不覆盖**各机绑定值 / 密钥 / 手编 prompt 正文,**跳过** providers)。
+- 跟 Step 2.5 #7 区别:#7 仅长间隔接续(behind≥20 / ≥5天 / seed.ts 在 reset 改动里)才触发;**本步每次开工都跑**,确保结构层始终与 git 对齐。
+- 归"安全批量跑"档,无副作用(四九收工已实测),直接跑;跑完在 Step 5 汇报里加一行 `🗄️ db:sync 已同步`。
+
 #### Step 4:Untracked 文件清单(不删,只显示)
 跑 `git ls-files --others --exclude-standard` 显示本地有但 git 不认识的文件。**不自动 `git clean`**(可能是你的临时笔记 / 测试输出)。如确认要清,你说"清理 untracked"我再跑。
 
@@ -197,6 +202,11 @@ git rev-list --left-right --count main...origin/main  # 输出格式: "<ahead>\t
 - 主题 / UI 系统变化 → 更新 `docs/THEMING.md`
 - 设备 / 跨平台流程变化 → 更新 `docs/HOME-SETUP.md` / `docs/SETUP-WINDOWS.md`
 - 协作流程本身变化 → 更新 `CLAUDE.md`(你自己)
+
+#### Step 3.5:同步数据库(每次收工固定执行 · 2026-06-08 新增)
+- 若本次会话**新增了结构性 DB 数据**(prompt 模板 slug / binding KEY / 风格)→ 先按 Step 3 写进 `packages/db/prisma/seed.ts`(只有进 seed.ts,别机开工 `db:sync` 才补得到)。
+- 跑 `pnpm db:sync` 验证本机 DB 与 seed 对齐(insert-if-missing,不覆盖各机值,安全)。**每次收工都跑**,确保结构层闭环。
+- 跑完在 Step 9 提醒前确认一句 `🗄️ db:sync 已同步`。
 
 #### Step 4:展示 diff
 跑 `git status` + `git diff --stat`(事后 review 用,**不是**确认门槛)。

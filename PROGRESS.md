@@ -5,6 +5,46 @@
 
 ---
 
+## 2026-06-08(周一,mac-studio · 真打 #3 图生图 + 分镜同场景整合/场景标记 + 美术默认 seedream/一键同步生成 + 删 stray + 收工规则升级)— 承 6-7 晚开工连做 6 块,边改边 Chrome 真打
+
+**全程 dev 在线 · typecheck 16/16 + test(adapters 31 / core 82 / api 32)全过 · 多处 Chrome 真打 · 收工跑 db:sync 规则化**
+
+### 一、#3 图生图 UI 端到端真打(¥0.44)
+- 临时埋点抓 `/images/edits` 请求/响应:`model=doubao-seedream-5-0-260128`(真实名非 providerId)· `size=2688x1512`(≥3.69M)· `image[]` multipart · `extra.strength`。响应 **200 出图**,三视图从形象图派生,UI→backend→adapter→moyu 全链通(36.8s)。验证后删埋点。
+- **网络抖动**:首次 `Connect Timeout 60s`(undici 直连 TUN fake-IP `198.18.0.66`),curl 测 moyu connect≈3ms 健康 → 重试即成(印证老记录)。
+- **修正自己误判**:中途以为林默旧形象图「过期」其实是 **HEAD 不在签名 → 403 假象**,GET(adapter 实际用)测旧图 206 正常。响应 URL `X-Tos-Expires=86400`(24h)确认 volces 直链 24h 真过期 → Phase 2 应下载存 MinIO。那张重生形象图严格不必要(多花 ¥0.22);林默 confirmed portrait 已换成新生成那张(旧的仍在候选池可换回)。
+
+### 二、分镜自动整合:同场景才合并(用户 3 规则)
+- `merge.ts`:`MergeableShot` 加 `sceneId`、`MergeOptions` 加 `requireSameScene`;合并循环加场景边界(下一镜 sceneId≠当前组→强制开新组),保留旧 `requireSceneContinuity`(资产重叠)正交。`autoMergeEpisode` 传 `sceneId` + `requireSameScene:true` + 文案改「同场景+≤Xs+按顺序」。
+- 单测 +3;**真实数据 dry-run**(第1集 38镜):旧 8 组 **2 跨场景** → 新 9 组 **0 跨场景**。①≤15s ②同场景 ③按顺序 全满足。手动合并(显式选镜)未限制,保持灵活。
+
+### 三、生成分镜 prompt 注明场景 + 去 `---`(用户)
+- `generate.ts` 抽纯函数 `buildSceneTag(场号,场地)` → `【场1-1 皇城·三公主寝殿】`,生成时逐镜贴 prompt 前(给「同场景整合」可见统一标准)+ generate.test.ts 6 测。
+- `mergePrompts` 段落分隔 `\n\n---\n\n` → `\n\n`(去 `---`)+ 1 测。组合 dry-run 验最终 prompt:每段 `【场X】` 开头、无 `---`、同组同场景。
+
+### 四、美术工坊:默认 seedream 5.0 lite + 一键同步生成
+- `listImageProviders` 改返 `{providers(含 unitPriceCny), defaultProviderId(=binding)}`;GenerationPanel 初始化显式默认选中默认 provider(下拉「默认模型(绑定)」→「Seedream 5.0 lite」)。
+- 新建 `art-batch-generate.tsx`「同步生成」按钮(顶栏):当前分类**缺主图**资产一键批量(人物=形象图/场景=主视角/道具=主图),3 并发 + 确认框(张数+预计¥)+ 进度条 + 中断 + 失败重试,**生成后自动设为主图**;模型走 binding(seedream lite)。真打:11 缺图 → 确认框「11 张 · ¥2.42 · Seedream 5.0 lite」(未点开始,没扣钱)。
+
+### 五、删多余空「男主」+ 确认删除入口
+- 用户报人物设定多余空「男主」找不到删除。查实 = 手动「+新建」输名后没填的 stray(0 引用,空)。删除功能其实在 **人物设定「...」菜单**(小图标易错过)+ **美术编辑弹窗红垃圾桶**。经「...」菜单删掉(软删),人物设定 11/12→11/11、美术工坊 12→11、同步生成 11→10。
+
+### 六、收工:进度同步 + DB 同步规则化 + 删 md 精简
+- **CLAUDE.md 加规则**:每次开工/收工固定跑 `pnpm db:sync` 同步结构性 DB(开工 Step 3.5 / 收工 Step 3.5)。本次跑通(8 prompt / 27 设置 / 跳过 7 provider,无新结构数据)。
+- 删多余/过时 md 文件精简仓库(见本次 commit diff)。
+
+**问题/待决策**
+- ❓ 林默 portrait 换了新的(旧过期),要不要换回原来那张。
+- ❓ 同步生成自动设为主图(非候选池)— 想「只生成候选人工挑」可改;手动合并跨场景未限制(默认灵活)。
+- ❓ **volces 图 24h 过期是真问题**(所有生成图过 24h 失效,显示/当参考都 403)→ Phase 2 在 generateImage 后下载上传 MinIO 存真 storageKey(W4-MM.6 未做完那段)。
+
+**下次接着做**
+- 📌 可 live 真打「同步生成」批量出 10 张缺图人物(~¥2.2)。
+- 📌 #2 视频带语音端到端(需 worker + seedance)仍未真打。
+- 📌 billing 样板去重仍 deferred(需先补 attempt+ledger 集成测试)。
+
+---
+
 ## 2026-06-07(周日,mac-studio · 代码健康审计 + 渐进优化 P0→P3 + 全盘 7 遍检查)— 全面体检:不是屎山,执行安全优化(~20 commit)
 
 **3 agent 审计 47.7k 行源码 → 结论:骨架优秀、局部有债、"已救一半"的工程(非屎山)。完整结论 + 路线见 ADR-31。**

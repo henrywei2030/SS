@@ -253,9 +253,19 @@ export const generateProcedures = {
     const rows = await ctx.prisma.providerConfig.findMany({
       where: { kind: 'IMAGE', isActive: true },
       orderBy: [{ providerId: 'asc' }],
-      select: { providerId: true, displayName: true },
+      select: { providerId: true, displayName: true, unitPriceCny: true },
     });
-    return rows;
+    // 默认图像 provider = binding.asset.image.providerId
+    //   — 美术工坊默认模型(下拉显式选中)+ 批量「同步生成」单价预估都用它。
+    const settings = await loadSystemSettings(ctx.prisma, ['binding.asset.image.providerId']);
+    return {
+      providers: rows.map((r) => ({
+        providerId: r.providerId,
+        displayName: r.displayName,
+        unitPriceCny: Number(r.unitPriceCny),
+      })),
+      defaultProviderId: settings['binding.asset.image.providerId'] ?? '',
+    };
   }),
 
 

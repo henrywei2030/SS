@@ -150,6 +150,16 @@ export function GenerationPanel({
     );
   }, [selectedSlot]);
 
+  // 需求(2026-06):图像模型默认显式选中 binding 配的默认 provider(当前 = Seedream 5.0 lite),
+  //   而非停留在抽象的「默认模型(绑定)」。只初始化一次,之后用户可自由切换(含切回 "" 跟随绑定)。
+  const didInitModel = React.useRef(false);
+  React.useEffect(() => {
+    if (!didInitModel.current && imageProviders?.defaultProviderId) {
+      setModelId(imageProviders.defaultProviderId);
+      didInitModel.current = true;
+    }
+  }, [imageProviders?.defaultProviderId]);
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="border-b border-[hsl(var(--color-border))] px-4 py-3">
@@ -228,7 +238,7 @@ export function GenerationPanel({
             title="默认 = 用后台 binding 配的图片模型;也可显式切到某个已配 Provider"
           >
             <option value="">默认模型(绑定)</option>
-            {imageProviders?.map((p) => (
+            {imageProviders?.providers.map((p) => (
               <option key={p.providerId} value={p.providerId}>
                 {p.displayName || p.providerId}
               </option>
