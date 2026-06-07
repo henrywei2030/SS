@@ -5,6 +5,29 @@
 
 ---
 
+## 2026-06-07(周日,mac-studio · 代码健康审计 + 渐进优化 P0/P1)— 全面体检:不是屎山,执行安全优化
+
+**3 agent 审计 47.7k 行源码 → 结论:骨架优秀、局部有债、"已救一半"的工程(非屎山)。完整结论 + 路线见 ADR-31。**
+
+承用户"能否全面优化成更有逻辑的形式而非屎山"。3 agent(后端/前端/架构)独立审计:
+- **硬指标(非屎山)**:分层依赖零违规(单向无环)· 业务 `any`≈1-2 · strict+noUncheckedIndexedAccess · 35 migration 全齐 · 62 ADR · 死代码 0 · 横切骨架统一(errorFormatter/sanitizeErrorMsg/三档 procedure)· `core/video-generation/*`+`aigc-workspace` 教科书级范本
+- **债三处**:① god 文件(asset.ts 2636/aigc.ts 1847/asset-edit-dialog 1791 等,内聚但大)② 样板未抽干净(GenerationAttempt+Ledger 状态机 ×13 / media→URL ×3 / refund ×3 / 鉴权 OR ×10 / window.confirm·alert ×11)③ 关键路径缺测试(processor.ts 扣费退款 0 测)
+
+**已落地(安全优化,均 typecheck 16/16 + test 全过):**
+- ✅ P0-1 `3a001f0`:fileToBase64 统一到共享模块 + 修 library 上传返 dataURL **潜伏 bug**
+- ✅ P1 `031314d`:抽 `pricing.ts` 集中计费公式(computeText/ImageCostCny)+ 12 单测锁 moyu 实收口径 —— 根除"sonnet 倍率漂移"那类 bug 的土壤
+- ✅ P1 `c129192`:`sanitizeErrorMsg` 安全脱敏 12 单测锁规则(adapters 测试 19→31)
+
+**安全原则**:纯重构 + typecheck/test 护栏 + 阶段提交回滚点;**不在 live app 单次手工重排 2600 行**(类型检查盖不住"运行时漏 procedure"这类回归)→ 大拆分留作有界、逐块验证的独立改动。
+
+**待续(ADR-31 路线表)**:P2 拆 god 文件(先抽 `*-shared` → 按分区线移 procedure 组,逐组验证 + procedure 计数校验)· P3 收编排(`runGenerationAttempt`/`writeLedgerEntry` 收 13 处样板 + worker refund 改调已测 core)· 删死 EventBus(0 订阅,通知走 Redis)· `resolveMediaFetchUrl`。
+
+**下次接着做**
+- 📌 P2 起步:asset.ts 抽 `asset-shared.ts`(helper/schema,typecheck 安全)→ 逐组移 procedure
+- 📌 P3:先抽 inspiration 3 处最规整的 GenerationAttempt 样板验证 helper 形状,再推广
+
+---
+
 ## 2026-06-07(周日,mac-studio · 五八次收工)— 剧本管理界面重构 + 出场集排序 + 文本框 auto-grow + 美术紧凑化 + 参考音频 + 图生图升级
 
 **完成 — typecheck 16/16 + test 全过 · 1 migration · 改 16 文件 + 新建 3 文件 · 全程 web dev 在线真打调试**
