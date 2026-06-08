@@ -5,6 +5,36 @@
 
 ---
 
+## 2026-06-09(周二,mac-studio · 打开系统 + 桌面化规划/决策 + Phase 1 后端去 infra + 集成验证)— 启动桌面程序化,Phase 1 全程驱动开关、现系统零干扰
+
+**typecheck 16/16 + test(adapters 31 / core 82 / api 51)全过 · Phase 1 集成验证通过(脱 redis/minio 跑通)· 决策见 ADR-35**
+
+### 〇、打开系统
+开工发现 Docker daemon 没起 → pg/redis/minio 全停 → `ECONNREFUSED`。`open -a Docker` + `pnpm infra:up`(容器自动重启)+ `db:migrate status`(up to date)+ `db:sync` → 全栈拉起、浏览器打开 :3000。
+
+### 一、桌面程序化:规划 + 决策(见 ADR-35)
+用户要把系统做成 Mac/Win 独立程序。3 Explore agent 摸清架构 + 2 Plan agent 设计。**方向定**:单人多设备 · 各机独立 · 离线。**关键决策(承用户「不能干扰现系统完善」)**:桌面 DB 用**嵌入式 postgres(零侵入)** 而非 SQLite —— 现有 schema/计费(Decimal)/advisory 锁/裸 SQL **一行不改**;SQLite(动核心)弃为本期方案、留未来可选优化。整体两期:**Phase 1 后端去 infra**(驱动开关,默认档不变)/ **Phase 2 Tauri 自包含打包 + 内嵌 pg**。更新流水线:新版 app 启动自动「增量 migrate + db:sync」复用现有命令,数据不丢。
+
+### 二、Phase 1 后端去 infra(全是「加开关、默认行为不变」)
+- **存储** `STORAGE_DRIVER=local-fs`(`LocalFsStorageAdapter` 现成,零代码改)。
+- **缓存** `CACHE_DRIVER=l1-only`([cache.ts](packages/queue/src/cache.ts)):gate 掉 L2 Redis,只用 L1 Map。
+- **进度推送** `PROGRESS_BUS_DRIVER`(新 [progress-bus.ts](packages/queue/src/progress-bus.ts)):Redis pub/sub → 进程内 EventEmitter;改 processor publish + [SSE route](apps/web/app/api/sse/aigc/[attemptId]/route.ts) subscribe(Zod 校验移进 bus redis 实现,HMAC token/DB 终态兜底/recheck 全保留)。默认 `redis` 不变。
+- **队列 + worker 合进 web** `QUEUE_DRIVER`:`enqueueVideoGenJob` 驱动开关 + `registerInProcessVideoHandler` DI 位([video-gen-queue.ts](packages/queue/src/video-gen-queue.ts));**processor 从 apps/workers 搬进 [@ss/core/video-generation/process-job.ts](packages/core/video-generation/process-job.ts)**(解耦 BullMQ:`(payload, JobContext)`、`UnrecoverableError`→`Error`;**advisory 锁/扣费/退款字节不变**)+ recover 抽 [core/recover.ts](packages/core/video-generation/recover.ts)(worker boot 与 web 共用)+ worker.ts 包一层 + [instrumentation.ts](apps/web/instrumentation.ts) 注册进程内 worker。默认 `bullmq` 不变。
+
+### 三、Step A 集成验证(脱 redis/minio)
+- 停 redis/minio、设桌面 env 跑 web:**进程内 worker 注册 + recover(查 pg)成功、全程无 ECONNREFUSED** → 证明真脱 redis/minio。
+- **修一个本次引入的 bug**:`instrumentation.ts` 把 `pg` 拉进 **edge bundle**(edge 无 fs/pg-native)→ 500。改 Next 官方 node-only 模式(瘦身 instrumentation + 单独 [lib/in-process-worker.ts](apps/web/lib/in-process-worker.ts) 仅 nodejs 动态 import)+ next.config `serverExternalPackages: [pg/prisma/bullmq/ioredis]`。修后 :3000 → 307(非 500)、无打包错。
+
+**问题/待决策**
+- ❓ Phase 1 deeper 验证(真触发 Mock 视频生成跑通进程内队列 + SSE 端到端)未做 —— 留 Phase 2 冒烟测(processor 字节搬运 + 单测覆盖,信心足)。
+- ❓ Phase 2 签名是离线分发硬门槛:需**你去办 Apple Developer 账号($99/yr)+ Windows 代码签名证书**(EV 免 SmartScreen),行政时间另算。
+
+**下次接着做**
+- 📌 **Step B**:内嵌 postgres(`embedded-postgres`)+ 首跑 bootstrap(生成密钥/initdb/migrate deploy/db:sync/seed/app 数据目录)。
+- 📌 然后 C(Tauri 壳 main.rs sidecar/端口/健康/退出)→ D(desktop-pack 组装 node+pg+standalone + 图标)→ **E 本机出包冒烟 = 能用的桌面程序** → F 签名/CI = 可分发成品。**还剩 ~4 步到「自己能用」。**
+
+---
+
 ## 2026-06-08(周一,mac-mini · 开工强同步 + 灵感全部重新展开 + 模型绑定健壮性 + 剧本拆解按集分块 + 拆解清空/删除)— 承 mac-studio 同日,换机连做 4 块
 
 **全程 dev 在线 · typecheck 16/16 + test(adapters 31 / core 82 / api 51,新增 19)全过 · live DB 验证多处**

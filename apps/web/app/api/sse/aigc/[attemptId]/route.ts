@@ -16,13 +16,9 @@
 import type { NextRequest } from 'next/server';
 
 import { prisma } from '@ss/db';
-import { createRedisSubscriber } from '@ss/queue/redis';
+import { getProgressBus, type ProgressSubscription } from '@ss/queue/progress-bus';
 import { verifyStreamToken } from '@ss/queue/sse-token';
-import {
-  videoGenChannel,
-  VideoGenProgressEventSchema,
-  type VideoGenProgressEvent,
-} from '@ss/queue/types';
+import { type VideoGenProgressEvent } from '@ss/queue/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -64,8 +60,7 @@ export async function GET(
     return new Response('attempt not found', { status: 404 });
   }
 
-  const subscriber = createRedisSubscriber(`sse:${attemptId}`);
-  const channel = videoGenChannel(attemptId);
+  let subscription: ProgressSubscription | undefined;
   let timeoutHandle: NodeJS.Timeout | undefined;
   let closed = false;
 
@@ -91,15 +86,12 @@ export async function GET(
         } catch {
           // already closed
         }
-        // 二十九收工 S6:silent swallow → console.warn,Redis 连接异常时可观测(防资源泄漏)
-        void subscriber
-          .unsubscribe(channel)
-          .catch((e) =>
-            console.warn(`[sse-aigc] unsubscribe ${channel} failed:`, e),
-          );
-        void subscriber
-          .quit()
-          .catch((e) => console.warn(`[sse-aigc] subscriber quit failed:`, e));
+        // 二十九收工 S6:可观测清理(防资源泄漏)。progress bus 订阅(redis 档内部 unsubscribe+quit)
+        if (subscription) {
+          void subscription
+            .unsubscribe()
+            .catch((e) => console.warn(`[sse-aigc] progress unsubscribe failed:`, e));
+        }
       };
 
       // 1. 终态兜底
@@ -154,20 +146,14 @@ export async function GET(
         return;
       }
 
-      // 2. 仍在 QUEUED/RUNNING:订阅 Redis
-      await subscriber.subscribe(channel);
-      subscriber.on('message', (ch, msg) => {
-        if (ch !== channel) return;
-        try {
-          // r10 audit:用 Zod runtime validate · JSON.parse + as cast 在协议升级 / 异常 publish 时
-          //   payload 不符合类型仍 cast 成功 → 推到前端崩 UI。改成 schema.parse 失败直接 log + 跳过
-          const parsed = VideoGenProgressEventSchema.parse(JSON.parse(msg));
-          send(parsed);
-          if (parsed.type === 'success' || parsed.type === 'failed') {
-            close();
-          }
-        } catch (err) {
-          console.error(`[sse:${attemptId}] parse/validate message failed:`, err instanceof Error ? err.message : err);
+      // 2. 仍在 QUEUED/RUNNING:订阅进度总线
+      //   - redis 档:跨进程 pub/sub + 边界 Zod 校验(畸形 payload 在 bus 内 log+跳过,不冒泡)
+      //   - in-process 档:同进程 EventEmitter(桌面单进程)
+      //   投递的都是已校验的 typed 事件
+      subscription = await getProgressBus().subscribe(attemptId, (event) => {
+        send(event);
+        if (event.type === 'success' || event.type === 'failed') {
+          close();
         }
       });
 
@@ -248,8 +234,7 @@ export async function GET(
     cancel() {
       closed = true;
       if (timeoutHandle) clearTimeout(timeoutHandle);
-      void subscriber.unsubscribe(channel).catch(() => {});
-      void subscriber.quit().catch(() => {});
+      if (subscription) void subscription.unsubscribe().catch(() => {});
     },
   });
 

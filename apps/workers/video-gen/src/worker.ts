@@ -18,7 +18,7 @@ import { Worker, type WorkerOptions } from 'bullmq';
 import { getPrimaryRedis } from '@ss/queue/redis';
 import { VIDEO_GEN_QUEUE_NAME, type VideoGenJobData } from '@ss/queue/types';
 
-import { processVideoGenJob } from './processor.js';
+import { processVideoGenJob } from '@ss/core/video-generation';
 
 // r8 性能优化:worker concurrency 可调(默认 2 · env clamp 1-10)
 const WORKER_CONCURRENCY = Math.max(
@@ -39,7 +39,13 @@ export function createWorker(workerId: string): Worker<VideoGenJobData> {
 
   const worker = new Worker<VideoGenJobData>(
     VIDEO_GEN_QUEUE_NAME,
-    async (job) => processVideoGenJob(job, workerId),
+    async (job) =>
+      processVideoGenJob(job.data, {
+        workerId,
+        jobId: job.id ?? '?',
+        attempt: job.attemptsMade + 1,
+        maxAttempts: job.opts.attempts ?? 1,
+      }),
     opts,
   );
 

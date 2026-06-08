@@ -1238,6 +1238,22 @@ ADR-29(剧本拆解)· ADR-30(图生图/参考音频/出场集)· 范本 `core/v
 
 ---
 
+## ADR-35 · 桌面化打包:Tauri 自包含 + 驱动档 + 嵌入式 postgres(2026-06-09)
+
+**背景**:把现有服务端应用(Next standalone + worker + pg/redis/minio,Docker)做成 Mac/Win 可安装的**单机离线**独立程序。约束(用户):**不能干扰现系统持续开发**。
+
+**决策**:
+1. **形态**:单人多设备 · 各机独立 · 离线。复用现有 `apps/desktop/` Tauri 2 骨架。
+2. **驱动档**(非分叉):一组 env 开关,默认档(pg+redis+minio)**完全不变**;桌面档 = 一套 env。同代码两用,新功能自动进桌面版。`STORAGE_DRIVER=local-fs` · `CACHE_DRIVER=l1-only` · `PROGRESS_BUS_DRIVER=in-process`(EventEmitter) · `QUEUE_DRIVER=in-process`(worker 合进 web 进程,processor 移 `@ss/core/video-generation/process-job` 解耦 BullMQ)。
+3. **数据库 = 嵌入式 postgres(零侵入),不用 SQLite**:承「不干扰现系统」—— 现有 schema / 计费(Decimal)/ `pg_advisory_xact_lock` / 裸 SQL **一行不改**。SQLite 需改 Decimal→String + 去 DB 聚合 + 重建迁移 + 锁换进程内(动计费核心),**弃为本期方案,留未来可选瘦身**。
+4. **打包**:Tauri Rust 主进程 spawn Node sidecar 跑 standalone `server.js`(含进程内 worker)+ 内嵌 pg;数据目录经 `SS_DATA_DIR` 下发;首跑 bootstrap 生成密钥 + initdb + **复用现有 `migrate deploy` + `db:sync`** + seed。**更新**:新版 app 启动自动增量 migrate + db:sync,数据不丢。
+5. **分发**:GitHub Actions matrix(Tauri 不能交叉编译)+ 签名/公证(mac Apple Developer / win 证书)。
+6. **Phase 1(后端去 infra)已完成 + 集成验证**(2026-06-09);Phase 2(Tauri 打包 + 内嵌 pg)待做。坑:instrumentation 动态 import 须用 Next node-only 模式(`NEXT_RUNTIME` 守卫 + 单独文件)+ `serverExternalPackages`,否则 pg 进 edge bundle 致 500。
+
+**关联**:占位 ADR-32(桌面/移动代码共享)更上位;本 ADR 聚焦打包/运行时架构。
+
+---
+
 ## 待补充的决策(占位)
 
 📋 ADR-32 · 桌面端 vs 移动端的代码共享策略(Phase 2 拆分时)

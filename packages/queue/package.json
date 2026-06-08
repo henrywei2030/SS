@@ -11,7 +11,8 @@
     "./redis": "./src/redis.ts",
     "./types": "./src/types.ts",
     "./sse-token": "./src/sse-token.ts",
-    "./cache": "./src/cache.ts"
+    "./cache": "./src/cache.ts",
+    "./progress-bus": "./src/progress-bus.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

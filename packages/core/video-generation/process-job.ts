@@ -10,20 +10,19 @@
  *   4. 失败:升 attempt FAILED + costLedgerEntry(success:false)
  *           + publish 'failed' 到 Redis channel
  *           + 失败分类(ADR-25 M4 白名单制):
- *             - censored / compliance / quota / unsupported → throw UnrecoverableError(BullMQ 不重试)
- *             - timeout / rate_limit / server_error / network → throw Error(BullMQ retry attempts:5)
+ *             - unrecoverable(censored/compliance/quota/...) → retryable:false(SSE 提示用户别重试)
+ *             - 临时错(timeout/rate_limit/network) → retryable:true
  *
- * ctx 去除:worker 没有 tRPC ctx,所有信息从 job.data 取;OperationLog 直接写。
+ * 桌面化(2026-06-08):从 apps/workers 搬进 @ss/core,解耦 BullMQ —— 收 (payload, JobContext),
+ *   BullMQ worker(独立进程)与进程内驱动(桌面单进程)共用同一份。失败统一 throw Error
+ *   (attempts=1 一次性任务、无重试;原 UnrecoverableError 仅为 BullMQ retry 控制,已无意义)。
+ * ctx 去除:无 tRPC ctx,信息从 payload 取;OperationLog 直接写。
  */
-import type { Job } from 'bullmq';
-import { UnrecoverableError } from 'bullmq';
-
 import { getEventBus } from '@ss/adapters/eventbus';
 import { getVideoProvider } from '@ss/adapters/provider';
 import { prisma } from '@ss/db';
-import { getPrimaryRedis } from '@ss/queue/redis';
+import { getProgressBus } from '@ss/queue/progress-bus';
 import {
-  videoGenChannel,
   type VideoGenJobData,
   type VideoGenProgressEvent,
 } from '@ss/queue/types';
@@ -73,10 +72,19 @@ export interface ProcessResult {
   costCny?: number;
 }
 
+/** 进程无关的 job 上下文 — BullMQ worker 与进程内驱动都用这个调,不耦合 BullMQ Job。 */
+export interface JobContext {
+  workerId: string;
+  jobId: string;
+  attempt: number;
+  maxAttempts: number;
+}
+
 export async function processVideoGenJob(
-  job: Job<VideoGenJobData>,
-  workerId: string,
+  payload: VideoGenJobData,
+  ctx: JobContext,
 ): Promise<ProcessResult> {
+  const { workerId, jobId, attempt, maxAttempts } = ctx;
   const {
     attemptId,
     projectId,
@@ -99,22 +107,21 @@ export async function processVideoGenJob(
     refVideoUrl,
     refAudioUrl,
     requestId,
-  } = job.data;
+  } = payload;
 
   // 第 19 轮 audit P1:所有 worker console 日志加 requestId 前缀,跨进程追溯
   const reqTag = requestId ? `[req=${requestId}]` : '';
-  const channel = videoGenChannel(attemptId);
-  const redis = getPrimaryRedis();
+  const progressBus = getProgressBus();
   const publish = async (event: VideoGenProgressEvent): Promise<void> => {
     try {
-      await redis.publish(channel, JSON.stringify(event));
+      await progressBus.publish(attemptId, event);
     } catch (err) {
-      console.error(`[${workerId}] redis publish failed (${event.type}):`, err);
+      console.error(`[${workerId}] progress publish failed (${event.type}):`, err);
     }
   };
 
   console.log(
-    `[${workerId}]${reqTag} processing attempt=${attemptId} provider=${providerId} group=${groupNumber} (job=${job.id} try=${job.attemptsMade + 1}/${job.opts.attempts ?? 1})`,
+    `[${workerId}]${reqTag} processing attempt=${attemptId} provider=${providerId} group=${groupNumber} (job=${jobId} try=${attempt}/${maxAttempts})`,
   );
 
   // P0-3 idempotency check(防 stalled re-queue / retry 双写 MediaItem + ledger)
@@ -129,7 +136,7 @@ export async function processVideoGenJob(
   }
   if (decision.kind === 'skip-failed') {
     console.log(`[${workerId}] attempt ${attemptId} already FAILED, skipping (idempotent)`);
-    throw new UnrecoverableError(`attempt ${attemptId} already FAILED: ${decision.errorMsg}`);
+    throw new Error(`attempt ${attemptId} already FAILED: ${decision.errorMsg}`);
   }
 
   await publish({ type: 'running', attemptId });
@@ -254,7 +261,7 @@ export async function processVideoGenJob(
     });
 
     if (unrecoverable) {
-      throw new UnrecoverableError(errMsg);
+      throw new Error(errMsg);
     }
     throw e instanceof Error ? e : new Error(errMsg);
   }

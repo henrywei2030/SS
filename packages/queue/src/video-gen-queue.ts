@@ -51,3 +51,42 @@ export async function addVideoGenJob(payload: VideoGenJobData): Promise<string> 
   });
   return job.id!;
 }
+
+// ---------------------------------------------------------------------------
+// 队列驱动开关(桌面化 Phase 1)— `QUEUE_DRIVER`:
+//   - 'bullmq'(默认):Redis 队列,worker 独立进程消费(现有云端/dev 档,行为不变)
+//   - 'in-process':本进程异步处理(桌面单进程,worker 合进 web 进程)
+//
+// in-process 的实际处理器(processVideoGenJob)在 @ss/core,由 web 启动钩子(instrumentation)
+// 注册进来(DI),避免 queue → core 依赖。Sub-step B 接上 registerInProcessVideoHandler。
+// ---------------------------------------------------------------------------
+type InProcessVideoHandler = (payload: VideoGenJobData) => Promise<void>;
+let inProcessHandler: InProcessVideoHandler | null = null;
+
+/** 桌面档:web 进程启动时注册进程内视频处理器(见 apps/web instrumentation)。 */
+export function registerInProcessVideoHandler(fn: InProcessVideoHandler): void {
+  inProcessHandler = fn;
+}
+
+/**
+ * 入队(驱动无关)— 调用方(router)统一走这个,按 QUEUE_DRIVER 分流。
+ * 立即返回(不阻塞),对齐 BullMQ add 语义;失败由 processor 内部标 FAILED + publish。
+ */
+export async function enqueueVideoGenJob(payload: VideoGenJobData): Promise<string> {
+  const driver = (process.env.QUEUE_DRIVER ?? 'bullmq').toLowerCase();
+  if (driver === 'in-process') {
+    const parsed = VideoGenJobDataSchema.parse(payload);
+    if (!inProcessHandler) {
+      throw new Error(
+        'QUEUE_DRIVER=in-process 但未注册进程内处理器(需 web instrumentation 调 registerInProcessVideoHandler)',
+      );
+    }
+    const handler = inProcessHandler;
+    // fire-and-forget:不阻塞 enqueue;processor 内部已处理失败(标 FAILED + publish 'failed')
+    void handler(parsed).catch((err) => {
+      console.error(`[queue:in-process] video job ${parsed.attemptId} crashed:`, err);
+    });
+    return `inproc:${parsed.attemptId}`;
+  }
+  return addVideoGenJob(payload);
+}

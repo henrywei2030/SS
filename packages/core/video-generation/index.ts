@@ -27,3 +27,10 @@ export { checkDailyVideoBudget } from './budget-check.js';
 export { createPlaceholderAttemptWithPrepay } from './prepay.js';
 export { compileVideoPromptForGroup } from './compile.js';
 export { enqueueVideoJobOrRefund } from './enqueue.js';
+// 桌面化 Phase 1:processor 搬进 core(解耦 BullMQ),BullMQ worker 与进程内驱动共用
+export {
+  processVideoGenJob,
+  type JobContext,
+  type ProcessResult,
+} from './process-job.js';
+export { recoverStaleVideoAttempts } from './recover.js';

@@ -38,6 +38,14 @@ const nextConfig: NextConfig = {
   output: 'standalone',
 
   /**
+   * 服务端外部包 — 不进 webpack bundle,运行时从 node_modules require。
+   * 桌面化:instrumentation 拉入 @ss/core/video-generation → @ss/db(pg)→ pg 可选原生 `pg-native`
+   *   解析失败致 500。这些都是服务端 Node 包(含原生/动态 require),本就该外部化;
+   *   对默认档同样正确(standalone build 会 trace 进产物 node_modules)。
+   */
+  serverExternalPackages: ['pg', '@prisma/client', '@prisma/adapter-pg', 'bullmq', 'ioredis'],
+
+  /**
    * 第 13 轮 audit:基础 security headers
    * - X-Frame-Options: 防 clickjacking(iframe 嵌入)
    * - X-Content-Type-Options: 防浏览器 MIME 嗅探

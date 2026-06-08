@@ -27,7 +27,7 @@ import { loadSystemSetting, loadSystemSettings } from '../utils/system-bindings.
 import { sanitizeErrorMsg } from '@ss/shared';
 import { ASPECT_RATIOS, type AspectRatio } from '@ss/shared/constants';
 import { aspectRatioSchema } from '@ss/shared/schemas';
-import { addVideoGenJob } from '@ss/queue/video-gen';
+import { enqueueVideoGenJob } from '@ss/queue/video-gen';
 import { signStreamToken } from '@ss/queue/sse-token';
 
 import { protectedProcedure, rateLimit } from '../trpc.js';
@@ -471,7 +471,7 @@ export const videoProcedures = {
             // 第 19 轮 audit P1:requestId 贯通到 worker,运维 grep 日志可看全链路
             requestId: ctx.requestId,
           },
-          enqueue: (p) => addVideoGenJob(p),
+          enqueue: (p) => enqueueVideoGenJob(p),
         });
       } catch (enqueueErr) {
         const errMsg = enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr);

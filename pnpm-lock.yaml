@@ -300,6 +300,9 @@ importers:
       '@ss/db':
         specifier: workspace:*
         version: link:../db
+      '@ss/queue':
+        specifier: workspace:*
+        version: link:../queue
       '@ss/shared':
         specifier: workspace:*
         version: link:../shared

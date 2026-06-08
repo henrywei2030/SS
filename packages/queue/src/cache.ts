@@ -19,6 +19,10 @@
  */
 import { getPrimaryRedis } from './redis.js';
 
+// 桌面/离线档(2026-06-08):`CACHE_DRIVER=l1-only` → 只用 L1 进程内 Map,完全跳过 L2 Redis
+//   (无 redis 依赖、不打连接、不刷 warn)。默认 'l1-l2' 保持原行为(Redis 挂仍 graceful 降级)。
+const L2_ENABLED = (process.env.CACHE_DRIVER ?? 'l1-l2').toLowerCase() !== 'l1-only';
+
 // L1 in-process cache:同实例多次调用秒级复用,降低 Redis 调用次数
 // key → { value, expiresAt }
 // r9 audit:加 size 上限防长跑 Node 进程 OOM(原 Map 无界增长)
@@ -65,28 +69,32 @@ export async function cacheGetOrSet<T>(
   const localHit = readLocal<T>(key);
   if (localHit !== undefined) return localHit;
 
-  // L2 Redis
-  try {
-    const redis = getPrimaryRedis();
-    const raw = await redis.get(key);
-    if (raw !== null) {
-      const parsed = JSON.parse(raw) as T;
-      writeLocal(key, parsed);
-      return parsed;
+  // L2 Redis(l1-only 档跳过)
+  if (L2_ENABLED) {
+    try {
+      const redis = getPrimaryRedis();
+      const raw = await redis.get(key);
+      if (raw !== null) {
+        const parsed = JSON.parse(raw) as T;
+        writeLocal(key, parsed);
+        return parsed;
+      }
+    } catch (e) {
+      // Redis 挂 → 不缓存,直接 fn()
+      console.warn(`[cache] redis get failed for ${key}:`, e instanceof Error ? e.message : e);
     }
-  } catch (e) {
-    // Redis 挂 → 不缓存,直接 fn()
-    console.warn(`[cache] redis get failed for ${key}:`, e instanceof Error ? e.message : e);
   }
 
   // miss → 计算 + 双层写入
   const value = await fn();
   writeLocal(key, value);
-  try {
-    const redis = getPrimaryRedis();
-    await redis.set(key, JSON.stringify(value), 'EX', ttlSec);
-  } catch (e) {
-    console.warn(`[cache] redis set failed for ${key}:`, e instanceof Error ? e.message : e);
+  if (L2_ENABLED) {
+    try {
+      const redis = getPrimaryRedis();
+      await redis.set(key, JSON.stringify(value), 'EX', ttlSec);
+    } catch (e) {
+      console.warn(`[cache] redis set failed for ${key}:`, e instanceof Error ? e.message : e);
+    }
   }
   return value;
 }
@@ -94,6 +102,7 @@ export async function cacheGetOrSet<T>(
 /** 显式失效单 key(admin mutation 后调) */
 export async function cacheInvalidate(key: string): Promise<void> {
   localCache.delete(key);
+  if (!L2_ENABLED) return;
   try {
     const redis = getPrimaryRedis();
     await redis.del(key);
@@ -113,6 +122,7 @@ export async function cacheInvalidatePrefix(prefix: string): Promise<void> {
   for (const k of Array.from(localCache.keys())) {
     if (k.startsWith(prefix)) localCache.delete(k);
   }
+  if (!L2_ENABLED) return;
   // L2 Redis SCAN + DEL(分批,每批 100)
   try {
     const redis = getPrimaryRedis();

@@ -18,11 +18,8 @@
 import 'dotenv/config';
 import { prisma } from '@ss/db';
 import { getPrimaryRedis } from '@ss/queue/redis';
-// 三十五收工 R2 Phase A:共享 refund + stale timeout helper(去 worker / router 重复实现)
-import {
-  refundPrepayForAttempt,
-  STALE_TIMEOUT_WORKER_BOOT_MS,
-} from '@ss/core/video-generation';
+// 桌面化 Phase 1:启动回收孤儿 attempt 抽到 core(worker boot 与桌面 web instrumentation 共用)
+import { recoverStaleVideoAttempts } from '@ss/core/video-generation';
 
 import { startHealthServer, stopHealthServer } from './health.js';
 import { createWorker } from './worker.js';
@@ -37,80 +34,9 @@ async function bootstrap(): Promise<void> {
 
   startHealthServer({ workerId });
 
-  // P0-2(langfuse) + 第 2 轮 audit P0-1:worker 启动时扫 stale RUNNING attempt
-  //   场景:上次 worker 进程被 SIGKILL,attempt 永远卡在 RUNNING 状态(DB 视角)。
-  //
-  //   cutoff = 30min(从 10min 进一步放宽,第 2 轮 audit 发现):
-  //     - 防 多 worker 启动时竞态误杀正在跑的真长 job(Seedance 6 次重试 × 60s = 6+ 分钟,
-  //       含 BullMQ exponential backoff 5/10/20/40/80s 还会更长)
-  //     - 30min 是"绝对孤儿"阈值 — 任何视频生成 job 超过 30min 都该认定为崩溃
-  //     - BullMQ 自身 lockDuration 5min 内会续锁,正常 job 不会被 stale 标 FAILED
-  //
-  // 二十九收工 P1 修(原本只标 FAILED 没退 PREPAY → 资金漏):
-  //   - 改 updateMany → findMany + 逐个事务标 FAILED + 写 REFUND ledger
-  //   - 复用 aigc.ts:1175-1209 的同款 idempotent 退款逻辑(查 REFUND 是否已存在防双写)
-  try {
-    const staleCutoff = new Date(Date.now() - STALE_TIMEOUT_WORKER_BOOT_MS);
-    // 全盘审查 #1:对齐 router inflight sweep — 同时扫 QUEUED。占位 attempt 创建即 QUEUED 且
-    //   startedAt=null;若 web 进程在「占位 QUEUED+PREPAY 提交后、升 RUNNING 前」崩溃,这个孤儿
-    //   原本永远不会被全库 backstop 清理(只扫 RUNNING)→ 只能等用户对同 group 再次生成触发 router sweep
-    //   → PREPAY 永久挂起 + 幽灵"生成中"。QUEUED 的 startedAt 为 null,故用 OR + createdAt 兜底。
-    const staleAttempts = await prisma.generationAttempt.findMany({
-      where: {
-        status: { in: ['RUNNING', 'QUEUED'] },
-        action: 'VIDEO',
-        OR: [
-          { startedAt: { lt: staleCutoff } },
-          { startedAt: null, createdAt: { lt: staleCutoff } },
-        ],
-      },
-      select: {
-        id: true,
-        createdBy: true,
-        projectId: true,
-        episodeId: true,
-        providerId: true,
-      },
-    });
-
-    let refundedCount = 0;
-    for (const stale of staleAttempts) {
-      try {
-        const refunded = await prisma.$transaction(async (tx) => {
-          await tx.generationAttempt.update({
-            where: { id: stale.id },
-            data: {
-              status: 'FAILED',
-              errorMsg: 'worker_restart_recovered: process crashed before attempt completed (QUEUED/RUNNING)',
-              finishedAt: new Date(),
-            },
-          });
-          return refundPrepayForAttempt(tx, {
-            attemptId: stale.id,
-            userId: stale.createdBy,
-            projectId: stale.projectId,
-            episodeId: stale.episodeId,
-            providerId: stale.providerId,
-            reason: 'worker_restart_stale_sweep',
-          });
-        });
-        if (refunded) refundedCount++;
-      } catch (perAttemptErr) {
-        console.error(
-          `[${workerId}] stale sweep: attempt ${stale.id} refund failed (non-fatal):`,
-          perAttemptErr,
-        );
-      }
-    }
-
-    if (staleAttempts.length > 0) {
-      console.warn(
-        `[${workerId}] recovered ${staleAttempts.length} stale QUEUED/RUNNING attempt(s) → marked FAILED, ${refundedCount} PREPAY refunded`,
-      );
-    }
-  } catch (err) {
-    console.error(`[${workerId}] stale-attempt sweep failed (non-fatal):`, err);
-  }
+  // 启动回收孤儿视频 attempt(上次进程崩溃留下的 QUEUED/RUNNING)→ 标 FAILED + 退 PREPAY(idempotent)。
+  // 桌面化:逻辑抽到 @ss/core recoverStaleVideoAttempts,BullMQ worker 与桌面 web instrumentation 共用。
+  await recoverStaleVideoAttempts(workerId);
 
   const worker = createWorker(workerId);
   await worker.waitUntilReady();
