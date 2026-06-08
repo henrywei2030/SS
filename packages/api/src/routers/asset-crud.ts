@@ -360,6 +360,59 @@ export const crudProcedures = {
       return { ok: true };
     }),
 
+  /**
+   * 批量软删资产(2026-06-08 剧本拆解清空/多选删除)。一个口覆盖三场景:
+   *   - ids 指定   → 删这些(多选删除)
+   *   - 否则 type  → 清空该类(单类清空)
+   *   - 否则 confirmAll=true → 清空本项目全部资产(一键清空,防误触须显式 confirmAll)
+   * 软删资产 + 关联 AssetUsageBinding(与单删 delete 同语义),严格限定 projectId 防越权。
+   */
+  deleteMany: protectedProcedure
+    .input(
+      z.object({
+        projectId: z.string().cuid(),
+        ids: z.array(z.string().cuid()).max(1000).optional(),
+        type: AssetTypeSchema.optional(),
+        confirmAll: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId);
+      const hasIds = !!input.ids && input.ids.length > 0;
+      if (!hasIds && !input.type && !input.confirmAll) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '需指定 ids(多选删) / type(清空该类) / confirmAll(清空全部)之一',
+        });
+      }
+      // 严格 scope projectId + 未删;ids 优先 > type > 全部
+      const where: Prisma.AssetWhereInput = {
+        projectId: input.projectId,
+        deletedAt: null,
+        ...(hasIds ? { id: { in: input.ids } } : input.type ? { type: input.type } : {}),
+      };
+      const targets = await ctx.prisma.asset.findMany({ where, select: { id: true } });
+      const ids = targets.map((t) => t.id);
+      if (ids.length === 0) return { deleted: 0 };
+      const now = new Date();
+      await ctx.prisma.$transaction([
+        ctx.prisma.asset.updateMany({ where: { id: { in: ids } }, data: { deletedAt: now } }),
+        ctx.prisma.assetUsageBinding.updateMany({
+          where: { assetId: { in: ids }, deletedAt: null },
+          data: { deletedAt: now },
+        }),
+      ]);
+      await logOperation(
+        ctx,
+        'asset.deleteMany',
+        'project',
+        input.projectId,
+        { count: ids.length, mode: hasIds ? 'ids' : input.type ? `type:${input.type}` : 'all' },
+        null,
+      );
+      return { deleted: ids.length };
+    }),
+
 
   // ---- 资产关联(2026-06 P1:图2 右侧「关联人物 / 关联资产」)----
   createRelation: protectedProcedure

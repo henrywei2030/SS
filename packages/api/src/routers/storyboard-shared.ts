@@ -13,7 +13,7 @@ import { TRAINABLE_TEXT_FIELDS as TRAINABLE_TEXT_FIELD_LIST } from '@ss/shared';
 
 import type { Context } from '../context.js';
 // 三十二收工 S3 followup:batch SystemSetting 读 helper
-import { loadSystemSettings } from '../utils/system-bindings.js';
+import { loadSystemSettings, resolveBoundModelId } from '../utils/system-bindings.js';
 
 // W7+ audit R10:assertProjectAccess 抽到 middleware/access.ts
 import { assertProjectAccess } from '../middleware/access.js';
@@ -133,14 +133,13 @@ export async function getStoryboardBindings(ctx: Context): Promise<{
     },
   );
   const map = new Map(Object.entries(settingsMap));
-  const modelId = map.get('binding.storyboard.generation.modelId') ?? '';
-  // 二十收工后用户反馈:不 hardcode 默认 provider,binding 空时显式拒绝
-  if (!modelId) {
-    throw new TRPCError({
-      code: 'PRECONDITION_FAILED',
-      message: '分镜生成未配置 LLM Provider — 请去 /admin/bindings 选择 binding.storyboard.generation.modelId',
-    });
-  }
+  // 悬空/停用自动 fallback(见 resolveBoundModelId),不再因换模型硬崩
+  const modelId = await resolveBoundModelId(ctx.prisma, {
+    bindingKey: 'binding.storyboard.generation.modelId',
+    kind: 'TEXT',
+    value: map.get('binding.storyboard.generation.modelId'),
+    purpose: '分镜生成',
+  });
   return {
     modelId,
     maxDurationS: Number(map.get('storyboard.maxDurationS') ?? '15'),

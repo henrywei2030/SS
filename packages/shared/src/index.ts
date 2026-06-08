@@ -10,3 +10,5 @@ export * from './prompt-utils.js';
 export * from './type-guards.js';
 // P3 收尾(2026-06-06):billingCycle() 收敛裸写 toISOString().slice(0,7)
 export * from './billing.js';
+// 2026-06-08:完整剧本拆解「按集分块」跨块合并去重(前端累积 + 后端共用)
+export * from './merge-asset-drafts.js';

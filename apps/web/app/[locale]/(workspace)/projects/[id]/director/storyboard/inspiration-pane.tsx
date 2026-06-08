@@ -9,6 +9,7 @@ import {
   Download,
   Trash2,
   Wand2,
+  RotateCcw,
   FileDown,
   Pin,
 } from 'lucide-react';
@@ -314,6 +315,8 @@ function DraftDetail({
   const { data: draft, isLoading } = trpc.inspiration.getDraft.useQuery({ draftId });
   const [activeEp, setActiveEp] = React.useState<number | null>(null);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
+  // 全部重新展开确认框(高成本 + 覆盖全部已展开内容,需二次确认)
+  const [regenAllOpen, setRegenAllOpen] = React.useState(false);
   // 四九收工:全部展开进度(前端循环驱动分块,实时进度条防卡死误判)
   const [batchProgress, setBatchProgress] = React.useState<{ done: number; total: number } | null>(null);
   // 大纲可人工修改(2026-06):正在编辑哪一集的 synopsis + 编辑中的文本
@@ -378,30 +381,46 @@ function DraftDetail({
   const batchRunning = batchProgress != null;
   // 任一生成进行中 → 禁用所有展开按钮(防并发)
   const anyGenning = genEp.isPending || genAllEp.isPending || batchRunning;
+  // 全部展开后,顶部主按钮语义切换为"全部重新展开"(覆盖重生成,带确认);否则"全部展开"(补未展开)
+  const allExpanded = outline.length > 0 && generatedCount === outline.length;
 
   // 四九收工:全部展开 = 前端循环驱动分块。每块完成更新进度条 + 刷新出新集,
   // 让慢模型(sonnet ~6min)也看得见进度,不会误以为系统卡死。
-  const runAllEpisodes = async (): Promise<void> => {
-    const startPending = outline.filter((o) => !epByNum.get(o.number)?.content).length;
-    if (startPending === 0) {
+  // regenerate=false(全部展开):只补未展开集,后端跳过已展开。
+  // regenerate=true(全部重新展开):强制重生成全部集,逐块覆盖(不预清空,中途失败已生成的保住)。
+  // 两种模式共用队列推进:每块完成后用后端回报的已写集号缩减 queue,直到清空。
+  const runAllEpisodes = async (regenerate = false): Promise<void> => {
+    const targets = regenerate
+      ? outline.map((o) => o.number)
+      : outline.filter((o) => !epByNum.get(o.number)?.content).map((o) => o.number);
+    if (targets.length === 0) {
       toast.success('全部集已展开,无需重复');
       return;
     }
-    setBatchProgress({ done: 0, total: startPending });
+    setBatchProgress({ done: 0, total: targets.length });
     let done = 0;
+    let queue = [...targets]; // 待处理集号,每块完成后缩减
     try {
-      // 循环续跑,直到后端报 remaining=0 或本块 0 产出(防卡死)
-      for (let guard = 0; guard < startPending + 2; guard++) {
-        const r = await genAllEp.mutateAsync({ draftId });
+      // 循环续跑,直到队列清空或本块 0 产出(防卡死)
+      for (let guard = 0; guard < targets.length + 2 && queue.length > 0; guard++) {
+        const r = await genAllEp.mutateAsync(
+          regenerate ? { draftId, regenerateNumbers: queue } : { draftId },
+        );
         done += r.generated;
-        setBatchProgress({ done, total: startPending });
+        setBatchProgress({ done, total: targets.length });
         onChanged(); // 刷新:本块新集立即显示
-        if (r.remaining === 0 || r.generated === 0) break;
+        // 推进队列:优先用后端回报的已写集号,兜底按数量;0 产出 → 退出防卡死
+        const did = r.generatedNumbers ?? [];
+        queue = did.length > 0 ? queue.filter((n) => !did.includes(n)) : queue.slice(r.generated);
+        if (r.generated === 0) break;
       }
-      if (done >= startPending) toast.success(`已展开全部 ${done} 集`);
-      else toast.warning(`已展开 ${done}/${startPending} 集,剩余可再点"全部展开"补齐(已展开会跳过)`);
+      const verb = regenerate ? '重新展开' : '展开';
+      if (done >= targets.length) toast.success(`已${verb}全部 ${done} 集`);
+      else toast.warning(`已${verb} ${done}/${targets.length} 集,剩余可再点补齐(已展开会跳过)`);
     } catch (e) {
-      toast.error(`全部展开中断:${e instanceof Error ? e.message : String(e)}(已展开的已保存,可再点补齐)`);
+      toast.error(
+        `全部${regenerate ? '重新' : ''}展开中断:${e instanceof Error ? e.message : String(e)}(已生成的已保存,可再点补齐)`,
+      );
     } finally {
       setBatchProgress(null);
     }
@@ -424,13 +443,29 @@ function DraftDetail({
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button
-            onClick={() => void runAllEpisodes()}
-            disabled={anyGenning || generatedCount === outline.length}
-            title="分批统筹生成未展开集(每批带完整大纲保连贯 + 省 token),已展开自动跳过"
+            onClick={
+              allExpanded ? () => setRegenAllOpen(true) : () => void runAllEpisodes(false)
+            }
+            disabled={anyGenning}
+            title={
+              allExpanded
+                ? '全部重新展开:重新生成全部集,逐集覆盖当前已展开内容(分批统筹,可中断)'
+                : '全部展开:分批统筹生成未展开集(每批带完整大纲保连贯 + 省 token),已展开自动跳过'
+            }
             className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--color-border))] px-2.5 py-1.5 text-xs hover:bg-[hsl(var(--color-muted))] disabled:opacity-50"
           >
-            {batchRunning ? <Loader2 className="size-3.5 animate-spin" /> : <Wand2 className="size-3.5" />}
-            {batchRunning ? `生成中 ${batchProgress.done}/${batchProgress.total}…` : '全部展开'}
+            {batchRunning ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : allExpanded ? (
+              <RotateCcw className="size-3.5" />
+            ) : (
+              <Wand2 className="size-3.5" />
+            )}
+            {batchRunning
+              ? `生成中 ${batchProgress.done}/${batchProgress.total}…`
+              : allExpanded
+                ? '全部重新展开'
+                : '全部展开'}
           </button>
           <button
             onClick={downloadAll}
@@ -603,6 +638,20 @@ function DraftDetail({
           danger
           onConfirm={() => del.mutate({ draftId })}
           onClose={() => setDeleteOpen(false)}
+        />
+      )}
+
+      {regenAllOpen && (
+        <ConfirmDialog
+          title={`全部重新展开《${draft.title}》?`}
+          description={`将重新生成全部 ${outline.length} 集剧本,逐集覆盖当前已展开内容(含手动在线编辑过的改动)。分批统筹生成、可中断;会消耗 LLM 额度。若只想改某几集,用对应集的「重新展开」更省。`}
+          confirmLabel="确认全部重新展开"
+          danger
+          onConfirm={() => {
+            setRegenAllOpen(false);
+            void runAllEpisodes(true);
+          }}
+          onClose={() => setRegenAllOpen(false)}
         />
       )}
     </div>

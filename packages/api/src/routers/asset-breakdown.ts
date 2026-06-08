@@ -10,12 +10,32 @@ import { type AssetDraft, breakdownAssets, breakdownFullSettings } from "@ss/cor
 import { Prisma } from "@ss/db";
 import { protectedProcedure } from "../trpc.js";
 import { logOperation } from "../middleware/audit.js";
-import { loadSystemSettings } from "../utils/system-bindings.js";
+import { loadSystemSettings, resolveBoundModelId } from "../utils/system-bindings.js";
 import { runTextGenerationAttempt } from "../utils/generation-attempt.js";
 import { assertProjectAccess } from "../middleware/access.js";
 import { DraftInputSchema, loadProjectFullScript } from "./asset-shared.js";
 
 export const breakdownProcedures = {
+  /**
+   * 2026-06-08「按集分块」:列出本项目有 current 剧本的集号(升序)+ 总剧本数,
+   *   供前端判断能否按集分块拆解(episodes 覆盖全部剧本才分块,否则退回整本一次拆)。
+   */
+  breakdownEpisodeList: protectedProcedure
+    .input(z.object({ projectId: z.string().cuid() }))
+    .query(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId);
+      const scripts = await ctx.prisma.script.findMany({
+        where: { projectId: input.projectId, isCurrent: true, deletedAt: null },
+        select: { episode: { select: { number: true } } },
+      });
+      const episodes = [
+        ...new Set(
+          scripts.map((s) => s.episode?.number).filter((n): n is number => typeof n === 'number'),
+        ),
+      ].sort((a, b) => a - b);
+      return { episodes, totalScripts: scripts.length };
+    }),
+
   /**
    * 从剧本拆解资产 — 调 LLM
    *
@@ -87,14 +107,13 @@ export const breakdownProcedures = {
         'binding.asset.breakdown.modelId',
         'asset.breakdown.maxCharacters',
       ]);
-      // 二十收工后用户反馈:不 hardcode 默认 provider,binding 空时显式拒绝
-      const modelId = settings['binding.asset.breakdown.modelId'] ?? '';
-      if (!modelId) {
-        throw new TRPCError({
-          code: 'PRECONDITION_FAILED',
-          message: '资产拆解未配置 LLM Provider — 请去 /admin/bindings 选择 binding.asset.breakdown.modelId',
-        });
-      }
+      // 悬空/停用自动 fallback(见 resolveBoundModelId),不再因换模型硬崩
+      const modelId = await resolveBoundModelId(ctx.prisma, {
+        bindingKey: 'binding.asset.breakdown.modelId',
+        kind: 'TEXT',
+        value: settings['binding.asset.breakdown.modelId'],
+        purpose: '资产拆解',
+      });
       const maxCharacters = Number(settings['asset.breakdown.maxCharacters'] ?? '20');
 
       // W1-W5 audit P0(B1):写 GenerationAttempt(action=TEXT),Phase 1 资产拆解扣费回溯链路
@@ -197,11 +216,19 @@ export const breakdownProcedures = {
         modelId: z.string().max(100).optional(),
         // 五六-2:分类型拆(整本剧本作上下文,只产一类)避免单请求超时;不传=一次全拆
         type: z.enum(['CHARACTER', 'SCENE', 'PROP']).optional(),
+        // 2026-06-08「按集分块」:只拆指定集号(前端循环驱动 + 跨块合并去重),
+        //   每块小而快彻底绕开非流式中转 250-300s 超时;不传=全集(旧行为)。
+        episodeNumbers: z.array(z.number().int().positive()).max(500).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId);
-      const { text: scriptText, scriptCount } = await loadProjectFullScript(ctx, input.projectId);
+      const { text: scriptText, scriptCount } = await loadProjectFullScript(
+        ctx,
+        input.projectId,
+        200_000,
+        input.episodeNumbers,
+      );
       if (!scriptText.trim()) {
         throw new TRPCError({
           code: 'NOT_FOUND',
@@ -213,14 +240,12 @@ export const breakdownProcedures = {
         where: { id: input.projectId },
         include: { style: true },
       });
-      const settings = await loadSystemSettings(ctx.prisma, ['binding.asset.breakdown.modelId']);
-      const modelId = input.modelId ?? settings['binding.asset.breakdown.modelId'] ?? '';
-      if (!modelId) {
-        throw new TRPCError({
-          code: 'PRECONDITION_FAILED',
-          message: '剧本拆解未配置 LLM — 去 /admin/bindings 配 binding.asset.breakdown.modelId',
-        });
-      }
+      const modelId = await resolveBoundModelId(ctx.prisma, {
+        bindingKey: 'binding.asset.breakdown.modelId',
+        kind: 'TEXT',
+        override: input.modelId,
+        purpose: '剧本拆解',
+      });
 
       // P3-A:状态机走 runTextGenerationAttempt(create RUNNING / SUCCESS / 软失败 result.warning→FAILED 统一,有单测锁)。
       //   breakdownFullSettings 引擎不返回 token 数 → 传 inputTokens/outputTokens=0(与原 update 不写这两列等价)。

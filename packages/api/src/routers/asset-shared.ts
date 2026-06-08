@@ -32,9 +32,18 @@ export async function loadProjectFullScript(
   ctx: Context,
   projectId: string,
   maxChars = 200_000,
+  // 2026-06-08:按集分块拆解 — 只取指定集号的剧本(不传=全集)
+  episodeNumbers?: number[],
 ): Promise<{ text: string; scriptCount: number; truncated: boolean }> {
   const scripts = await ctx.prisma.script.findMany({
-    where: { projectId, isCurrent: true, deletedAt: null },
+    where: {
+      projectId,
+      isCurrent: true,
+      deletedAt: null,
+      ...(episodeNumbers && episodeNumbers.length > 0
+        ? { episode: { number: { in: episodeNumbers } } }
+        : {}),
+    },
     select: { content: true, episode: { select: { number: true, title: true } } },
   });
   if (scripts.length === 0) return { text: '', scriptCount: 0, truncated: false };

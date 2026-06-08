@@ -21,7 +21,7 @@ import { router, protectedProcedure } from '../trpc.js';
 import type { Context } from '../context.js';
 import { assertProjectAccess } from '../middleware/access.js';
 import { logOperation } from '../middleware/audit.js';
-import { loadSystemSetting } from '../utils/system-bindings.js';
+import { loadSystemSetting, resolveBoundModelId } from '../utils/system-bindings.js';
 
 // ---------------------------------------------------------------------------
 // 类型 + fallback prompt(admin 可在 /admin/prompts 覆盖对应 slug)
@@ -185,18 +185,17 @@ const ParamsSchema = z.object({
   tone: z.string().max(50).optional(), // 基调:轻松/虐心/爽文...
 });
 
-/** 解析 binding modelId,空则抛引导错误 */
+/**
+ * 解析 binding modelId → 保证返回一个可用(存在 + active + TEXT)的 providerId。
+ * 悬空/停用自动 fallback 同 kind active 模型(见 resolveBoundModelId),不再硬崩。
+ */
 async function resolveModelId(prisma: Context['prisma'], override?: string | null): Promise<string> {
-  const modelId =
-    override || (await loadSystemSetting(prisma, 'binding.inspiration.generation.modelId')) || '';
-  if (!modelId) {
-    throw new TRPCError({
-      code: 'PRECONDITION_FAILED',
-      message:
-        '灵感创作未配置 LLM Provider — 请去 /admin/bindings 选择 binding.inspiration.generation.modelId',
-    });
-  }
-  return modelId;
+  return resolveBoundModelId(prisma, {
+    bindingKey: 'binding.inspiration.generation.modelId',
+    kind: 'TEXT',
+    override,
+    purpose: '灵感创作',
+  });
 }
 
 /**
@@ -394,7 +393,14 @@ export const inspirationRouter = router({
    *   - 返回 { generated, remaining, total } 供前端进度条 + 续跑判断
    */
   generateAllEpisodes: protectedProcedure
-    .input(z.object({ draftId: z.string().cuid() }))
+    .input(
+      z.object({
+        draftId: z.string().cuid(),
+        // 全部重新展开:传指定集号 → 强制重生成这些集(忽略已展开,覆盖旧内容);
+        //   不传 → 默认只补未展开集(跳过已展开)。前端逐块缩减队列驱动续跑。
+        regenerateNumbers: z.array(z.number().int().positive()).max(200).optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const draft = await ctx.prisma.inspirationDraft.findFirst({
         where: { id: input.draftId, deletedAt: null },
@@ -407,9 +413,13 @@ export const inspirationRouter = router({
       const outline = (draft.outline as unknown as OutlineEp[]) ?? [];
       const existing = (draft.episodes as unknown as DraftEp[]) ?? [];
       const doneNums = new Set(existing.filter((e) => e.content?.trim()).map((e) => e.number));
-      const pending = outline.filter((o) => !doneNums.has(o.number)); // #2:跳过已展开
+      // 全部重新展开:regenerateNumbers 指定的集强制重生成(覆盖已展开内容,逐块覆盖不预清空);
+      //   否则默认只补未展开集(#2 跳过已展开)。
+      const pending = input.regenerateNumbers?.length
+        ? outline.filter((o) => input.regenerateNumbers!.includes(o.number))
+        : outline.filter((o) => !doneNums.has(o.number));
       if (pending.length === 0) {
-        return { generated: 0, remaining: 0, total: outline.length };
+        return { generated: 0, generatedNumbers: [] as number[], remaining: 0, total: outline.length };
       }
 
       // 每块 2 集(~3-4k tokens)。慢模型(sonnet ~40 tok/s)单块 ~80-120s,稳在
@@ -429,7 +439,7 @@ export const inspirationRouter = router({
       );
 
       // P3:状态机走 runTextGenerationAttempt(provider + 解析 + 并发锁事务在 runFn,返回本块新增集数)
-      const chunkAdded = await runTextGenerationAttempt(
+      const addedNumbers = await runTextGenerationAttempt(
         ctx,
         {
           projectId: draft.projectId,
@@ -448,7 +458,7 @@ export const inspirationRouter = router({
           );
           // 解析本块 → 锁内重读最新 episodes → 合并 → 落库(并发安全,见 generateEpisode 同款 advisory-lock 注释)
           const parsed = parseEpisodesBatch(result.text ?? '');
-          let added = 0;
+          const added: number[] = []; // 本块实际写入的集号(供前端缩减重生成队列)
           await ctx.prisma.$transaction(async (tx) => {
             await tx.$executeRawUnsafe(
               `SELECT pg_advisory_xact_lock(hashtext('insp_draft:' || $1)::bigint)`,
@@ -461,12 +471,12 @@ export const inspirationRouter = router({
             const byNum = new Map(
               ((fresh?.episodes as unknown as DraftEp[]) ?? []).map((e) => [e.number, e] as const),
             );
-            added = 0;
+            added.length = 0;
             for (const o of chunk) {
               const body = parsed.get(o.number);
               if (body?.trim()) {
                 byNum.set(o.number, { number: o.number, title: o.title, content: body.trim() });
-                added += 1;
+                added.push(o.number);
               }
             }
             const episodes = [...byNum.values()].sort((a, b) => a.number - b.number);
@@ -481,7 +491,7 @@ export const inspirationRouter = router({
           });
           await logOperation(ctx, 'inspiration.episodes_batch', 'inspirationDraft', draft.id, null, {
             chunk: chunk.map((c) => c.number),
-            generated: added,
+            generated: added.length,
           });
           return {
             inputTokens: result.inputTokens,
@@ -492,8 +502,13 @@ export const inspirationRouter = router({
         },
       );
       // remaining = 本块后还剩多少未展开(前端据此续跑 + 进度条)
-      const remaining = pending.length - chunkAdded;
-      return { generated: chunkAdded, remaining, total: outline.length };
+      const remaining = pending.length - addedNumbers.length;
+      return {
+        generated: addedNumbers.length,
+        generatedNumbers: addedNumbers, // 本块写入的集号(重生成模式前端据此缩减队列)
+        remaining,
+        total: outline.length,
+      };
     }),
 
   /** 3. 列出项目的灵感草稿 */

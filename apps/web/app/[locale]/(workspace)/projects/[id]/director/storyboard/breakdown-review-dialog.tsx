@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@ss/api';
+import { mergeAssetDrafts } from '@ss/shared';
 
 import { trpc } from '@/lib/trpc/client';
 import { Button } from '@/components/ui/button';
@@ -45,6 +46,27 @@ interface ReviewItem {
 
 const TYPE_LABEL: Record<string, string> = { CHARACTER: '人物', SCENE: '场景', PROP: '道具' };
 
+// 2026-06-08「按集分块」:每块集数 + 并发块数(块小而快,彻底绕开非流式中转 250-300s 超时)
+const CHUNK_SIZE = 4;
+const CONCURRENCY = 3; // moyu 中转项目验证过的安全并发(对齐 storyboard LLM_CONCURRENCY=3)
+
+function chunkArr<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+function toReviewItem(d: AnyDraft): ReviewItem {
+  return {
+    draft: d,
+    selected: true, // 重新拆解默认全选(以最新覆盖已存在,用户可取消勾选)
+    name: d.name,
+    description: d.description ?? '',
+    prompt: d.prompt ?? '',
+    bio: 'bio' in d ? (d.bio ?? '') : '',
+  };
+}
+
 export function BreakdownReviewDialog({
   projectId,
   onClose,
@@ -60,65 +82,97 @@ export function BreakdownReviewDialog({
   const [phase, setPhase] = React.useState<string>('准备…');
 
   const breakdown = trpc.asset.breakdownProject.useMutation();
+  const utils = trpc.useUtils();
 
-  // 五六-2 链路优化:分类型 3 次拆(每次整本剧本作上下文,只产一类,避免非流式中转单请求超时),
-  //   **并行**发起(原串行 ~3× 墙钟 → 并行 ≈ 最慢一类的耗时),每类完成即增量显示,某类失败不影响其余。
-  //   moyu 中转 connections=32,3 并发已是项目验证过的安全并发(对齐 storyboard LLM_CONCURRENCY=3)。
+  // 2026-06-08「按集分块」:把整本剧本按集分块拆(每块 CHUNK_SIZE 集)、CONCURRENCY 并发,
+  //   跨块按 archetypeKey/name 合并去重(并集 episodes + 取更丰富设定)。每块小而快,彻底绕开
+  //   非流式中转 250-300s 超时(根因:人物/场景三段式整本生成 >300s → headersTimeout / 中转关连接)。
+  //   无法按集分块时(单集 / 剧本未编号)退回分类型 3 并行(五六-2 旧行为)。
   const runAll = React.useCallback(async (): Promise<void> => {
     setRunning(true);
-    setPhase('并行拆解中…(0/3)');
-    const TYPES = [
-      { t: 'CHARACTER' as const, label: '人物' },
-      { t: 'SCENE' as const, label: '场景' },
-      { t: 'PROP' as const, label: '道具' },
-    ];
-    const acc: ReviewItem[] = []; // 单线程事件循环,各 .then 顺序执行,push 无竞态
+    setPhase('准备…');
+    let accDrafts: AnyDraft[] = [];
     let totalCost = 0;
     let warn: string | undefined;
     const errs: string[] = [];
-    let done = 0;
 
-    await Promise.all(
-      TYPES.map((cur) =>
-        breakdown
-          .mutateAsync({ projectId, type: cur.t })
-          .then((res) => {
-            totalCost += res.cost;
-            if (res.warning) warn = res.warning;
-            const drafts: AnyDraft[] =
-              cur.t === 'CHARACTER' ? res.characters : cur.t === 'SCENE' ? res.scenes : res.props;
-            for (const d of drafts) {
-              acc.push({
-                draft: d,
-                selected: true, // 五七-3:重新拆解默认全选 —— 以最新内容覆盖已存在(用户拍板);不想覆盖可取消勾选
-                name: d.name,
-                description: d.description ?? '',
-                prompt: d.prompt ?? '',
-                bio: 'bio' in d ? (d.bio ?? '') : '',
-              });
+    // 合并新块草稿 + 增量渲染(同步执行无 await → 并发 worker 间无竞态)
+    const applyDrafts = (newDrafts: AnyDraft[]): void => {
+      accDrafts = mergeAssetDrafts(accDrafts, newDrafts);
+      setItems(accDrafts.map(toReviewItem));
+    };
+
+    try {
+      const meta = await utils.asset.breakdownEpisodeList.fetch({ projectId });
+      // 集号需覆盖全部剧本才分块(否则未编号剧本会漏拆 → 退回整本分类型)
+      const canChunk = meta.episodes.length >= 2 && meta.episodes.length === meta.totalScripts;
+
+      if (canChunk) {
+        const chunks = chunkArr(meta.episodes, CHUNK_SIZE);
+        let done = 0;
+        setPhase(`按集分块拆解中…(0/${chunks.length} 块)`);
+        let cursor = 0;
+        const worker = async (): Promise<void> => {
+          while (cursor < chunks.length) {
+            const my = chunks[cursor++]!;
+            try {
+              const res = await breakdown.mutateAsync({ projectId, episodeNumbers: my });
+              totalCost += res.cost;
+              if (res.warning) warn = res.warning;
+              applyDrafts([...res.characters, ...res.scenes, ...res.props]);
+            } catch (e) {
+              errs.push(`第${my.join('·')}集:${e instanceof Error ? e.message : String(e)}`);
+            } finally {
+              done += 1;
+              setPhase(`按集分块拆解中…(${done}/${chunks.length} 块)`);
             }
-            // 审阅 UI 按类型分组渲染,插入顺序无关 → 增量 setItems 即可
-            setItems([...acc]);
-          })
-          .catch((e) => {
-            errs.push(`${cur.label}:${e instanceof Error ? e.message : String(e)}`);
-          })
-          .finally(() => {
-            done += 1;
-            setPhase(`并行拆解中…(${done}/3)`);
-          }),
-      ),
-    );
+          }
+        };
+        await Promise.all(
+          Array.from({ length: Math.min(CONCURRENCY, chunks.length) }, () => worker()),
+        );
+      } else {
+        // 退回:分类型 3 并行(五六-2),用于单集 / 剧本未编号场景
+        setPhase('分类型拆解中…(0/3)');
+        const TYPES = [
+          { t: 'CHARACTER' as const, label: '人物' },
+          { t: 'SCENE' as const, label: '场景' },
+          { t: 'PROP' as const, label: '道具' },
+        ];
+        let done = 0;
+        await Promise.all(
+          TYPES.map((cur) =>
+            breakdown
+              .mutateAsync({ projectId, type: cur.t })
+              .then((res) => {
+                totalCost += res.cost;
+                if (res.warning) warn = res.warning;
+                applyDrafts([...res.characters, ...res.scenes, ...res.props]);
+              })
+              .catch((e) => errs.push(`${cur.label}:${e instanceof Error ? e.message : String(e)}`))
+              .finally(() => {
+                done += 1;
+                setPhase(`分类型拆解中…(${done}/3)`);
+              }),
+          ),
+        );
+      }
 
-    setWarning(warn);
-    if (acc.length > 0) {
-      toast.success(
-        `拆解完成 · 共 ${acc.length} 条 · ¥${totalCost.toFixed(4)}` +
-          (errs.length ? ` · ${errs.length} 类失败` : ''),
-      );
+      setWarning(warn);
+      if (accDrafts.length > 0) {
+        toast.success(
+          `拆解完成 · 共 ${accDrafts.length} 条 · ¥${totalCost.toFixed(4)}` +
+            (errs.length ? ` · ${errs.length} 处失败` : ''),
+        );
+      }
+      if (errs.length) {
+        toast.error(`部分失败:${errs[0]}${accDrafts.length ? ' — 可应用已得结果或重试' : ''}`);
+      }
+    } catch (e) {
+      toast.error(`拆解失败:${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setRunning(false);
     }
-    if (errs.length) toast.error(`部分类型失败:${errs[0]}${acc.length ? ' — 可应用已得结果或重试' : ''}`);
-    setRunning(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
@@ -202,7 +256,7 @@ export function BreakdownReviewDialog({
           <div className="flex h-48 flex-col items-center justify-center gap-3 text-sm text-[hsl(var(--color-muted-foreground))]">
             <Loader2 className="size-6 animate-spin text-[hsl(var(--color-primary))]" />
             {phase}
-            <span className="text-[11px]">分类型读取完整剧本拆解中,避免单次超时…</span>
+            <span className="text-[11px]">按集分块拆解、跨块合并去重,避免单次超时…</span>
           </div>
         ) : !hasItems ? (
           <div className="flex h-32 items-center justify-center text-sm text-[hsl(var(--color-destructive))]">

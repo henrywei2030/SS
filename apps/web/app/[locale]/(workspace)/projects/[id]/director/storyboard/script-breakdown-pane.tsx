@@ -133,6 +133,16 @@ export function ScriptBreakdownPane({ projectId }: { projectId: string }): React
   });
   const [syncConfirm, setSyncConfirm] = React.useState(false);
 
+  // 2026-06-08:一键清空本项目全部人物/场景/道具设定
+  const clearAll = trpc.asset.deleteMany.useMutation({
+    onSuccess: (res) => {
+      toast.success(res.deleted > 0 ? `已清空 ${res.deleted} 个设定` : '没有可清空的设定');
+      void utils.asset.list.invalidate();
+    },
+    onError: (e) => toast.error(`清空失败:${e.message}`),
+  });
+  const [clearAllConfirm, setClearAllConfirm] = React.useState(false);
+
   return (
     <div className="flex h-full flex-col">
       {/* 顶栏 */}
@@ -155,6 +165,17 @@ export function ScriptBreakdownPane({ projectId }: { projectId: string }): React
           >
             {syncAll.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
             同步全部
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1.5 border-red-500/40 text-xs text-red-600 hover:bg-red-500/10 dark:text-red-400"
+            onClick={() => setClearAllConfirm(true)}
+            disabled={clearAll.isPending}
+            title="清空本项目全部人物/场景/道具设定(软删,数据库保留审计)"
+          >
+            {clearAll.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+            一键清空
           </Button>
         </div>
       </div>
@@ -185,6 +206,19 @@ export function ScriptBreakdownPane({ projectId }: { projectId: string }): React
           onConfirm={() => {
             syncAll.mutate({ projectId });
             setSyncConfirm(false);
+          }}
+        />
+      )}
+      {clearAllConfirm && (
+        <ConfirmDialog
+          title="清空全部设定?"
+          description="软删除本项目所有人物 / 场景 / 道具设定及其分镜绑定。界面内不可恢复(数据库保留软删记录供审计)。"
+          confirmLabel="清空全部"
+          danger
+          onClose={() => setClearAllConfirm(false)}
+          onConfirm={() => {
+            clearAll.mutate({ projectId, confirmAll: true });
+            setClearAllConfirm(false);
           }}
         />
       )}
@@ -240,6 +274,36 @@ function TypePanel({
     create.mutate({ projectId, type, name, prompt: '(待补)', alias: [], description: '', tags: [] });
   };
 
+  // 2026-06-08:单类清空 + 多选删除(复用 asset.deleteMany)
+  const [multiSelect, setMultiSelect] = React.useState(false);
+  const [checkedIds, setCheckedIds] = React.useState<Set<string>>(new Set());
+  const [clearTypeConfirm, setClearTypeConfirm] = React.useState(false);
+  const [delSelConfirm, setDelSelConfirm] = React.useState(false);
+
+  const delMany = trpc.asset.deleteMany.useMutation({
+    onSuccess: (res) => {
+      toast.success(res.deleted > 0 ? `已删除 ${res.deleted} 个` : '没有可删除的');
+      setCheckedIds(new Set());
+      setMultiSelect(false);
+      setSelectedId(null);
+      void utils.asset.list.invalidate({ projectId, type });
+    },
+    onError: (e) => toast.error(`删除失败:${e.message}`),
+  });
+
+  const toggleCheck = (id: string): void =>
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const allChecked = sortedAssets.length > 0 && sortedAssets.every((a) => checkedIds.has(a.id));
+  const exitMulti = (): void => {
+    setMultiSelect(false);
+    setCheckedIds(new Set());
+  };
+
   return (
     <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-[hsl(var(--color-border))]">
       {/* 板块标题 */}
@@ -260,14 +324,34 @@ function TypePanel({
             <span className="text-[10px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
               {TYPES.find((t) => t.type === type)?.label.replace('设定', '')}选择
             </span>
-            <button
-              onClick={() => setAdding((v) => !v)}
-              className="flex items-center gap-0.5 text-[10px] text-[hsl(var(--color-accent))] hover:underline"
-              title="新建(最小占位,内容靠拆解/AI 填)"
-            >
-              <Plus className="size-2.5" />
-              新建
-            </button>
+            <div className="flex items-center gap-1.5">
+              {assets.length > 0 && (
+                <button
+                  onClick={() => (multiSelect ? exitMulti() : setMultiSelect(true))}
+                  className="text-[10px] text-[hsl(var(--color-muted-foreground))] hover:underline"
+                  title="多选删除"
+                >
+                  {multiSelect ? '完成' : '多选'}
+                </button>
+              )}
+              {assets.length > 0 && (
+                <button
+                  onClick={() => setClearTypeConfirm(true)}
+                  className="text-[10px] text-red-500 hover:underline"
+                  title={`清空全部${label}`}
+                >
+                  清空
+                </button>
+              )}
+              <button
+                onClick={() => setAdding((v) => !v)}
+                className="flex items-center gap-0.5 text-[10px] text-[hsl(var(--color-accent))] hover:underline"
+                title="新建(最小占位,内容靠拆解/AI 填)"
+              >
+                <Plus className="size-2.5" />
+                新建
+              </button>
+            </div>
           </div>
           {adding && (
             <div className="border-b border-[hsl(var(--color-border))] p-1.5">
@@ -307,12 +391,20 @@ function TypePanel({
                     .filter(Boolean)
                     .join(' · ');
                   return (
-                    <li key={a.id}>
+                    <li key={a.id} className="flex items-center">
+                      {multiSelect && (
+                        <input
+                          type="checkbox"
+                          checked={checkedIds.has(a.id)}
+                          onChange={() => toggleCheck(a.id)}
+                          className="ml-2 size-3 shrink-0 accent-[hsl(var(--color-accent))]"
+                        />
+                      )}
                       <button
-                        onClick={() => setSelectedId(a.id)}
+                        onClick={() => (multiSelect ? toggleCheck(a.id) : setSelectedId(a.id))}
                         className={cn(
-                          'flex w-full flex-col gap-0.5 px-2 py-1.5 text-left transition-colors',
-                          selectedId === a.id
+                          'flex min-w-0 flex-1 flex-col gap-0.5 px-2 py-1.5 text-left transition-colors',
+                          (multiSelect ? checkedIds.has(a.id) : selectedId === a.id)
                             ? 'bg-[hsl(var(--color-accent)/0.1)]'
                             : 'hover:bg-[hsl(var(--color-secondary)/0.5)]',
                         )}
@@ -342,6 +434,30 @@ function TypePanel({
               </ul>
             )}
           </div>
+          {multiSelect && (
+            <div className="flex shrink-0 items-center gap-1.5 border-t border-[hsl(var(--color-border))] px-2 py-1.5">
+              <button
+                onClick={() =>
+                  setCheckedIds(allChecked ? new Set() : new Set(sortedAssets.map((a) => a.id)))
+                }
+                className="text-[10px] text-[hsl(var(--color-muted-foreground))] hover:underline"
+              >
+                {allChecked ? '取消全选' : '全选'}
+              </button>
+              <button
+                onClick={() => setDelSelConfirm(true)}
+                disabled={checkedIds.size === 0 || delMany.isPending}
+                className="ml-auto flex items-center gap-0.5 text-[10px] font-medium text-red-600 hover:underline disabled:opacity-40 dark:text-red-400"
+              >
+                {delMany.isPending ? (
+                  <Loader2 className="size-2.5 animate-spin" />
+                ) : (
+                  <Trash2 className="size-2.5" />
+                )}
+                删除选中 {checkedIds.size}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* 右:设定内容 */}
@@ -366,6 +482,33 @@ function TypePanel({
           )}
         </div>
       </div>
+
+      {clearTypeConfirm && (
+        <ConfirmDialog
+          title={`清空全部${label}?`}
+          description={`软删除本项目所有「${label}」设定及其分镜绑定。界面内不可恢复(数据库保留软删记录)。`}
+          confirmLabel="清空"
+          danger
+          onClose={() => setClearTypeConfirm(false)}
+          onConfirm={() => {
+            delMany.mutate({ projectId, type });
+            setClearTypeConfirm(false);
+          }}
+        />
+      )}
+      {delSelConfirm && (
+        <ConfirmDialog
+          title={`删除选中的 ${checkedIds.size} 个${label}?`}
+          description="软删除选中设定及其分镜绑定。界面内不可恢复(数据库保留软删记录)。"
+          confirmLabel="删除"
+          danger
+          onClose={() => setDelSelConfirm(false)}
+          onConfirm={() => {
+            delMany.mutate({ projectId, ids: [...checkedIds] });
+            setDelSelConfirm(false);
+          }}
+        />
+      )}
     </div>
   );
 }

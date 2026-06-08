@@ -35,6 +35,8 @@ import { router, adminProcedure, rateLimit } from '../../trpc.js';
 import { logOperation } from '../../middleware/audit.js';
 // 第 23 轮 audit P1:apiUrl SSRF 防御
 import { validateApiUrl } from '../../utils/url-safety.js';
+// Layer A(2026-06-08):删/停用 provider 时自动改绑指向它的 binding,防引用悬空
+import { repointBindingsAwayFrom } from '../../utils/system-bindings.js';
 
 // ---------------------------------------------------------------------------
 // admin.provider
@@ -176,17 +178,32 @@ const providerRouter = router({
           message: 'Provider 含 API Key,请先 clearApiKey 再 delete(防误删带 token 的)',
         });
       }
+      // Layer A:删前先把指向它的 binding.* 自动改绑到同 kind 其它 active provider,
+      //   防止删除后 binding 静默悬空 → 业务侧硬崩(根因:binding 与 ProviderConfig 无引用完整性)。
+      const repointed = await repointBindingsAwayFrom(ctx.prisma, {
+        providerId: input.providerId,
+        kind: cfg.kind,
+      });
       // 关联数据保留(GenerationAttempt / CostLedgerEntry 的 providerId 是字符串,不外键级联)
       await ctx.prisma.providerConfig.delete({ where: { providerId: input.providerId } });
+      if (repointed.length > 0) {
+        // binding 缓存失效(storyboard 等缓 60s),让改绑立即生效
+        try {
+          const { cacheInvalidatePrefix } = await import('@ss/queue/cache');
+          await cacheInvalidatePrefix('cache:bindings:');
+        } catch (e) {
+          console.warn('[provider.delete] binding cache invalidate failed (non-blocking):', e);
+        }
+      }
       await logOperation(
         ctx,
         'provider.config.delete',
         'provider',
         input.providerId,
         cfg,
-        null,
+        { repointedBindings: repointed },
       );
-      return { success: true };
+      return { success: true, repointedBindings: repointed };
     }),
 
   setApiKey: adminProcedure
@@ -227,11 +244,34 @@ const providerRouter = router({
   setActive: adminProcedure
     .input(z.object({ providerId: z.string().max(100), isActive: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
+      // Layer A:停用前把指向它的 binding.* 改绑到同 kind 其它 active provider(防悬空)
+      let repointed: Array<{ key: string; to: string }> = [];
+      if (!input.isActive) {
+        const cfg = await ctx.prisma.providerConfig.findUnique({
+          where: { providerId: input.providerId },
+          select: { kind: true },
+        });
+        if (cfg) {
+          repointed = await repointBindingsAwayFrom(ctx.prisma, {
+            providerId: input.providerId,
+            kind: cfg.kind,
+          });
+        }
+      }
       await setProviderActive(input.providerId, input.isActive, ctx.user.id);
+      if (repointed.length > 0) {
+        try {
+          const { cacheInvalidatePrefix } = await import('@ss/queue/cache');
+          await cacheInvalidatePrefix('cache:bindings:');
+        } catch (e) {
+          console.warn('[provider.setActive] binding cache invalidate failed (non-blocking):', e);
+        }
+      }
       await logOperation(ctx, 'provider.setActive', 'provider', input.providerId, null, {
         isActive: input.isActive,
+        repointedBindings: repointed,
       });
-      return { success: true };
+      return { success: true, repointedBindings: repointed };
     }),
 
   /**

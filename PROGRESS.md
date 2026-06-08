@@ -5,6 +5,44 @@
 
 ---
 
+## 2026-06-08(周一,mac-mini · 开工强同步 + 灵感全部重新展开 + 模型绑定健壮性 + 剧本拆解按集分块 + 拆解清空/删除)— 承 mac-studio 同日,换机连做 4 块
+
+**全程 dev 在线 · typecheck 16/16 + test(adapters 31 / core 82 / api 51,新增 19)全过 · live DB 验证多处**
+
+### 〇、开工 + 环境补齐
+- 强同步:GitHub 覆盖本地(reset --hard,追平 30 commit)+ 清 4 个「子模块更名」遗留空目录(apps/web/public、packages/core/analytics、packages/ui、packages/workers,均 0 文件,clean -fd 零风险)。
+- 长间隔接续诊断:install / db:generate / infra:up / migrate:deploy(5 新 migration)/ db:sync / preflight 8 项全绿。
+
+### 一、灵感创作「全部重新展开」按钮
+- 顶部主按钮上下文化:未全展开→「全部展开」(补未展开);**全展开后→「全部重新展开」**(RotateCcw + 红 danger 确认框),不再变灰死路。
+- 后端 `generateAllEpisodes` 加 `regenerateNumbers[]`:强制重生成指定集(忽略已展开),前端逐块缩减队列驱动 + 返回 `generatedNumbers`;**逐集覆盖不预清空**(中途失败已生成的保住)。单集「重新展开」保持即点即重。
+
+### 二、模型绑定健壮性(根因:binding 与 ProviderConfig 无引用完整性 → 删/停用 provider 后 binding 静默悬空 → getTextProvider 硬崩)
+- **Layer B** `resolveBoundModelId`(system-bindings.ts):绑定值悬空/停用/空 → 自动 fallback 同 kind 第一个 active provider(+warn);无 active 才抛清晰错。应用到 6 个 TEXT 解析点(灵感/资产拆解×2/资产设定生成×2/剧本分析/分镜)。
+- **Layer A** `repointBindingsAwayFrom`:删/停用 provider 时自动把指向它的 binding 改绑到同 kind 其它 active + 失效缓存,接入 `provider.delete` / `setActive`。
+- Layer C(bindings UI 失效标红)本就有。+11 单测。**live DB 实测**:悬空值 moyu-gemini-3-flash → 自动 fallback moyu-claude-sonnet-4-6 ✅。
+
+### 三、完整剧本拆解「按集分块」(根因:人物/场景三段式整本生成 250-313s → 非流式中转 undici 300s headersTimeout + 中转关连接 → 只回道具)
+- `@ss/shared/mergeAssetDrafts`(纯函数,前后端共用):跨块按 archetypeKey/name 去重,episodes 并集 + 取更丰富 description/bio + 保留首个标量。+8 单测。
+- 后端:`loadProjectFullScript` 加集号过滤;`breakdownEpisodeList` query(列有剧本的集号);`breakdownProject` 加 `episodeNumbers`。
+- 前端:`runAll` 重写为取集列表→4 集/块→并发 3 循环→增量合并渲染→进度「X/N 块」;无法分块(单集/未编号)退回分类型 3 并行。**每块小而快,彻底无超时**。live DB 验证 canChunk(20 集→5 块)。
+
+### 四、剧本拆解清空/删除按钮(用户提)
+- 后端 `asset.deleteMany`:一个口三场景 —— `ids`(多选删)> `type`(单类清空)> `confirmAll`(一键清空全部),软删 asset + 解绑 AssetUsageBinding,严格 scope projectId 防越权。
+- 前端:顶栏「一键清空」· 每列「清空」(单类)· 每列「多选」→ 勾选 →「删除选中 N」+「全选」,全部带 danger 确认框。
+
+**问题/待决策**
+- ❓ 拆解按集分块**成本略增**(主角在多块各生成一次再合并)。可优化为「把已识别人物名传给后续块,只补新人物+新出场集」(省钱但块间变串行)—— 待用户拍板。
+- ❓ IMAGE/VIDEO 的读取解析点没套 Layer B(它们 getImage/getVideoProvider 本有 Mock 兜底不硬崩,且已被 Layer A 保护)。要不要也套同款 helper 做完全对称。
+- ❓ 删/停用的改绑明细已在 mutation 返回值(`repointedBindings`),但 /admin/providers 前端还没弹 toast 提示「已自动改绑 X→Y」。
+
+**下次接着做**
+- 📌 真打验证:灵感「全部重新展开」+ 剧本拆解「按集分块」端到端(都会真实扣费)。
+- 📌 上面三个待决策项(成本优化 / IMAGE-VIDEO 对称 / 改绑 toast)按需推进。
+- 📌 #2 视频带语音端到端仍未真打。
+
+---
+
 ## 2026-06-08(周一,mac-studio · 真打 #3 图生图 + 分镜同场景整合/场景标记 + 美术默认 seedream/一键同步生成 + 删 stray + 收工规则升级)— 承 6-7 晚开工连做 6 块,边改边 Chrome 真打
 
 **全程 dev 在线 · typecheck 16/16 + test(adapters 31 / core 82 / api 32)全过 · 多处 Chrome 真打 · 收工跑 db:sync 规则化**

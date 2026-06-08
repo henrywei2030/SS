@@ -13,7 +13,7 @@ import { getEventBus } from "@ss/adapters/eventbus";
 import { asRecord, EVENTS, sanitizeErrorMsg, billingCycle } from "@ss/shared";
 import { protectedProcedure } from "../trpc.js";
 import { logOperation } from "../middleware/audit.js";
-import { loadSystemSettings } from "../utils/system-bindings.js";
+import { loadSystemSettings, resolveBoundModelId } from "../utils/system-bindings.js";
 import { runTextGenerationAttempt } from "../utils/generation-attempt.js";
 import { loadAssetWithAccess, loadProjectFullScript, SlotSchema } from "./asset-shared.js";
 
@@ -36,14 +36,11 @@ export const generateProcedures = {
     )
     .mutation(async ({ ctx, input }) => {
       const asset = await loadAssetWithAccess(ctx, input.assetId);
-      const settings = await loadSystemSettings(ctx.prisma, ['binding.asset.breakdown.modelId']);
-      const modelId = settings['binding.asset.breakdown.modelId'];
-      if (!modelId) {
-        throw new TRPCError({
-          code: 'PRECONDITION_FAILED',
-          message: '资产设定 AI 生成未配置 LLM — 去 /admin/bindings 配 binding.asset.breakdown.modelId',
-        });
-      }
+      const modelId = await resolveBoundModelId(ctx.prisma, {
+        bindingKey: 'binding.asset.breakdown.modelId',
+        kind: 'TEXT',
+        purpose: '资产设定 AI 生成',
+      });
       const provider = await getTextProvider(modelId);
       const known = [
         `姓名:${asset.name}`,
@@ -171,14 +168,11 @@ export const generateProcedures = {
       if (input.field === 'bio' && asset.type !== 'CHARACTER') {
         throw new TRPCError({ code: 'BAD_REQUEST', message: '人物小传仅人物资产适用' });
       }
-      const settings = await loadSystemSettings(ctx.prisma, ['binding.asset.breakdown.modelId']);
-      const modelId = settings['binding.asset.breakdown.modelId'];
-      if (!modelId) {
-        throw new TRPCError({
-          code: 'PRECONDITION_FAILED',
-          message: '资产设定 AI 生成未配置 LLM — 去 /admin/bindings 配 binding.asset.breakdown.modelId',
-        });
-      }
+      const modelId = await resolveBoundModelId(ctx.prisma, {
+        bindingKey: 'binding.asset.breakdown.modelId',
+        kind: 'TEXT',
+        purpose: '资产设定 AI 生成',
+      });
       const provider = await getTextProvider(modelId);
       const { text: scriptText } = await loadProjectFullScript(ctx, asset.projectId, 40_000);
 

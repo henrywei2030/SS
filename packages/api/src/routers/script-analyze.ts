@@ -14,7 +14,7 @@ import { sanitizeErrorMsg } from '@ss/shared';
 import { protectedProcedure } from '../trpc.js';
 import { logOperation } from '../middleware/audit.js';
 // 三十一收工 S3:SystemSetting 单 key 读 helper
-import { loadSystemSetting } from '../utils/system-bindings.js';
+import { resolveBoundModelId } from '../utils/system-bindings.js';
 
 // W7+ audit R10:assertProjectAccess 抽到 middleware/access.ts
 import { assertProjectAccess } from '../middleware/access.js';
@@ -118,18 +118,13 @@ export const analyzeProcedures = {
       if (!script) throw new TRPCError({ code: 'NOT_FOUND' });
       await assertProjectAccess(ctx, script.projectId);
 
-      // P1-4:从 binding 读 modelId(input 优先 > binding,无硬编码兜底)
-      // 二十收工后用户反馈:不 hardcode 任何默认 provider,binding 空时显式拒绝
-      let modelId = input.modelId;
-      if (!modelId) {
-        modelId = (await loadSystemSetting(ctx.prisma, 'binding.script.analysis.modelId')) ?? '';
-      }
-      if (!modelId) {
-        throw new TRPCError({
-          code: 'PRECONDITION_FAILED',
-          message: '剧本分析未配置 LLM Provider — 请去 /admin/bindings 选择 binding.script.analysis.modelId(或在调用时传 input.modelId 显式指定)',
-        });
-      }
+      // P1-4:从 binding 读 modelId(input 优先 > binding);悬空/停用自动 fallback,不再硬崩
+      const modelId = await resolveBoundModelId(ctx.prisma, {
+        bindingKey: 'binding.script.analysis.modelId',
+        kind: 'TEXT',
+        override: input.modelId,
+        purpose: '剧本分析',
+      });
 
       const { analyzeScript } = await import('@ss/core/script');
 
