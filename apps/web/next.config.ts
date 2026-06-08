@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { NextConfig } from 'next';
 import createNextIntlPlugin from 'next-intl/plugin';
 
@@ -36,6 +37,14 @@ const nextConfig: NextConfig = {
     ],
   },
   output: 'standalone',
+
+  /**
+   * 桌面打包:monorepo + pnpm 下,nft 默认从 apps/web 追踪 → 漏掉经 .pnpm 符号链接的
+   * Next 内部依赖(如 styled-jsx)→ standalone 缺包,装到 .app(无上层 node_modules)即
+   * `Cannot find module 'styled-jsx'`。把追踪根设为仓库根 → 完整纳入 workspace/.pnpm 依赖,
+   * standalone 真自包含。
+   */
+  outputFileTracingRoot: path.join(__dirname, '../../'),
 
   /**
    * 服务端外部包 — 不进 webpack bundle,运行时从 node_modules require。

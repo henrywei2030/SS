@@ -12,7 +12,11 @@ out
 
 # Tauri
 **/src-tauri/target
-**/src-tauri/Cargo.lock
+**/src-tauri/gen
+# 桌面打包产物(desktop-pack.mjs 在各平台本地/CI 各自生成,体量大,不入库)
+**/src-tauri/resources/
+**/src-tauri/binaries/
+# Cargo.lock 入库(应用类项目锁版本 → CI 可复现构建);故不再 ignore
 
 # Environment
 .env

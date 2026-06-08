@@ -8,10 +8,6 @@ repository = "https://github.com/henrywei2030/SS"
 edition = "2021"
 rust-version = "1.77"
 
-[lib]
-name = "starsalign_desktop_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
-
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -19,6 +15,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# Phase 2 Step C:用 libc 给 node sidecar 进程组发 SIGTERM(优雅停 web + 内嵌 pg)
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [features]
 # 默认空,Phase 2 加 GPU sidecar 等 feature

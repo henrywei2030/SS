@@ -5,9 +5,8 @@
   "identifier": "com.starsalign.studio",
   "build": {
     "beforeDevCommand": "",
-    "beforeBuildCommand": "pnpm --filter @ss/web build",
-    "devUrl": "http://localhost:3000",
-    "frontendDist": "../../web/.next"
+    "beforeBuildCommand": "",
+    "frontendDist": "../splash"
   },
   "app": {
     "windows": [
@@ -41,6 +40,8 @@
     ],
     "category": "Productivity",
     "shortDescription": "AI 短剧生产平台",
-    "longDescription": "围绕 AI 短剧 / 漫剧 / 真人剧生产流程搭建的下一代制作平台,覆盖剧本→分析→分镜→数字资产→AIGC 抽卡→团队协作→素材库→数据监控全链路。"
+    "longDescription": "围绕 AI 短剧 / 漫剧 / 真人剧生产流程搭建的下一代制作平台,覆盖剧本→分析→分镜→数字资产→AIGC 抽卡→团队协作→素材库→数据监控全链路。",
+    "resources": ["resources/**/*"],
+    "externalBin": ["binaries/node"]
   }
 }
