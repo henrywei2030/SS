@@ -120,6 +120,59 @@ interface OpenAIErrorResponse {
   };
 }
 
+// OpenAI 兼容流式(SSE)分片
+interface OpenAIStreamChunk {
+  choices?: Array<{
+    delta?: { role?: string; content?: string };
+    finish_reason?: string | null;
+  }>;
+  usage?: { prompt_tokens?: number; completion_tokens?: number } | null;
+  error?: { message?: string };
+}
+
+/**
+ * 解析整条 OpenAI 兼容 SSE 流 → 累计 delta.content / finish_reason / usage。
+ *
+ * 改流式的原因(2026-06-09):非流式下中转站要等整段生成完才返响应头,慢模型大输出
+ *   (moyu sonnet ~40 tok/s,拆解多集 >12k tokens)生成 >300s 撞 headersTimeout。
+ *   stream:true 后响应头秒回(满足 headersTimeout),token 持续到达(满足 bodyTimeout 的
+ *   chunk 间 idle 判定)→ 彻底拿掉"生成时长上限"。仅需最终结果,故收齐整流再解析,不向调用方增量透出。
+ */
+function parseOpenAIStream(sse: string): {
+  content: string;
+  finishReason?: string;
+  usage: { prompt_tokens: number; completion_tokens: number } | null;
+  streamError?: string;
+} {
+  let content = '';
+  let finishReason: string | undefined;
+  let usage: { prompt_tokens: number; completion_tokens: number } | null = null;
+  let streamError: string | undefined;
+  for (const rawLine of sse.split('\n')) {
+    const line = rawLine.trim();
+    if (!line.startsWith('data:')) continue; // 跳过空行 / `: keep-alive` 注释行
+    const data = line.slice(5).trim();
+    if (!data || data === '[DONE]') continue;
+    let evt: OpenAIStreamChunk;
+    try {
+      evt = JSON.parse(data) as OpenAIStreamChunk;
+    } catch {
+      continue;
+    }
+    if (evt.error?.message) streamError = evt.error.message;
+    const choice = evt.choices?.[0];
+    if (choice?.delta?.content) content += choice.delta.content;
+    if (choice?.finish_reason) finishReason = choice.finish_reason;
+    if (evt.usage) {
+      usage = {
+        prompt_tokens: evt.usage.prompt_tokens ?? 0,
+        completion_tokens: evt.usage.completion_tokens ?? 0,
+      };
+    }
+  }
+  return { content, finishReason, usage, streamError };
+}
+
 export class OpenAICompatTextProvider extends BaseProvider implements ITextProvider {
   readonly info: ProviderInfo;
 
@@ -177,6 +230,10 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
       body.response_format = { type: 'json_object' };
     }
     if (req.extra) Object.assign(body, req.extra);
+    // 流式调用 —— 见 parseOpenAIStream 注释:headers 秒回拿掉非流式生成时长上限。
+    //   放在 extra 之后,确保不被覆盖。
+    body.stream = true;
+    body.stream_options = { include_usage: true };
 
     let resp: OpenAIChatResponse;
     try {
@@ -188,9 +245,9 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
           // 透传上游 trace id(若 ctx 有 requestId,Phase 2 加)
         },
         body: JSON.stringify(body),
-        // 四九收工:headers/body 提到 300s(原 180s)。非流式 LLM 大输出要全生成完才返
-        // headers;慢模型(moyu sonnet ~40 tok/s)分块多集实测撞 182s。这是 per-request
-        // 覆盖,优先级高于 sharedDispatcher,故这里也必须 bump。
+        // 改流式后响应头秒回 → 不再受"非流式整段生成完才返 headers"的时长上限约束。
+        // 仍留 300s 富余:headersTimeout 防中转站迟迟不发首字节;bodyTimeout 是 chunk 间 idle
+        // 判定,token 持续到达不触发(慢模型大输出也安全)。per-request 覆盖 > sharedDispatcher。
         bodyTimeout: 300_000,
         headersTimeout: 300_000,
       });
@@ -206,7 +263,31 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
           parsed?.error?.message ?? `HTTP ${statusCode}: ${text.slice(0, 200)}`;
         throw new ProviderError(this.info.id, errMsg);
       }
-      resp = JSON.parse(text) as OpenAIChatResponse;
+      // 改流式后 text 是 SSE(data: 行序列),非单个 JSON → 解析还原成 resp 形状,下游零改动。
+      const stream = parseOpenAIStream(text);
+      if (stream.streamError) {
+        // 200 后流中途报错(上游模型错误等)
+        throw new ProviderError(this.info.id, stream.streamError);
+      }
+      if (stream.content || stream.usage || stream.finishReason) {
+        // usage 优先用流尾 stream_options 的真实值;中转站若没返则按字符估算兜底(仅影响计费估值)
+        const usage = stream.usage ?? {
+          prompt_tokens: Math.ceil((req.prompt.length + (req.system?.length ?? 0)) / 4),
+          completion_tokens: Math.ceil(stream.content.length / 4),
+        };
+        resp = {
+          choices: [
+            {
+              message: { role: 'assistant', content: stream.content },
+              finish_reason: stream.finishReason,
+            },
+          ],
+          usage,
+        };
+      } else {
+        // 兜底:中转站忽略了 stream(返回普通 JSON completion 而非 SSE)→ 按非流式解析。
+        resp = JSON.parse(text) as OpenAIChatResponse;
+      }
     } catch (e) {
       // 失败:Provider 内置 ledger 跳过(router 单点写,ADR-25)— skipLedger:true 时不记
       await this.recordLedger({

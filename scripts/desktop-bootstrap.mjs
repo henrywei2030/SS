@@ -303,6 +303,9 @@ export async function bootstrapDesktop() {
     QUEUE_DRIVER: 'in-process',
     EVENT_BUS_DRIVER: 'in-process',
     AUTH_DRIVER: 'local',
+    // 桌面 web 经 http://localhost(明文 loopback)提供 → 关 Secure cookie。否则 WKWebView 丢弃
+    //   Secure 的 session cookie(NEXT_LOCALE 等非 Secure cookie 不受影响),登录 200 却存不住 → 登不进。
+    SS_DESKTOP_INSECURE_COOKIE: '1',
     NODE_ENV: process.env.NODE_ENV ?? 'production',
   };
 

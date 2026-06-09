@@ -69,7 +69,12 @@ export async function POST(req: Request): Promise<NextResponse> {
       sameSite: 'lax',
       path: '/',
       maxAge: 7 * 24 * 60 * 60,
-      secure: process.env.NODE_ENV === 'production',
+      // 桌面态经 http://localhost 提供服务(loopback,无 MITM 风险),WKWebView 会丢弃 HTTP 下的
+      // Secure cookie → session 存不住、登不进。桌面 bootstrap 注入 SS_DESKTOP_INSECURE_COOKIE=1 关掉。
+      // Web 部署不设此旗标 → 行为不变(仍按 NODE_ENV 走 Secure)。
+      secure:
+        process.env.NODE_ENV === 'production' &&
+        process.env.SS_DESKTOP_INSECURE_COOKIE !== '1',
     });
     return NextResponse.json({ user });
   } catch (e) {
