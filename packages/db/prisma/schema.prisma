@@ -1071,6 +1071,10 @@ model CostLedgerEntry {
   @@index([billingCycle])
   @@index([attemptId])
   @@index([entryType])
+  // ⚠️ 12 维深审:DB 用 partial unique (attemptId) WHERE entryType='REFUND'(防并发双退款,
+  // 代码级幂等 refundPrepayForAttempt + advisory 锁之外的 DB 兜底)。Prisma 不支持 partial
+  // @@unique,见 migration `20260610010000_refund_unique_per_attempt`;此处不写 @@unique
+  // 避免 migrate dev 改成全量 unique 误伤 NORMAL/ADJUSTMENT 多条语义。
   @@map("cost_ledger_entries")
 }
 

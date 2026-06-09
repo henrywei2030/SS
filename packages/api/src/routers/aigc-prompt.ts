@@ -18,6 +18,7 @@ import { aspectRatioSchema } from '@ss/shared/schemas';
 
 import { protectedProcedure } from '../trpc.js';
 import { logOperation } from '../middleware/audit.js';
+import { acquireTxAdvisoryLock } from '../utils/advisory-lock.js';
 
 import { loadGroupOrThrow } from './aigc-shared.js';
 
@@ -78,10 +79,7 @@ export const promptProcedures = {
       // 4. W5 audit R1:全部写入在事务里 + advisory lock,防两个用户同时点"自动匹配"
       //    导致 refSlotIdx 双分配(partial unique 会拦,但拦到第二个用户那边抛 P2002 体验差)
       const result = await ctx.prisma.$transaction(async (tx) => {
-        await tx.$executeRawUnsafe(
-          `SELECT pg_advisory_xact_lock(hashtext('aigc_match:' || $1)::bigint)`,
-          grp.id,
-        );
+        await acquireTxAdvisoryLock(tx, 'aigc_match', grp.id);
 
         // 锁内 re-read 现有 bindings 查重 + 算 next slot
         const existing = await tx.assetUsageBinding.findMany({

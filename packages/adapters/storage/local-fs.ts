@@ -6,6 +6,7 @@ import { promises as fs } from 'node:fs';
 import { createReadStream } from 'node:fs';
 import { join, dirname, resolve as pathResolve, relative as pathRelative, isAbsolute } from 'node:path';
 import type { Readable } from 'node:stream';
+import { pathToFileURL } from 'node:url';
 
 import type { StorageAdapter, PutOptions, PutResult, ObjectInfo } from './types.js';
 
@@ -64,9 +65,10 @@ export class LocalFsStorageAdapter implements StorageAdapter {
 
     await fs.writeFile(fullPath, buf);
 
+    // Windows 绝对路径(C:\...)裸拼 `file://` 产非法 URL,pathToFileURL 跨平台正确编码
     const url = this.cfg.publicBaseUrl
       ? `${this.cfg.publicBaseUrl}/${key}`
-      : `file://${fullPath}`;
+      : pathToFileURL(fullPath).href;
 
     void opts;
     return { key, url, sizeBytes: buf.length };
@@ -83,7 +85,7 @@ export class LocalFsStorageAdapter implements StorageAdapter {
   async getSignedUrl(key: string): Promise<string> {
     return this.cfg.publicBaseUrl
       ? `${this.cfg.publicBaseUrl}/${key}`
-      : `file://${this.resolve(key)}`;
+      : pathToFileURL(this.resolve(key)).href;
   }
 
   async deleteObject(key: string): Promise<void> {

@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { protectedProcedure } from '../trpc.js';
 import { logOperation } from '../middleware/audit.js';
 import { isEpisodeLockedNow } from '../utils/episode-lock.js';
+import { acquireTxAdvisoryLock } from '../utils/advisory-lock.js';
 import { assertProjectAccess } from '../middleware/access.js';
 
 import { loadGroupOrThrow } from './aigc-shared.js';
@@ -147,10 +148,7 @@ export const bindingsProcedures = {
         (asset.type === 'SCENE' ? 'ENVIRONMENT' : 'APPEAR');
 
       const binding = await ctx.prisma.$transaction(async (tx) => {
-        await tx.$executeRawUnsafe(
-          `SELECT pg_advisory_xact_lock(hashtext('aigc_match:' || $1)::bigint)`,
-          grp.id,
-        );
+        await acquireTxAdvisoryLock(tx, 'aigc_match', grp.id);
 
         const existing = await tx.assetUsageBinding.findFirst({
           where: {

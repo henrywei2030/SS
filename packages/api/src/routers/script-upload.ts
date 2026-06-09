@@ -17,6 +17,7 @@ import { protectedProcedure } from '../trpc.js';
 import type { Context } from '../context.js';
 import { logOperation } from '../middleware/audit.js';
 import { isEpisodeLockedNow } from '../utils/episode-lock.js';
+import { acquireTxAdvisoryLock } from '../utils/advisory-lock.js';
 import { extractScriptText } from '../utils/script-extract.js';
 // 三十一收工 S3:SystemSetting 单 key 读 helper
 import { loadSystemSetting } from '../utils/system-bindings.js';
@@ -79,10 +80,7 @@ async function createNextVersion(ctx: Context, input: NewVersionInput) {
   return ctx.prisma.$transaction(async (tx) => {
     // 用 episodeId 派生一个 bigint 作为 advisory lock key
     // hashtext 给定相同 input 输出相同 i32,转 bigint 即可
-    await tx.$executeRawUnsafe(
-      `SELECT pg_advisory_xact_lock(hashtext('script_version:' || $1)::bigint)`,
-      input.episodeId,
-    );
+    await acquireTxAdvisoryLock(tx, 'script_version', input.episodeId);
 
     // Phase 1.5.3 bugfix:version 号计算必须基于"全部"(含软删)的 script,
     // 否则用户清空剧本(deleteAllForEpisode)后再上传,会撞 unique (episodeId, version)
@@ -232,10 +230,12 @@ export const uploadProcedures = {
       if (!draft) throw new TRPCError({ code: 'NOT_FOUND', message: '灵感草稿不存在' });
       await assertProjectAccess(ctx, draft.projectId);
 
-      const allEps =
-        (draft.episodes as unknown as { number: number; title: string; content: string }[]) ?? [];
+      // JSON 列防御:episodes 被脏数据污染成非数组时 .filter 会直接 500,这里按空处理走 BAD_REQUEST
+      const allEps = Array.isArray(draft.episodes)
+        ? (draft.episodes as unknown as { number: number; title: string; content: string }[])
+        : [];
       const selected = allEps.filter(
-        (e) => e.content?.trim() && input.episodeNumbers.includes(e.number),
+        (e) => e?.content?.trim() && input.episodeNumbers.includes(e.number),
       );
       if (selected.length === 0) {
         throw new TRPCError({ code: 'BAD_REQUEST', message: '所选集均无内容(去灵感创作先展开)' });

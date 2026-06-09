@@ -19,6 +19,7 @@ import { protectedProcedure, rateLimit } from '../trpc.js';
 import { logOperation } from '../middleware/audit.js';
 // 三十二收工 S3 followup:batch SystemSetting 读 helper
 import { loadSystemSettings } from '../utils/system-bindings.js';
+import { acquireTxAdvisoryLock } from '../utils/advisory-lock.js';
 import {
   acquireEpisodeLock,
   isEpisodeLockedNow,
@@ -605,10 +606,7 @@ export const generateProcedures = {
       //   (这里用 'episode_publish:',与 'episode_lock:' 不冲突)。
       const now = new Date();
       const updated = await ctx.prisma.$transaction(async (tx) => {
-        await tx.$executeRawUnsafe(
-          `SELECT pg_advisory_xact_lock(hashtext('episode_publish:' || $1)::bigint)`,
-          ep.id,
-        );
+        await acquireTxAdvisoryLock(tx, 'episode_publish', ep.id);
         // 锁内 re-read,拿到不可被并发改动的真实状态
         const fresh = await tx.episode.findUnique({
           where: { id: ep.id },

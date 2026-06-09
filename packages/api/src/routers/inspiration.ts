@@ -20,6 +20,7 @@ import { runTextGenerationAttempt } from '../utils/generation-attempt.js';
 import { router, protectedProcedure } from '../trpc.js';
 import type { Context } from '../context.js';
 import { assertProjectAccess } from '../middleware/access.js';
+import { acquireTxAdvisoryLock } from '../utils/advisory-lock.js';
 import { logOperation } from '../middleware/audit.js';
 import { loadSystemSetting, resolveBoundModelId } from '../utils/system-bindings.js';
 
@@ -349,10 +350,7 @@ export const inspirationRouter = router({
           // 并发锁收口:LLM 在锁外跑;"读最新 episodes → 合并本集 → 落库"放进 advisory-lock 事务,
           //   锁内重读最新快照(LLM 调用期间别的 generate* 请求可能已写入其它集),避免老快照覆盖丢集
           const written = await ctx.prisma.$transaction(async (tx) => {
-            await tx.$executeRawUnsafe(
-              `SELECT pg_advisory_xact_lock(hashtext('insp_draft:' || $1)::bigint)`,
-              draft.id,
-            );
+            await acquireTxAdvisoryLock(tx, 'insp_draft', draft.id);
             const fresh = await tx.inspirationDraft.findUnique({
               where: { id: draft.id },
               select: { episodes: true },
@@ -460,10 +458,7 @@ export const inspirationRouter = router({
           const parsed = parseEpisodesBatch(result.text ?? '');
           const added: number[] = []; // 本块实际写入的集号(供前端缩减重生成队列)
           await ctx.prisma.$transaction(async (tx) => {
-            await tx.$executeRawUnsafe(
-              `SELECT pg_advisory_xact_lock(hashtext('insp_draft:' || $1)::bigint)`,
-              draft.id,
-            );
+            await acquireTxAdvisoryLock(tx, 'insp_draft', draft.id);
             const fresh = await tx.inspirationDraft.findUnique({
               where: { id: draft.id },
               select: { episodes: true },

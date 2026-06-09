@@ -29,6 +29,64 @@ function sseFormat(event: VideoGenProgressEvent): string {
   return `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
 }
 
+type AttemptTerminalRow = {
+  status: string;
+  outputMediaId: string | null;
+  errorMsg: string | null;
+  costCny: unknown;
+} | null;
+
+/**
+ * 终态兜底推送(12 维深审:进入时 + subscribe 后 double-check 两处同款 ~50 行收敛单一真相源)。
+ * attempt 已 SUCCESS/FAILED → 推一条对应事件并返回 true(调用方负责 close);未终态返回 false。
+ * SUCCESS 但 media 缺失/被软删 → 按 failed 推(第 2 轮 audit P0-2:防前端空 <video>)。
+ */
+async function pushTerminalIfDone(
+  attemptId: string,
+  row: AttemptTerminalRow,
+  send: (event: VideoGenProgressEvent) => void,
+): Promise<boolean> {
+  if (!row) return false;
+  if (row.status === 'FAILED') {
+    send({ type: 'failed', attemptId, errorMsg: row.errorMsg ?? 'unknown', retryable: false });
+    return true;
+  }
+  if (row.status !== 'SUCCESS') return false;
+  if (!row.outputMediaId) {
+    send({
+      type: 'failed',
+      attemptId,
+      errorMsg: 'success_but_no_media: attempt.outputMediaId 为空',
+      retryable: false,
+    });
+    return true;
+  }
+  const m = await prisma.mediaItem.findFirst({
+    where: { id: row.outputMediaId, deletedAt: null },
+    select: { id: true, cdnUrl: true, meta: true },
+  });
+  if (!m || !m.cdnUrl) {
+    send({
+      type: 'failed',
+      attemptId,
+      errorMsg: 'media_deleted_or_missing: MediaItem 已被删除或缺 cdnUrl',
+      retryable: false,
+    });
+    return true;
+  }
+  const meta = (m.meta as Record<string, unknown> | null) ?? {};
+  const thumbnailUrl = typeof meta.thumbnailUrl === 'string' ? meta.thumbnailUrl : undefined;
+  send({
+    type: 'success',
+    attemptId,
+    mediaId: m.id,
+    videoUrl: m.cdnUrl,
+    thumbnailUrl,
+    costCny: Number(row.costCny ?? 0),
+  });
+  return true;
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ attemptId: string }> },
@@ -94,54 +152,8 @@ export async function GET(
         }
       };
 
-      // 1. 终态兜底
-      if (attempt.status === 'SUCCESS') {
-        // 第 2 轮 audit P0-2:MediaItem 已被软删/不存在时,不能推空 videoUrl(前端 UI 显示空 <video>)
-        if (!attempt.outputMediaId) {
-          send({
-            type: 'failed',
-            attemptId,
-            errorMsg: 'success_but_no_media: attempt.outputMediaId 为空',
-            retryable: false,
-          });
-          close();
-          return;
-        }
-        const m = await prisma.mediaItem.findFirst({
-          where: { id: attempt.outputMediaId, deletedAt: null },
-          select: { id: true, cdnUrl: true, meta: true },
-        });
-        if (!m || !m.cdnUrl) {
-          send({
-            type: 'failed',
-            attemptId,
-            errorMsg: 'media_deleted_or_missing: MediaItem 已被删除或缺 cdnUrl',
-            retryable: false,
-          });
-          close();
-          return;
-        }
-        const meta = (m.meta as Record<string, unknown> | null) ?? {};
-        const thumbnailUrl =
-          typeof meta.thumbnailUrl === 'string' ? meta.thumbnailUrl : undefined;
-        send({
-          type: 'success',
-          attemptId,
-          mediaId: m.id,
-          videoUrl: m.cdnUrl,
-          thumbnailUrl,
-          costCny: Number(attempt.costCny ?? 0),
-        });
-        close();
-        return;
-      }
-      if (attempt.status === 'FAILED') {
-        send({
-          type: 'failed',
-          attemptId,
-          errorMsg: attempt.errorMsg ?? 'unknown',
-          retryable: false,
-        });
+      // 1. 终态兜底(进入时):已终态推一条后关闭
+      if (await pushTerminalIfDone(attemptId, attempt, send)) {
         close();
         return;
       }
@@ -173,53 +185,7 @@ export async function GET(
           costCny: true,
         },
       });
-      if (recheck?.status === 'SUCCESS') {
-        // 第 2 轮 audit P0-2:double-check 分支同样防空 media 推送
-        if (!recheck.outputMediaId) {
-          send({
-            type: 'failed',
-            attemptId,
-            errorMsg: 'success_but_no_media: attempt.outputMediaId 为空',
-            retryable: false,
-          });
-          close();
-          return;
-        }
-        const m = await prisma.mediaItem.findFirst({
-          where: { id: recheck.outputMediaId, deletedAt: null },
-          select: { id: true, cdnUrl: true, meta: true },
-        });
-        if (!m || !m.cdnUrl) {
-          send({
-            type: 'failed',
-            attemptId,
-            errorMsg: 'media_deleted_or_missing: MediaItem 已被删除或缺 cdnUrl',
-            retryable: false,
-          });
-          close();
-          return;
-        }
-        const meta = (m.meta as Record<string, unknown> | null) ?? {};
-        const thumbnailUrl =
-          typeof meta.thumbnailUrl === 'string' ? meta.thumbnailUrl : undefined;
-        send({
-          type: 'success',
-          attemptId,
-          mediaId: m.id,
-          videoUrl: m.cdnUrl,
-          thumbnailUrl,
-          costCny: Number(recheck.costCny ?? 0),
-        });
-        close();
-        return;
-      }
-      if (recheck?.status === 'FAILED') {
-        send({
-          type: 'failed',
-          attemptId,
-          errorMsg: recheck.errorMsg ?? 'unknown',
-          retryable: false,
-        });
+      if (await pushTerminalIfDone(attemptId, recheck, send)) {
         close();
         return;
       }

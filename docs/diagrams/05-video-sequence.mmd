@@ -1,0 +1,48 @@
+sequenceDiagram
+    participant UI as 前端 (aigc-workspace)
+    participant API as aigc.generateVideo
+    participant DB as PostgreSQL
+    participant Q as 队列 (BullMQ/进程内)
+    participant W as Worker (processVideoGenJob)
+    participant P as Provider (Seedance)
+    participant BUS as 进度总线
+    participant SSE as SSE 端点
+
+    UI->>API: generateVideo(groupId, 时长/比例/分辨率)
+    activate API
+    API->>DB: BEGIN tx
+    API->>DB: pg_advisory_xact_lock(video:groupId) 串行化
+    API->>DB: 扫描 stale RUNNING → FAILED + REFUND
+    API->>DB: 创建 QUEUED attempt + PREPAY 账本(按 max 时长预扣)
+    API->>API: 抽卡上限 + 日预算检查
+    API->>API: 编译提示词(风格+资产+token)
+    API->>API: 合规门禁(AI_REAL 须 CHARACTER APPROVED)
+    API->>DB: QUEUED → RUNNING + 写入真实 inputJson
+    API->>Q: enqueue(attemptId) (失败则 FAILED+REFUND)
+    API->>DB: COMMIT
+    API-->>UI: { attemptId }
+    deactivate API
+
+    UI->>API: getStreamToken(attemptId) → JWT
+    UI->>SSE: GET /api/sse/aigc/[attemptId]?token=JWT
+    SSE->>BUS: subscribe(attemptId)
+
+    Q->>W: 派发 job
+    activate W
+    W->>W: 幂等检查(已 SUCCESS 返缓存 / 已 FAILED 抛错)
+    W->>BUS: publish(running)
+    BUS-->>SSE: running
+    SSE-->>UI: running
+    W->>P: provider.generate(prompt, refs, 时长...)
+    P-->>W: { videoUrl, costCny }
+    alt 成功
+        W->>DB: 建 MediaItem(VIDEO) + attempt=SUCCESS + ACTUAL 账本(+多扣退 REFUND)
+        W->>BUS: publish(success, mediaId, videoUrl, costCny)
+        BUS-->>SSE: success
+    else 失败
+        W->>DB: attempt=FAILED + 错误分类(可重试/不可重试)
+        W->>BUS: publish(failed, retryable)
+        BUS-->>SSE: failed
+    end
+    deactivate W
+    SSE-->>UI: 终态(刷新预览/抽卡画廊)

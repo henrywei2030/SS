@@ -12,6 +12,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { getAuthAdapter } from '@ss/adapters/auth';
+import { ForbiddenError } from '@ss/shared';
 
 import { SESSION_COOKIE } from '@/lib/auth/session';
 import {
@@ -78,9 +79,16 @@ export async function POST(req: Request): Promise<NextResponse> {
     });
     return NextResponse.json({ user });
   } catch (e) {
-    // 认证失败才计数(到上限触发限流)
-    recordLoginFailure(ip);
-    const msg = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ error: 'invalid_credentials', message: msg }, { status: 401 });
+    // 凭证错误(ForbiddenError:密码错/账号停用)→ 401 + 计数;消息是 adapter 的安全短语,可示
+    if (e instanceof ForbiddenError) {
+      recordLoginFailure(ip);
+      return NextResponse.json({ error: 'invalid_credentials', message: e.message }, { status: 401 });
+    }
+    // 其余(DB 连接 / JWT_SECRET 配置等基建错误)不外泄内部细节、不计入爆破限流,只落服务端日志
+    console.error('[api/auth/login] unexpected error:', e);
+    return NextResponse.json(
+      { error: 'internal', message: '登录服务暂不可用,请稍后重试' },
+      { status: 500 },
+    );
   }
 }

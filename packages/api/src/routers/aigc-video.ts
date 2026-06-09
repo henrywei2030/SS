@@ -13,7 +13,7 @@ import { getVideoProvider } from '@ss/adapters/provider';
 import {
   acquireAigcVideoLock,
   refundPrepayForAttempt,
-  STALE_TIMEOUT_GROUP_MS,
+  sweepStaleGroupAttempts,
   checkDailyVideoBudget,
   createPlaceholderAttemptWithPrepay,
   compileVideoPromptForGroup,
@@ -171,47 +171,14 @@ export const videoProcedures = {
       const { attempt: earlyAttempt } = await ctx.prisma.$transaction(async (tx) => {
         // 三十五收工 R2 Phase A:共享 helper(原 inline lock raw → acquireAigcVideoLock)
         await acquireAigcVideoLock(tx, grp.id);
-        // 2026-05-27 audit r13 P0(用户反馈):stale RUNNING 自愈
-        //   worker 进程崩 / network drop / 真接 Provider 异步 task 失踪时,attempt 永久卡在 RUNNING
-        //   → inflight check 永久 block 同 group 新建 → 用户必须等管理员手动清理
-        //   解法:findFirst 拿全部 inflight + 把 startedAt > 10min 视为 stale,事务内标 FAILED + 退 PREPAY
-        const inflightCandidates = await tx.generationAttempt.findMany({
-          where: {
-            shotGroupId: grp.id,
-            action: 'VIDEO',
-            status: { in: ['QUEUED', 'RUNNING'] },
-          },
-          select: { id: true, providerId: true, startedAt: true, createdAt: true },
+        // 2026-05-27 audit r13 P0:stale RUNNING 自愈 — 12 维深审下沉 core(纯搬运,语义不变):
+        //   worker 崩/失踪导致永久卡 RUNNING → 自动标 FAILED + 退 PREPAY;清理后仍存活的才拒(真在跑)
+        const { aliveInflight } = await sweepStaleGroupAttempts(tx, {
+          shotGroupId: grp.id,
+          userId: ctx.user.id,
+          projectId: grp.episode.projectId,
+          episodeId: grp.episodeId,
         });
-        const now = Date.now();
-        const staleAttempts = inflightCandidates.filter((a) => {
-          const ts = (a.startedAt ?? a.createdAt)?.getTime() ?? now;
-          return now - ts > STALE_TIMEOUT_GROUP_MS;
-        });
-        for (const stale of staleAttempts) {
-          // 标 FAILED + 退 PREPAY(idempotent — refundPrepayForAttempt 内查 REFUND 防双写)
-          await tx.generationAttempt.update({
-            where: { id: stale.id },
-            data: {
-              status: 'FAILED',
-              errorMsg: `stale RUNNING auto-recovered (>${STALE_TIMEOUT_GROUP_MS / 60000}min, worker likely crashed)`,
-              finishedAt: new Date(),
-            },
-          });
-          // 三十五收工 R2 Phase A:用共享 refund helper 替原 ~30 行内联逻辑
-          await refundPrepayForAttempt(tx, {
-            attemptId: stale.id,
-            userId: ctx.user.id,
-            projectId: grp.episode.projectId,
-            episodeId: grp.episodeId,
-            providerId: stale.providerId,
-            reason: 'stale_running_auto_recovered',
-          });
-        }
-        // 自愈后仍存活的 inflight(startedAt 在 10min 内)— 真在跑,拒绝
-        const aliveInflight = inflightCandidates.find(
-          (a) => !staleAttempts.some((s) => s.id === a.id),
-        );
         if (aliveInflight) {
           throw new TRPCError({
             code: 'CONFLICT',

@@ -15,6 +15,7 @@ import { logOperation } from '../middleware/audit.js';
 // 三十二收工 S3 followup:batch SystemSetting 读 helper
 import { loadSystemSettings } from '../utils/system-bindings.js';
 import { isEpisodeLockedNow } from '../utils/episode-lock.js';
+import { acquireTxAdvisoryLock } from '../utils/advisory-lock.js';
 
 // W7+ audit R10:assertProjectAccess 抽到 middleware/access.ts
 import { assertProjectAccess } from '../middleware/access.js';
@@ -127,10 +128,7 @@ export const groupProcedures = {
       // group.positionIdx 用 max+1 单调递增（含 soft-deleted）
       // advisory lock 保证读 max + create + 清空组的整个过程原子
       const group = await ctx.prisma.$transaction(async (tx) => {
-        await tx.$executeRawUnsafe(
-          `SELECT pg_advisory_xact_lock(hashtext('storyboard_group:' || $1)::bigint)`,
-          episodeId,
-        );
+        await acquireTxAdvisoryLock(tx, 'storyboard_group', episodeId);
         const lastGroup = await tx.shotGroup.findFirst({
           where: { episodeId },
           orderBy: { positionIdx: 'desc' },
@@ -253,10 +251,7 @@ export const groupProcedures = {
 
       let shotsMerged = 0;
       await ctx.prisma.$transaction(async (tx) => {
-        await tx.$executeRawUnsafe(
-          `SELECT pg_advisory_xact_lock(hashtext('storyboard_group:' || $1)::bigint)`,
-          input.episodeId,
-        );
+        await acquireTxAdvisoryLock(tx, 'storyboard_group', input.episodeId);
         const lastGroup = await tx.shotGroup.findFirst({
           where: { episodeId: input.episodeId },
           orderBy: { positionIdx: 'desc' },

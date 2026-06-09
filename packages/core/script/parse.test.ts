@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseScriptText } from './parse.js';
+import { parseEpisodeBoundaries, parseScriptText } from './parse.js';
 
 describe('parseScriptText', () => {
   it('解析单场 + 标题 + 人物列表 + 动作 + 对白 + 旁白', () => {
@@ -177,5 +177,64 @@ A（vo）：4`;
   it('场头 "内外" 识别为 MIXED', () => {
     const r = parseScriptText('1-1 日 内外 走廊→院子\n△转场');
     expect(r.scenes[0]?.location).toBe('MIXED');
+  });
+});
+
+// 12 维深审 D10 补强:多集切分此前零覆盖(剧本上传「集数识别」的核心,六五修复区)
+describe('parseEpisodeBoundaries', () => {
+  it('无集标 → 单集 fallback(episodeNumber=1,content=全文)', () => {
+    const text = '1-1 日 内 房间\n△陆乘醒来。\n陆乘:这是哪?';
+    const r = parseEpisodeBoundaries(text);
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatchObject({ episodeNumber: 1, title: '' });
+    expect(r[0]!.content).toBe(text);
+    expect(r[0]!.sceneCount).toBe(1);
+  });
+
+  it('「第N集」多集切分:边界正确 + 各集内容含集标行 + 标题捕获', () => {
+    const text = [
+      '第1集:重生',
+      '1-1 日 内 房间',
+      '△第一集内容。',
+      '第2集 复仇',
+      '2-1 夜 外 街道',
+      '△第二集内容。',
+    ].join('\n');
+    const r = parseEpisodeBoundaries(text);
+    expect(r).toHaveLength(2);
+    expect(r[0]).toMatchObject({ episodeNumber: 1, title: '重生' });
+    expect(r[0]!.content).toContain('第一集内容');
+    expect(r[0]!.content).not.toContain('第二集内容');
+    expect(r[1]).toMatchObject({ episodeNumber: 2, title: '复仇' });
+    expect(r[1]!.content).toContain('2-1 夜 外 街道');
+  });
+
+  it('混合写法:第N集 / Episode N / EP N 都识别(大小写不敏感)', () => {
+    const text = ['第 1 集', 'A', 'Episode 2', 'B', 'ep3', 'C'].join('\n');
+    const r = parseEpisodeBoundaries(text);
+    expect(r.map((e) => e.episodeNumber)).toEqual([1, 2, 3]);
+    expect(r[1]!.content).toContain('B');
+    expect(r[2]!.content).toContain('C');
+  });
+
+  it('首个集标前的封面/前言被丢弃(设计行为)', () => {
+    const text = ['《剧名》封面页', '作者:某某', '第1集', '正文'].join('\n');
+    const r = parseEpisodeBoundaries(text);
+    expect(r).toHaveLength(1);
+    expect(r[0]!.content).not.toContain('封面页');
+    expect(r[0]!.content).toContain('正文');
+  });
+
+  it('「第0集」非法集号不当集标(行首命中正则但 n>0 校验拒),归入上文内容', () => {
+    const text = ['第1集', '第0集 这种写法', '继续'].join('\n');
+    const r = parseEpisodeBoundaries(text);
+    expect(r).toHaveLength(1);
+    expect(r[0]!.content).toContain('第0集 这种写法');
+  });
+
+  it('集号乱序/重复按出现顺序保留(上游负责去重)', () => {
+    const text = ['第3集', 'C', '第1集', 'A'].join('\n');
+    const r = parseEpisodeBoundaries(text);
+    expect(r.map((e) => e.episodeNumber)).toEqual([3, 1]);
   });
 });

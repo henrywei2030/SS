@@ -1,0 +1,13 @@
+flowchart LR
+    subgraph 服务端形态
+        WEBs["web"] --> Rds[("Redis")]
+        WEBs --> PGs[("PG (docker)")]
+        WEBs --> Minio[("MinIO")]
+        Wkr["独立 worker"] --> Rds
+        Wkr --> PGs
+    end
+    subgraph 桌面形态
+        WEBd["web (standalone)"] --> PGe[("嵌入式 PG")]
+        WEBd --> FS[("本地文件存储")]
+        WEBd -.进程内队列+总线.-> WEBd
+    end

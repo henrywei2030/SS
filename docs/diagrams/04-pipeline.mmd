@@ -1,0 +1,29 @@
+flowchart TD
+    A["① 创建项目<br/>Project (type 决定风格/合规)"] --> B
+
+    subgraph 剧本阶段
+        B["② 灵感创作 (可选)<br/>想法 → LLM → 多集大纲+剧本<br/>InspirationDraft"] --> C
+        C["③ 剧本管理<br/>上传 docx/txt + 多集切分<br/>Script + Scene"]
+    end
+
+    C --> D["④ 剧本拆解<br/>LLM 拆 人/景/物 文字设定<br/>Asset (L0→L1)"]
+    D -->|同步闸 syncedToArtAt| E
+
+    subgraph 美术阶段
+        E["⑤ 美术工坊<br/>AI 出形象图 + 图生图 + 确认主图<br/>Asset 槽位 + MediaItem (L2→L3→L5)"]
+    end
+
+    C --> F["⑥ 分镜<br/>LLM 生成镜头 + 合并组<br/>Shot + ShotGroup"]
+    E --> G
+    F --> G
+
+    subgraph S_AIGC["AIGC 阶段"]
+        G["⑦ 绑定资产到生成段<br/>AssetUsageBinding (@图片N/@音频N)"]
+        G --> H["⑧ 编译视频提示词<br/>风格 + 资产媒体 + token 替换"]
+        H --> I["⑨ 合规门禁 (仅 AI_REAL)<br/>CHARACTER 须 APPROVED"]
+        I --> J["⑩ 视频生成 (抽卡)<br/>队列 → Provider → MediaItem<br/>GenerationAttempt + CostLedger"]
+    end
+
+    J -->|SSE 进度| K["⑪ 预览 / 采纳 / 重抽"]
+    J --> L["⑫ 素材库归集<br/>MediaItem (VIDEO)"]
+    K --> M["⑬ 数据分析<br/>成本 / 抽卡率 / 质量"]

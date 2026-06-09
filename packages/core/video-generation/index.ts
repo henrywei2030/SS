@@ -12,10 +12,8 @@
  *   - `compileVideoPromptForGroup` — project style + bindings + media + refs + compileShotGroupVideoPrompt
  *   - `enqueueVideoJobOrRefund` — BullMQ push + 失败时 attempt FAILED + REFUND
  *
- * Follow-up(留下次):
- *   - `sweepStaleRunningInGroup(tx, groupId)` — 同 group 短窗口 sweep(目前 router 内联)
- *   - `checkInflightAndThrow(tx, groupId)` — 同 group inflight 拒绝(目前 router 内联,跟 lock 紧耦合)
- *   - 单测(R2 Phase D)— 每模块 1-2 unit test,目标 95→115+ tests
+ *   - `sweepStaleGroupAttempts` — 同 group stale 自愈 + 存活探测(12 维深审落地,原 Follow-up
+ *     `sweepStaleRunningInGroup`;inflight 拒绝语义留 router — core 不抛 TRPCError)
  */
 export {
   STALE_TIMEOUT_GROUP_MS,
@@ -34,3 +32,8 @@ export {
   type ProcessResult,
 } from './process-job.js';
 export { recoverStaleVideoAttempts } from './recover.js';
+export {
+  sweepStaleGroupAttempts,
+  type SweepStaleGroupArgs,
+  type SweepStaleGroupResult,
+} from './stale-sweep.js';

@@ -42,20 +42,29 @@ const LOGIN_MAX_FAILURES = 5; // 每窗口最多 5 次失败
 const LOGIN_WINDOW_MS = 60_000; // 60s 窗口
 
 // 单进程内 in-memory store(Phase 2 → Redis)
-const loginBuckets = new Map<string, { count: number; resetAt: number }>();
+// ⚠️ 存 globalThis,不能用模块级 Map:Next standalone 可能把本模块编进多个模块实例
+//   (同 progress-bus / video-gen-queue / rate-limit.ts 同款坑)→ 各实例各一份计数 = 爆破限流被稀释。
+type GlobalWithLoginRateLimit = typeof globalThis & {
+  __ss_loginBuckets?: Map<string, { count: number; resetAt: number }>;
+  __ss_loginCleanup?: ReturnType<typeof setInterval>;
+};
+const g = globalThis as GlobalWithLoginRateLimit;
+const loginBuckets = (g.__ss_loginBuckets ??= new Map());
 
-/** 每 5min 清理过期 bucket,防内存涨爆 */
-const cleanupInterval = setInterval(
-  () => {
-    const now = Date.now();
-    for (const [key, bucket] of loginBuckets) {
-      if (bucket.resetAt < now) loginBuckets.delete(key);
-    }
-  },
-  5 * 60 * 1000,
-);
-// 让 interval 不阻塞进程退出
-if (typeof cleanupInterval.unref === 'function') cleanupInterval.unref();
+/** 每 5min 清理过期 bucket,防内存涨爆(globalThis 守卫:多模块实例只起一个 interval) */
+if (!g.__ss_loginCleanup) {
+  g.__ss_loginCleanup = setInterval(
+    () => {
+      const now = Date.now();
+      for (const [key, bucket] of loginBuckets) {
+        if (bucket.resetAt < now) loginBuckets.delete(key);
+      }
+    },
+    5 * 60 * 1000,
+  );
+  // 让 interval 不阻塞进程退出
+  if (typeof g.__ss_loginCleanup.unref === 'function') g.__ss_loginCleanup.unref();
+}
 
 /**
  * 检查当前 IP 是否已被限流(**不计数**,只读判断)。

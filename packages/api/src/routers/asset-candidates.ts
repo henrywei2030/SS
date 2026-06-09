@@ -11,6 +11,7 @@ import { EVENTS } from "@ss/shared";
 import { protectedProcedure } from "../trpc.js";
 import { logOperation } from "../middleware/audit.js";
 import { assertProjectAccess } from "../middleware/access.js";
+import { acquireTxAdvisoryLock } from "../utils/advisory-lock.js";
 import { computeMaturity, loadAssetWithAccess, SLOT_FIELD, SlotSchema } from "./asset-shared.js";
 
 export const candidatesProcedures = {
@@ -165,7 +166,7 @@ export const candidatesProcedures = {
       // 否则两个并发不同 slot 在 Read Committed 下各自 fresh 读看不到对方 update,
       // 最终 maturity 字段只反映最后一个 update 的视角(漏算对方新增 slot)
       const updated = await ctx.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'asset_confirm:' + asset.id})::bigint)`;
+        await acquireTxAdvisoryLock(tx, 'asset_confirm', asset.id);
         const fresh = await tx.asset.findFirstOrThrow({
           where: { id: asset.id, deletedAt: null },
         });
@@ -301,7 +302,7 @@ export const candidatesProcedures = {
       // 第 19 轮 audit P1:加 advisory_xact_lock(跟 confirmCandidate 配套),
       // 否则 confirm A + unconfirm B 并发时 maturity 会基于陈旧状态算
       const updated = await ctx.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'asset_confirm:' + asset.id})::bigint)`;
+        await acquireTxAdvisoryLock(tx, 'asset_confirm', asset.id);
         const fresh = await tx.asset.findFirstOrThrow({
           where: { id: asset.id, deletedAt: null },
         });

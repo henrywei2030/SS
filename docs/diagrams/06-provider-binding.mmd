@@ -1,0 +1,19 @@
+flowchart LR
+    subgraph 能力绑定
+        BIND["SystemSetting<br/>binding.xxx.modelId/providerId"]
+    end
+    subgraph S_PROV["Provider 实例"]
+        CFG["ProviderConfig<br/>(providerId / 单价 / apiKeyEnc)"]
+        RELAY["RelayProvider<br/>(中转站 1 token 多模型)"]
+    end
+    subgraph 适配器
+        TXT["TEXT: openai-compat / claude"]
+        IMG["IMAGE: openai-compat-image / mock"]
+        VID["VIDEO: seedance / mock"]
+        CMP["COMPLIANCE: 火山 (占位)"]
+    end
+
+    BIND -->|resolveBoundModelId| CFG
+    CFG -->|relayProviderId 非空| RELAY
+    CFG --> TXT & IMG & VID & CMP
+    TXT & IMG & VID --> EXT["外部 API / 中转站"]

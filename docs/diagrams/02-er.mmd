@@ -1,0 +1,31 @@
+erDiagram
+    User ||--o{ Project : owns
+    User ||--o{ ProjectMember : joins
+    Project ||--o{ ProjectMember : has
+    Project ||--o{ Episode : contains
+    Project ||--o{ Asset : has
+    Project ||--o{ Script : has
+    Project ||--o{ MediaItem : has
+    Project ||--o{ InspirationDraft : has
+    Project }o--|| StyleProfile : uses
+
+    Episode ||--o{ Scene : contains
+    Episode ||--o{ Shot : contains
+    Episode ||--o{ ShotGroup : contains
+    Script ||--o{ Scene : "parsed into"
+    Script ||--o{ ScriptAnalysis : analyzed
+
+    Scene ||--o{ Shot : groups
+    ShotGroup ||--o{ Shot : merges
+    ShotGroup ||--o{ AssetUsageBinding : binds
+    ShotGroup ||--o{ GenerationAttempt : "video takes"
+
+    Asset ||--o{ AssetUsageBinding : "used in"
+    Asset ||--o{ AssetVersion : versioned
+    Asset ||--o{ AssetRelation : "related to"
+    Episode ||--o{ AssetUsageBinding : scopes
+
+    GenerationAttempt ||--o{ CostLedgerEntry : "billed (PREPAY/ACTUAL/REFUND)"
+    GenerationAttempt }o--|| MediaItem : "outputs"
+
+    ProviderConfig }o--|| RelayProvider : "via relay"

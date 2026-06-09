@@ -1,0 +1,58 @@
+flowchart TD
+    subgraph EDGE["接入层"]
+        WEB["Web 浏览器 (Next.js SSR)"]
+        DESK["桌面 App (Tauri 离线单机)"]
+    end
+
+    subgraph PRES["表现层 · apps/web"]
+        PAGES["App Router 页面 [locale]/(workspace) + /admin"]
+        TRPC_C["tRPC React Client + React Query"]
+        SSE_C["SSE 客户端 (视频进度)"]
+    end
+
+    subgraph API["API 层 · @ss/api (tRPC)"]
+        ROUTERS["路由: project / script / inspiration / storyboard / asset / aigc / media / insights / admin.*"]
+        MW["中间件: 鉴权 / 限流 / 项目访问 / 审计"]
+    end
+
+    subgraph CORE["领域层 · @ss/core (纯函数)"]
+        C1["script 解析"]
+        C2["asset 拆解 / 选图"]
+        C3["storyboard 生成 / 合并 / 视频提示词编译"]
+        C4["video-generation 锁/预算/计费/任务处理"]
+    end
+
+    subgraph INFRA["适配层 · @ss/adapters + @ss/queue"]
+        PROV["Provider 适配器 (TEXT/IMAGE/VIDEO/COMPLIANCE)"]
+        STORE["StorageAdapter (S3 兼容 / local-fs)"]
+        QUEUE["队列 (BullMQ / 进程内)"]
+        BUS["进度总线 (Redis pub/sub / EventEmitter)"]
+        CRYPTO["AES-256-GCM 密钥加密"]
+    end
+
+    subgraph DATA["数据层"]
+        PG[("PostgreSQL 16 / 嵌入式 PG")]
+        REDIS[("Redis 7 (服务端态)")]
+        OBJ[("对象存储 MinIO / 本地文件")]
+    end
+
+    subgraph EXT["外部 AI 服务"]
+        SEED["Seedance (视频)"]
+        RELAY["中转站 moyu/OpenRouter/Poe (LLM/图)"]
+        VOLC["火山合规 (人脸)"]
+    end
+
+    WEB --> PAGES
+    DESK --> PAGES
+    PAGES --> TRPC_C --> ROUTERS
+    PAGES --> SSE_C
+    ROUTERS --> MW --> CORE
+    CORE --> PROV & STORE & QUEUE & BUS
+    PROV --> CRYPTO
+    PROV --> SEED & RELAY & VOLC
+    QUEUE --> REDIS
+    BUS --> REDIS
+    SSE_C -. 订阅进度 .-> BUS
+    ROUTERS --> PG
+    STORE --> OBJ
+    CORE --> PG

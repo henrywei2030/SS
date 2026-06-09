@@ -17,6 +17,8 @@
 import { TRPCError } from '@trpc/server';
 import type { EpisodeStatus, PrismaClient } from '@ss/db';
 
+import { acquireTxAdvisoryLock } from './advisory-lock.js';
+
 export const SOFT_LOCK_TTL_MS = 15 * 60 * 1000; // 15 分钟
 
 export type EpisodeLockToken = {
@@ -37,10 +39,7 @@ export async function acquireEpisodeLock(
 
   return await prisma.$transaction(async (tx) => {
     // advisory lock 让同一 episode 的并发抢锁串行 —— 防 read-then-update 之间的竞态
-    await tx.$executeRawUnsafe(
-      `SELECT pg_advisory_xact_lock(hashtext('episode_lock:' || $1)::bigint)`,
-      episodeId,
-    );
+    await acquireTxAdvisoryLock(tx, 'episode_lock', episodeId);
 
     const ep = await tx.episode.findUnique({
       where: { id: episodeId },

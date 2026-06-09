@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { protectedProcedure } from '../trpc.js';
 import { logOperation } from '../middleware/audit.js';
 import { loadEpisodeOrThrow } from '../middleware/access.js';
+import { acquireTxAdvisoryLock } from '../utils/advisory-lock.js';
 
 import { loadGroupOrThrow } from './aigc-shared.js';
 
@@ -43,10 +44,7 @@ export const groupsProcedures = {
 
       // 用 advisory lock 防并发抢同一 positionIdx(跟 W3 storyboard 一致)
       const group = await ctx.prisma.$transaction(async (tx) => {
-        await tx.$executeRawUnsafe(
-          `SELECT pg_advisory_xact_lock(hashtext('storyboard_group:' || $1)::bigint)`,
-          ep.id,
-        );
+        await acquireTxAdvisoryLock(tx, 'storyboard_group', ep.id);
         const last = await tx.shotGroup.findFirst({
           where: { episodeId: ep.id },
           orderBy: { positionIdx: 'desc' },

@@ -1,0 +1,12 @@
+stateDiagram-v2
+    [*] --> DRAFT
+    DRAFT --> PUBLISHED: 导演发布给 AIGC
+    PUBLISHED --> QUEUED: 入队
+    QUEUED --> GENERATING: 预算/合规放行 + 入 worker
+    QUEUED --> BUDGET_BLOCKED: 超日预算
+    GENERATING --> GENERATED: 至少 1 个候选成功
+    GENERATING --> FAILED: 生成失败
+    GENERATED --> ADOPTED: 用户采纳某条 take
+    ADOPTED --> FINAL: 终稿
+    FAILED --> [*]
+    FINAL --> [*]
