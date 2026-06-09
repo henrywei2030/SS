@@ -37,6 +37,13 @@ macOS(aarch64)+ Windows(x64)双 runner 云端出**未签名**安装包(Tauri 不
 - 📌 Mac .dmg 美化(Finder 布局,需 GUI 会话)/ 自动更新流水线(新版启动自动 migrate+db:sync)。
 - 📌 桌面程序更深真打:Mock 视频生成端到端跑进程内队列 + SSE。
 
+**续(同日 · 三遍审查 + 加固 + 签名)**
+- **三遍审查桌面打包代码**(用户要,为 mac-mini 首测)。无 P0;修两处真实健壮性风险:① 打包态 web 端口 3000→**47900**(冷门,避开常见 dev 端口 / 残留 :3000 冲突;dev 仍 3000)—— 验证安全:tRPC 浏览器端用相对 URL(端口无关)+ CSRF 同源校验,换端口不破功能、无需重建 web;② 健康检查 `main.rs` 从硬编码 127.0.0.1 改为**解析 localhost 逐个试连**(server 绑 HOSTNAME=localhost,原硬编码在只解析 ::1 的机器会误判超时卡 splash)。提交 `524ae5b`,CI 重触发带加固。
+- **签名(用户定:自用免费路线)**:`.app` 当前 ad-hoc(Gatekeeper 不认,需公证才认)。做深度 ad-hoc 重签(`codesign --force --deep --sign -`)→ valid on disk、嵌套 node/pg 全签到、降「已损坏」风险;重建 `.dmg`(296M)。**自用流程**:拷过去 → `xattr -cr "/Applications/StarsAlign Studio.app"` 清隔离 → 双击(U 盘/scp 拷可能免 xattr)。分发给别人才需 Developer ID + 公证($99/年)。
+- **踩坑**:重测反复 401 实为 detached `.app` 的 orphan next-server 占端口、用旧数据应答(测试 artifact,非 build 问题);按端口清 orphan 后干净首跑 **login 200**。
+- ⚠️ **`.dmg` 是构建产物(gitignored,不入 git)→ mac-mini 测试需手动传**(AirDrop / U 盘 拷本地 `apps/desktop/src-tauri/target/release/bundle/dmg/StarsAlign-Studio-0.1.0-aarch64.dmg`,或下 CI 的 macOS artifact)。
+- **下次(mac-mini)**:传 `.dmg` → `xattr -cr` → 测首跑 + 登录;问题看 `~/Library/Application Support/StarsAlign Studio/logs/desktop.log`。
+
 ---
 
 ## 2026-06-09(周二,mac-studio · 打开系统 + 桌面化规划/决策 + Phase 1 后端去 infra + 集成验证)— 启动桌面程序化,Phase 1 全程驱动开关、现系统零干扰
