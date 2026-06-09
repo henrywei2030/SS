@@ -26,14 +26,14 @@
 `tauri build` → `StarsAlign Studio.app`(576MB)+ `.dmg`(300MB,hdiutil 造,可挂载)。**踩大坑**:.app 登录反复「失败」,实为一个残留在 :3000 的旧服务器(修复前版本)一直答我的 curl —— 清掉残留后,当前 .app 全新启动 **登录 HTTP 200 + ss_session JWT + user(isAdmin)**、desktop.log `Ready 172ms` 无报错。加文件日志(数据目录 logs/desktop.log)解决 .app GUI 启动 detach、stdout 丢失。
 
 ### 四、Step F:CI(`.github/workflows/desktop-build.yml`)
-macOS(aarch64)+ Windows(x64)双 runner 云端出**未签名**安装包(Tauri 不能交叉编译,Win 包只能 CI/Win 机出)。修 prisma generate 缺 DATABASE_URL(全新 checkout 无 packages/db/.env)+ Build web 设 SS_DESKTOP_BUILD=1。Cargo.lock 入库(可复现)。**CI 跑通待确认**。
+macOS(aarch64)+ Windows(x64)双 runner 云端出**未签名**安装包(Tauri 不能交叉编译,Win 包只能 CI/Win 机出)。修 prisma generate 缺 DATABASE_URL(全新 checkout 无 packages/db/.env)+ Build web 设 SS_DESKTOP_BUILD=1 + desktop-pack 在 Windows 调 npm/rustc 需 shell。Cargo.lock 入库(可复现)。**★双平台 CI 已绿出包 ✅**(run 27176479803:Mac 6m38s / Win 15m13s;artifact StarsAlign-Studio-Windows 244MB + macOS 440MB)。
 
 **问题/待决策**
-- ❓ Windows CI 首跑是否过(embedded-pg win 二进制 / WiX·NSIS / 路径)未确认 —— 见下次。
+- ❓ Windows 安装包 CI 已绿出包,但**未在真 Win 机 runtime 实测**(架构同 Mac 自包含;win-laptop 可验)。
 - ❓ 签名/公证:Mac 需 Apple Developer($99/yr)、Win 需代码签名证书 —— 行政事项,当前出未签名包(右键绕过 Gatekeeper/SmartScreen)。
 
 **下次接着做**
-- 📌 确认 Windows CI 出包(失败则按 runner 日志修);下载 CI artifact 在 Win 机真装真跑。
+- 📌 win-laptop 下载 CI artifact(StarsAlign-Studio-Windows 244MB)真装真跑验证。
 - 📌 Mac .dmg 美化(Finder 布局,需 GUI 会话)/ 自动更新流水线(新版启动自动 migrate+db:sync)。
 - 📌 桌面程序更深真打:Mock 视频生成端到端跑进程内队列 + SSE。
 
