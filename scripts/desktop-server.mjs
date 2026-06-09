@@ -25,7 +25,8 @@ async function main() {
   console.log('[desktop] bootstrap 完成,启动 web 服务...');
 
   const mode = process.env.SS_DESKTOP_WEB_MODE ?? 'dev';
-  const port = process.env.PORT ?? '3000';
+  // 打包态由 main.rs 传 PORT=47900(冷门端口,避开常见 dev 端口冲突);dev 模式走 next dev -p 3000(忽略 PORT)
+  const port = process.env.PORT ?? '47900';
 
   // 文件日志:.app GUI 启动会 detach、stdout 丢失 → 把关键信息 + web 服务输出写进数据目录,便于诊断。
   mkdirSync(paths.logs, { recursive: true });

@@ -11,7 +11,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::net::{SocketAddr, TcpStream};
+use std::net::{TcpStream, ToSocketAddrs};
 use std::process::{Child, Command};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -21,9 +21,17 @@ use tauri::Manager;
 /// 持有 node sidecar 子进程句柄,供退出时停止。
 struct Sidecar(Mutex<Option<Child>>);
 
-const WEB_ADDR: &str = "127.0.0.1:3000";
+// 端口:dev 跟 `next dev -p 3000` 一致;打包用冷门端口 47900,避开常见 dev 端口(3000/5173/8080…)冲突。
+const WEB_HOST: &str = "localhost";
+#[cfg(debug_assertions)]
+const WEB_PORT: u16 = 3000;
+#[cfg(not(debug_assertions))]
+const WEB_PORT: u16 = 47900;
 // 用 &'static str 常量(而非 format!),兼容 eval 的 &str / Into<String> 两种签名
+#[cfg(debug_assertions)]
 const REDIRECT_JS: &str = "window.location.replace('http://localhost:3000')";
+#[cfg(not(debug_assertions))]
+const REDIRECT_JS: &str = "window.location.replace('http://localhost:47900')";
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// dev:仓库根 = 编译期 manifest 目录(.../apps/desktop/src-tauri)上溯三级。
@@ -79,7 +87,8 @@ fn spawn_sidecar(app: &tauri::AppHandle) -> std::io::Result<Child> {
             .env("SS_DESKTOP_WEB_MODE", "standalone")
             .env("SS_DESKTOP_STANDALONE_DIR", res.join("web"))
             .env("SS_DESKTOP_MIGRATIONS_DIR", res.join("db/migrations"))
-            .env("SS_DESKTOP_SEED_JS", res.join("db/seed.mjs"));
+            .env("SS_DESKTOP_SEED_JS", res.join("db/seed.mjs"))
+            .env("PORT", WEB_PORT.to_string()); // 打包态 web 端口(与 REDIRECT_JS / 健康检查一致)
         set_process_group(&mut cmd);
         cmd.spawn()
     }
@@ -87,11 +96,16 @@ fn spawn_sidecar(app: &tauri::AppHandle) -> std::io::Result<Child> {
 
 /// 轮询 web 端口直到可连(就绪)或超时。
 fn wait_web_ready(timeout: Duration) -> bool {
-    let addr: SocketAddr = WEB_ADDR.parse().expect("valid addr");
     let start = Instant::now();
     while start.elapsed() < timeout {
-        if TcpStream::connect_timeout(&addr, Duration::from_millis(800)).is_ok() {
-            return true;
+        // 解析 localhost(可能是 127.0.0.1 和/或 ::1)→ 逐个试连,任一通即就绪。
+        // (server 绑 HOSTNAME=localhost;硬编码 127.0.0.1 在只解析到 ::1 的机器上会误判超时)
+        if let Ok(addrs) = (WEB_HOST, WEB_PORT).to_socket_addrs() {
+            for addr in addrs {
+                if TcpStream::connect_timeout(&addr, Duration::from_millis(800)).is_ok() {
+                    return true;
+                }
+            }
         }
         std::thread::sleep(Duration::from_millis(600));
     }
