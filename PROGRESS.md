@@ -5,6 +5,34 @@
 
 ---
 
+## 2026-06-09(周二,mac-mini · 桌面包本地构建 + 首次真打修 3 处阻断:登录 cookie / 文本流式 / 拆解分块)— 承同日 mac-studio Phase 2,在 mac-mini 真跑桌面程序并修真打暴露的问题
+
+**桌面 .app 在 mac-mini 本地构建 + 真启动通过(内嵌 pg + 登录 HTTP 200);真打灵感/拆解暴露并修复 3 处阻断 —— ① WKWebView 丢 Secure cookie 登不进 ② 非流式中转大输出撞 headersTimeout ③ 拆解大块撞 maxTokens 截断丢数据。本地提交 2 commit,收工 push。**
+
+### 〇、本地构建桌面包(studio 的 .dmg 不便拷)
+mac-mini 原无 Rust → rustup 装 stable 1.96 + tauri-cli 2.11.2。按 CI recipe 本地全量构建(`pnpm install` → `SS_DESKTOP_BUILD=1` web build → `desktop-pack` → `tauri build`),出 `.app`(**本地构建无 quarantine,免 xattr 直接开**)+ `.dmg`(238M)。真启动:内嵌 pg initdb+migrate+全量 seed(~9s)→ web :47900 Ready 168ms → 登录 HTTP 200 + ss_session JWT 全通、进程内 worker 注册,desktop.log 零报错。
+
+### 一、真打阻断 #1 — 登录登不进(cookie Secure · commit 9435af9)
+GUI 输密码登不进、curl 却 200。根因:`apps/web/app/api/auth/login/route.ts` 用 `NODE_ENV==='production'` 决定 cookie `Secure`,桌面态虽 production 却走 `http://localhost`(loopback)→ **WKWebView 丢弃 HTTP 下的 Secure session cookie**(curl 对 localhost 宽容,验不出 → studio 当时也只 curl 验、没碰到)。**WKWebView cookie 库实证**(`~/Library/HTTPStorages/com.starsalign.studio.binarycookies`):改前只有非 Secure 的 NEXT_LOCALE、改后 ss_session 存住。修:桌面 bootstrap 注入 `SS_DESKTOP_INSECURE_COOKIE=1`,登录路由据此关 Secure(loopback 无 MITM);**web 部署不设此旗标、行为不变**。
+
+### 二、真打阻断 #2 — 文本生成撞超时(改流式 · commit 9435af9)
+灵感/拆解"没反应、moyu 后台无调用"。逐层排查:连接 + POP 健康(8 IP 全可连、curl POST chat 2s 401),根因是 `packages/adapters/provider/openai-compat.ts` **非流式**调用 → moyu 等整段生成完才返响应头,慢模型大输出(sonnet ~40 tok/s,拆解多集 >12k tokens)生成 >300s 撞 undici `headersTimeout`(灵感/拆解/分镜全受影响)。修:`stream:true` + `stream_options.include_usage` + 解析 SSE 还原 resp 形状(**下游零改动**,兜底中转站忽略 stream)。实测真实 moyu:**响应头 3s 到达**(不再 300s)、usage 正常回、SSE 解析正确。typecheck 干净 + adapters 测试 31/31。
+
+### 三、真打阻断 #3 — 拆解截断丢数据 + 进度不可见(分块 4→2 · commit 98e8838)
+流式治超时后,拆解暴露更深问题:4 集块富设定输出 >16000 撞引擎 `breakdownFullSettings` 的 maxTokens → `finish_reason=length` JSON 截断 → **整块设定静默丢失**(就是"LLM 未返回 JSON"警告,只拼出没截断块的 18 人物);且 ~12 集恰好 3 块 = 并发 3,三块同时结束 → 进度一直 `0/3` 跳完看不见。修:前端 `CHUNK_SIZE 4→2`(每块 ~8000 稳在 16000 内不截断;~6 块分 2 波 → 进度 `0/6→3/6→6/6` 可见;单块更快)。代价:主角跨更多块重复生成、成本温和升(**用户确认优先不丢数据 + 体验**)。
+
+**问题/待决策**
+- ❓ 分块 4→2 的最终真打效果(进度可见 + 不截断)**用户收工时未回报确认** —— 下次开 mac-mini 跑一遍核对。
+- ❓ 拆解链路更深优化(留作以后,用户拍板):① **重复生成**(主角每出场块重生成全套 → 切小块放大浪费;根治要"传已识别人物名给后续块、只补新人",但块间串行)② **真·流式进度**(token 边生成边推 UI,需 tRPC→SSE 架构,工程量大)③ **换更快模型**(sonnet via moyu ~40 tok/s 是慢的根,`/admin/bindings` 零代码可换)。
+- ❓ 次要:osascript `quit` 不触发 main.rs 整组 SIGTERM → sidecar(pg+web)orphan;清理用 `pkill -TERM -f desktop-server.mjs`。Cmd+Q / 关窗应正常,Apple Events quit 的退出钩子覆盖待确认。
+
+**下次接着做**
+- 📌 mac-mini 重测拆解,确认 4→2 的进度可见 + 不截断;按需推进上面 3 个深度优化。
+- 📌 其它设备(studio/win-laptop)开工 `git pull` 即可拿到本日 3 修复 —— **本会话无结构性 DB 数据变更**(无新 prompt/binding/风格),不需 db:sync 补数据。
+- 📌 win-laptop 下载 CI artifact 真装真跑(承 studio 遗留项)。
+
+---
+
 ## 2026-06-09(周二,mac-studio · Phase 2 桌面打包 Step C/D/E — 出可用 Mac .app/.dmg + 双平台 CI · 通宵自主)— 承同日 Phase 1,把后端去 infra 真正打成自包含桌面程序
 
 **Mac 桌面程序 = 完全可用成品(.app 启动 → 内嵌 pg 引导 + standalone 服务 + 登录鉴权全通,实测 admin HTTP 200 + JWT)· .dmg 已出 · Windows 走 CI · 装 Rust 工具链**
