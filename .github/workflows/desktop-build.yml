@@ -21,6 +21,11 @@ jobs:
             target: x86_64-pc-windows-msvc
             artifact: StarsAlign-Studio-Windows
     runs-on: ${{ matrix.os }}
+    env:
+      # CI 全新 checkout 无 packages/db/.env(gitignored)→ prisma generate / web build 需 DATABASE_URL
+      # 可解析(构建期不真连库,页面均 dynamic / SSG 仅 locale)。给占位串满足 Prisma 配置 + schema 解析。
+      DATABASE_URL: postgresql://build:build@localhost:5432/build?schema=public
+      NEXT_TELEMETRY_DISABLED: '1'
     steps:
       - uses: actions/checkout@v4
 

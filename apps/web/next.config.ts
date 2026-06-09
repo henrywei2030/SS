@@ -16,6 +16,10 @@ const nextConfig: NextConfig = {
   ],
   experimental: {
     serverActions: { bodySizeLimit: '10mb' },
+    // 桌面打包:Next 服务端 minify 会 mangle 生成的 Prisma client 元数据 → standalone 里查询
+    // 构建器报 `Invalid prisma.X.findFirst() invocation`(空 detail)。关掉服务端压缩 → 生成的
+    // client 完整,查询正常(server bundle 略大,桌面可接受)。
+    serverMinification: false,
     // r8 性能优化:tree-shake 大型 icon / utility 库
     // lucide-react 默认全量打包 ~600KB,优化后只引导入的 icon ~5KB/个
     // 实测首屏 JS bundle 减 250-400KB

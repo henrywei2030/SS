@@ -123,6 +123,27 @@ if (existsSync(pub)) cpSync(pub, join(webOut, 'apps/web/public'), { recursive: t
 //   standalone 变成 npm 式可解析 —— 一次解决全部,不动开发环境。
 const hoisted = hoistPnpmFlat(webOut);
 log(`  ✓ hoist .pnpm → node_modules 顶层(扁平化 ${hoisted} 个包,修 Next standalone + pnpm 解析)`);
+
+// serverExternalPackages 里 Next 经 subpath import 漏 trace 的包(@prisma/client 被生成的 client
+//   以 `@prisma/client/runtime/client` 子路径 import,Next 在 monorepo 下没 trace 进 standalone →
+//   运行时查询构建器全崩)。从仓库 .pnpm 直接定位真实包目录,补进 standalone 顶层(pg 已被 trace)。
+const repoPnpm = join(root, 'node_modules/.pnpm');
+const findRepoPkg = (scopePkg) => {
+  const prefix = scopePkg.replace('/', '+') + '@';
+  const entry = readdirSync(repoPnpm).find((d) => d.startsWith(prefix));
+  return entry ? join(repoPnpm, entry, 'node_modules', scopePkg) : null;
+};
+for (const pkg of ['@prisma/client', '@prisma/adapter-pg']) {
+  const dest = join(webOut, 'node_modules', pkg);
+  if (existsSync(dest)) continue;
+  const src = findRepoPkg(pkg);
+  if (src && existsSync(src)) {
+    cpSync(src, dest, { recursive: true, dereference: true });
+    log(`  ✓ 补 ${pkg} → standalone(修 Next serverExternalPackages 漏 trace)`);
+  } else {
+    log(`  ⚠ 仓库 .pnpm 未找到 ${pkg}`);
+  }
+}
 log('  ✓ standalone + static + public');
 
 // ---- 3. Runtime(bootstrap 脚本 + 平铺 node_modules:embedded-pg + pg)----
