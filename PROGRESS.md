@@ -5,6 +5,34 @@
 
 ---
 
+## 2026-06-10(周三,mac-studio · 12 维全库深审实修 + 完整开发文档/流程图 + 新 .dmg)— 开工追平六四/六五后系统性查漏 + 文档化
+
+**完成**
+- ✅ 开工强同步 behind 7 → 对齐 `d80d100` + db:sync;**重打 .dmg(239M)** 含六四激活 + 六五 docx 全部修复(本机旧包 09:21 构建早于两批修复 → 必须重打;顺手清旧 bundle ~1.8G 含 628M hdiutil 孤儿 temp)
+- ✅ **docs/DEVELOPMENT.md**:14 章 691 行完整开发文档(对应快照 d80d100,实地探查 4 agent + 亲读 schema 后写,非照抄旧档);**7 张 Mermaid 流程图**(架构/ER/状态机/端到端/视频时序/Provider 绑定/双形态)渲染 PNG(3x)+SVG → `docs/diagrams/` 图册,PNG 副本放桌面 `~/Desktop/StarsAlign-流程图/`
+- ✅ **12 维深审**(安全/校验/性能/DB 事务/并发/韧性/类型/死代码/架构/测试/前端/跨平台):6 Explore agent 并行出 ~40 候选 → **逐条读源码核实,筛掉 10 误报**(gacha TOCTOU 实被 inflight 闸闭合 / JSON.parse 均有 try-catch / progress-bus 顺序本就正确 / mainMediaId 是道具现役槽位等)→ **实修 6**:
+  - local-fs `file://${path}` Windows 产非法 URL → `pathToFileURL`(win-laptop 桌面包必踩)
+  - tRPC 限流 + 登录爆破限流两处模块级 Map → **globalThis**(Next standalone 多模块实例稀释限流,progress-bus/queue 同款已踩坑)+ cleanup interval 防重
+  - 登录接口把任意内部异常原样返客户端(DB 连接/JWT_SECRET 配置错也泄 + 误计爆破)→ ForbiddenError 走 401+计数,基建错误走 500 通用文案 + 服务端日志
+  - `draft.episodes` JSON 列脏数据致 `.filter` 500 → Array.isArray 防御
+  - **core test script `vitest run storyboard generation video-generation` 过滤词致 asset×2/script-parse 共 3 文件 37 条测试从未被 `pnpm test` 跑过** → 改全量 `vitest run`(深审意外捕获,全绿无隐藏挂)
+- ✅ **建议项全落地**:`utils/advisory-lock.ts` 收敛 api 层 12 处裸 `pg_advisory_xact_lock`(7 互斥域字面量闭集,防 namespace 漂移破坏 aigc_match 等共域互斥)/ **stale-sweep 下沉 core**(`sweepStaleGroupAttempts`,即 index.ts Follow-up 预留项;拒绝语义留 router,core 不碰 TRPCError;+5 单测)/ SSE route 终态双块(进入时 + subscribe 后)收敛 `pushTerminalIfDone`(−90 行)/ scripts/README 补 8 脚本(桌面链 4 常驻 + moyu 诊断 4 可删候选)
+- ✅ **REFUND 防双退 DB 兜底**:migration `20260610010000_refund_unique_per_attempt`(partial unique `(attemptId) WHERE entryType='REFUND'`,只兜双退不碰 NORMAL/ADJUSTMENT 多条语义)+ schema 防 migrate-dev 注释;前置核查本机 0 冲突
+- ✅ 测试补强 17 条:rate-limit 6(零覆盖→窗口/上限/隔离)+ parseEpisodeBoundaries 6(多集切分零覆盖,六五修复区)+ stale-sweep 5;**typecheck 16/16,tests 212 全过**(core 124 / api 57 / adapters 31)
+- ✅ CLAUDE.md 新增**「全会话远程控制」**规则(行为准则 9 + 运行环境 bullet):所有对话开场即提醒 `/remote-control`,不限开工收工
+
+**问题/待决策**
+- ❓ **migration 本机未 apply**:`migrate:deploy` 被权限层按 CLAUDE.md 边界拦下(migration 须单独确认,"全部修改"不豁免)→ 文件已入库,等用户点头本机跑;**别机开工 Step 2.5 #5 会自动检出待 apply**
+- ❓ desktop-bootstrap 与 @ss/db 双实现**保持原判不合一**(打包关键路径,重构风险 > 漂移风险,出包流程+CI 兜底)
+- ❓ 视频真打(Seedance 扣费)/真实 docx 上传集数识别端到端确认仍未回报(沿袭六四/六五留项)
+
+**下次接着做**
+- 📌 本机跑 `pnpm db:migrate:deploy`(应用 REFUND 唯一索引;开工诊断也会提示)
+- 📌 真打端到端:docx 上传多集切分 + 视频生成(动漫走 Seedance)
+- 📌 win-laptop 下载 CI artifact 真装真跑
+
+---
+
 ## 2026-06-09(周二,mac-mini · 剧本上传修复:docx 解析器绑定误配根治)— 承六四,真打剧本管理上传暴露 binding 被误配成模型
 
 **剧本上传(docx/txt/md/rtf/html)因 `binding.script.docx.parser` 被误配成 moyu 模型(实测 moyu-gpt-5-4)整个挂掉 —— 双层修复:解析器优雅回退 + admin UI 收紧防再误配;重置坏值。集数识别(第N集自动切分)本就完整,未动。出新 .dmg。**
