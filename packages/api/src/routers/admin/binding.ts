@@ -39,6 +39,11 @@ export interface BindingItem {
   }>;
 }
 
+// docx.parser binding 是「解析库选择」(非 provider)→ 只允许已实现的 parser,防被误配成模型 ID
+//   (script-extract.ts 实际只实现 mammoth;将来加 docx2md 等,这里与那边 switch 同步)。
+const IMPLEMENTED_DOCX_PARSERS = ['mammoth'];
+const isDocxParserKey = (key: string): boolean => key.includes('docx.parser');
+
 /** 从 binding key 推断业务期望的 ProviderKind */
 function bindingKindOf(key: string): BindingItem['kind'] {
   if (key.includes('docx.parser')) return 'OTHER'; // 非 LLM
@@ -66,22 +71,16 @@ const bindingRouter = router({
 
     return settings.map((s): BindingItem => {
       const kind = bindingKindOf(s.key);
-      // OTHER 类（如 docx.parser）不限定 kind，全列；其它按 kind 过滤
-      const options =
-        kind === 'OTHER'
-          ? providers
-          : providers.filter((p) => p.kind === kind);
-      return {
-        key: s.key,
-        value: s.value,
-        description: s.description,
-        kind,
-        options: options.map((p) => ({
-          providerId: p.providerId,
-          displayName: p.displayName,
-          isActive: p.isActive,
-        })),
-      };
+      // docx.parser 是「解析库选择」非 provider → 只列已实现 parser(防误配成模型 ID);
+      //   其它 OTHER 全列;LLM 类按 kind 过滤。
+      const options = isDocxParserKey(s.key)
+        ? IMPLEMENTED_DOCX_PARSERS.map((p) => ({ providerId: p, displayName: p, isActive: true }))
+        : (kind === 'OTHER' ? providers : providers.filter((p) => p.kind === kind)).map((p) => ({
+            providerId: p.providerId,
+            displayName: p.displayName,
+            isActive: p.isActive,
+          }));
+      return { key: s.key, value: s.value, description: s.description, kind, options };
     });
   }),
 
@@ -99,10 +98,17 @@ const bindingRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: '绑定 key 不存在' });
       }
 
-      // 校验 value 必须是某个真实 provider（OTHER 类不校验，如 docx.parser=mammoth）
-      // W1-W7 audit:provider 必须 isActive=true,防绑到已禁用 provider 让业务侧 silent fail
+      // docx.parser:解析库选择,值必须是已实现 parser(防误配成模型 ID 致剧本上传挂)。
+      // 其它非 OTHER(LLM 类):value 必须是真实 + isActive 的 provider(W1-W7 audit)。
       const kind = bindingKindOf(input.key);
-      if (kind !== 'OTHER') {
+      if (isDocxParserKey(input.key)) {
+        if (!IMPLEMENTED_DOCX_PARSERS.includes(input.value)) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `docx parser "${input.value}" 未接入,当前只支持:${IMPLEMENTED_DOCX_PARSERS.join(' / ')}`,
+          });
+        }
+      } else if (kind !== 'OTHER') {
         const provider = await ctx.prisma.providerConfig.findFirst({
           where: { providerId: input.value, kind: kind },
         });

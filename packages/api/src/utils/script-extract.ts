@@ -38,9 +38,10 @@ export const ACCEPTED_FILE_EXTS = Object.keys(SUPPORTED_EXTS)
  * 调用方传 filename（用于扩展名识别）+ buffer。
  * 失败时抛 Error，message 适合直接展示给前端。
  *
- * W1-W5 audit P1 followup(P1-5):docxParser 接通 binding.script.docx.parser
- *   当前只支持 'mammoth';传其它值会抛 NOT_IMPLEMENTED,提醒接入新 parser 时这里 switch。
- *   不接通时 binding 为死配置 — admin 改了不生效。
+ * docxParser 接通 binding.script.docx.parser。当前只实现 'mammoth';binding 值异常
+ *   (空 / 模型 ID / 未接入的 parser)一律**回退 mammoth + warn,绝不阻断上传**
+ *   —— 历史上 binding 被误配成模型 ID(moyu-*)导致整个剧本上传挂掉。
+ *   新增 parser(如 docx2md)时在下面 docx case 接入并放宽判断。
  */
 export async function extractScriptText(
   buffer: Buffer,
@@ -58,10 +59,12 @@ export async function extractScriptText(
   let text: string;
   switch (format) {
     case 'docx': {
-      const docxParser = opts?.docxParser ?? 'mammoth';
-      if (docxParser !== 'mammoth') {
-        throw new Error(
-          `docx parser "${docxParser}" 暂未接入(SystemSetting binding.script.docx.parser),当前只支持 mammoth`,
+      // 当前只实现 mammoth。binding 值异常(空 / 模型 ID / 未接入 parser)一律回退 mammoth +
+      //   warn,绝不阻断上传(根因:binding.script.docx.parser 曾被误配成模型 moyu-* → 整个上传挂)。
+      const docxParser = (opts?.docxParser ?? '').toLowerCase().trim();
+      if (docxParser && docxParser !== 'mammoth') {
+        console.warn(
+          `[script-extract] binding.script.docx.parser="${docxParser}" 未接入,回退 mammoth(当前仅实现 mammoth)`,
         );
       }
       const result = await mammoth.extractRawText({ buffer });
