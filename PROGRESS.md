@@ -5,6 +5,40 @@
 
 ---
 
+## 2026-06-09(周二,mac-studio · Phase 2 桌面打包 Step C/D/E — 出可用 Mac .app/.dmg + 双平台 CI · 通宵自主)— 承同日 Phase 1,把后端去 infra 真正打成自包含桌面程序
+
+**Mac 桌面程序 = 完全可用成品(.app 启动 → 内嵌 pg 引导 + standalone 服务 + 登录鉴权全通,实测 admin HTTP 200 + JWT)· .dmg 已出 · Windows 走 CI · 装 Rust 工具链**
+
+### 〇、/remote-control(用户加)
+开工 Step 0.5 + 收工 Step 10 加 `/remote-control`(UI 命令,提醒用户运行,开启远程监控本会话;Claude 无法代跑)。
+
+### 一、Step C:Tauri sidecar 壳
+装 Rust(rustup,本机原无)。`main.rs` 重写为 sidecar 宿主:拉起 node 跑 `desktop-server.mjs` → TCP 轮询 :3000 健康 → splash 跳转本地 web → 退出整组 SIGTERM 优雅停 web+pg;dev/打包双模(`cfg!(debug_assertions)`),去 devUrl 防 tauri dev 死等;品牌 SVG 生成全平台图标;cargo check 过。
+
+### 二、Step D:自包含打包(`scripts/desktop-bootstrap.mjs` / `desktop-pack.mjs` / `build-desktop-resources.mjs`)
+- **内嵌 pg + 首跑引导**:`embedded-postgres@16.11.0-beta.15`(匹配 docker pg16,坑:主包/二进制包 beta 版号不同步,选五包齐全的 16.11)。app 数据目录(各平台标准位)/ 持久化密钥(APP_MASTER_KEY 永不换)/ initdb / 建库(自查存在性避 createDatabase 抛错路径悬空连接致 57P01)/ 装配桌面档 env(embedded URL + 4 驱动开关 + local-fs)。
+- **打包态无工具链**:自写 SQL migration runner(读 migration.sql,prisma 兼容记账)+ esbuild 把 seed.ts 打成自包含 bundle。首跑全量 / 后续增量,均验幂等。
+- **总装**:Next standalone 自包含(static/public 补拷 + .pnpm 扁平化 hoist 修 styled-jsx/@swc/helpers + 补 @prisma/client·adapter-pg[Next 漏 trace])+ runtime 平铺 node_modules(embedded-pg dylib 绝对符号链接 → flatten 成真文件,否则断链 initdb 崩)+ node 二进制 externalBin。
+- **★登录/Prisma 根治**:打包态 prisma 查询报空 detail `Invalid invocation` = **Next/SWC 编译生成的 Prisma client 搞坏查询构建器**(esbuild 编译的同款 client 正常)。修:`SS_DESKTOP_BUILD` 开关桌面构建时 @ss/db 移出 transpile、进 serverExternalPackages;desktop-pack 用 esbuild 预编译 @ss/db(含生成 client)→ standalone node_modules。**默认档(dev/docker)不开此开关,行为零变化。**
+- standalone host 默认 localhost(修 next-intl rewrite 的 IPv4/IPv6 自代理 ECONNREFUSED)。
+
+### 三、Step E:本机出包 + 真启动验证
+`tauri build` → `StarsAlign Studio.app`(576MB)+ `.dmg`(300MB,hdiutil 造,可挂载)。**踩大坑**:.app 登录反复「失败」,实为一个残留在 :3000 的旧服务器(修复前版本)一直答我的 curl —— 清掉残留后,当前 .app 全新启动 **登录 HTTP 200 + ss_session JWT + user(isAdmin)**、desktop.log `Ready 172ms` 无报错。加文件日志(数据目录 logs/desktop.log)解决 .app GUI 启动 detach、stdout 丢失。
+
+### 四、Step F:CI(`.github/workflows/desktop-build.yml`)
+macOS(aarch64)+ Windows(x64)双 runner 云端出**未签名**安装包(Tauri 不能交叉编译,Win 包只能 CI/Win 机出)。修 prisma generate 缺 DATABASE_URL(全新 checkout 无 packages/db/.env)+ Build web 设 SS_DESKTOP_BUILD=1。Cargo.lock 入库(可复现)。**CI 跑通待确认**。
+
+**问题/待决策**
+- ❓ Windows CI 首跑是否过(embedded-pg win 二进制 / WiX·NSIS / 路径)未确认 —— 见下次。
+- ❓ 签名/公证:Mac 需 Apple Developer($99/yr)、Win 需代码签名证书 —— 行政事项,当前出未签名包(右键绕过 Gatekeeper/SmartScreen)。
+
+**下次接着做**
+- 📌 确认 Windows CI 出包(失败则按 runner 日志修);下载 CI artifact 在 Win 机真装真跑。
+- 📌 Mac .dmg 美化(Finder 布局,需 GUI 会话)/ 自动更新流水线(新版启动自动 migrate+db:sync)。
+- 📌 桌面程序更深真打:Mock 视频生成端到端跑进程内队列 + SSE。
+
+---
+
 ## 2026-06-09(周二,mac-studio · 打开系统 + 桌面化规划/决策 + Phase 1 后端去 infra + 集成验证)— 启动桌面程序化,Phase 1 全程驱动开关、现系统零干扰
 
 **typecheck 16/16 + test(adapters 31 / core 82 / api 51)全过 · Phase 1 集成验证通过(脱 redis/minio 跑通)· 决策见 ADR-35**

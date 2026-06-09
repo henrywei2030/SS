@@ -199,15 +199,19 @@ rmSync(tmpPrefix, { recursive: true, force: true });
 mkdirSync(tmpPrefix, { recursive: true });
 writeFileSync(join(tmpPrefix, 'package.json'), JSON.stringify({ name: 'ss-desktop-runtime', private: true }));
 // npm(随 node 自带)默认装 optional 平台包 + 跑 postinstall(pg 二进制 hydrate),比 pnpm 省心
-sh('npm', [
-  'install',
-  '--no-audit',
-  '--no-fund',
-  '--prefix',
-  tmpPrefix,
-  `embedded-postgres@${EMBEDDED_PG_VER}`,
-  `pg@${PG_VER}`,
-]);
+sh(
+  'npm',
+  [
+    'install',
+    '--no-audit',
+    '--no-fund',
+    '--prefix',
+    tmpPrefix,
+    `embedded-postgres@${EMBEDDED_PG_VER}`,
+    `pg@${PG_VER}`,
+  ],
+  { shell: process.platform === 'win32' }, // Windows 上 npm 是 npm.cmd,execFileSync 需 shell
+);
 // 先在 tmpPrefix(符号链接目标仍存在)就地扁平化,再普通拷贝 → runtimeOut 全是真文件。
 flattenSymlinks(join(tmpPrefix, 'node_modules'));
 cpSync(join(tmpPrefix, 'node_modules'), join(runtimeOut, 'node_modules'), { recursive: true });
@@ -218,7 +222,9 @@ log('  ✓ runtime(node_modules + bootstrap 脚本)');
 
 // ---- 4. Node 二进制(tauri externalBin,名字带 target triple)----
 log('④ Node 二进制(externalBin)');
-const triple = execFileSync('rustc', ['-Vv']).toString().match(/host:\s*(\S+)/)[1];
+const triple = execFileSync('rustc', ['-Vv'], { shell: process.platform === 'win32' })
+  .toString()
+  .match(/host:\s*(\S+)/)[1];
 const binDir = join(desktop, 'src-tauri/binaries');
 mkdirSync(binDir, { recursive: true });
 const ext = process.platform === 'win32' ? '.exe' : '';
