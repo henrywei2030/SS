@@ -46,8 +46,11 @@ interface ReviewItem {
 
 const TYPE_LABEL: Record<string, string> = { CHARACTER: '人物', SCENE: '场景', PROP: '道具' };
 
-// 2026-06-08「按集分块」:每块集数 + 并发块数(块小而快,彻底绕开非流式中转 250-300s 超时)
-const CHUNK_SIZE = 4;
+// 2026-06-08「按集分块」:每块集数 + 并发块数。
+// 2026-06-09:超时已由 openai-compat 流式根治;块小的意义改为 ① 每块输出稳在引擎 maxTokens
+//   16000 内不截断(4 集块实测 >16000 撞 finish_reason=length → JSON 截断、整块设定丢失)
+//   ② 块数多于并发 → 进度 0/N→…→N/N 可见(原 4 集恰好 3 块 = 并发,三块同时结束看不到进度)。
+const CHUNK_SIZE = 2;
 const CONCURRENCY = 3; // moyu 中转项目验证过的安全并发(对齐 storyboard LLM_CONCURRENCY=3)
 
 function chunkArr<T>(arr: T[], size: number): T[][] {
