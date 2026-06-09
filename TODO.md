@@ -1,6 +1,6 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-06-09(**六四收工 · mac-mini AIGC 真打修复链(合规只卡伪真人剧 / 视频队列+进度 globalThis / 预览收窄)+ 首次激活门禁(共享密钥)+ 2 遍审查 · 详见 [PROGRESS](PROGRESS.md)**)
+> 最后更新:2026-06-09(**六五收工 · mac-mini 剧本上传修复(docx 解析器绑定误配根治:解析器优雅回退 mammoth + admin UI 收紧防误配)· 详见 [PROGRESS](PROGRESS.md)**)
 > 仓库:https://github.com/henrywei2030/SS
 > **🚀 一键启动**:`pnpm start`(详见 [README.md](README.md#快速启动) / [CLAUDE.md](CLAUDE.md#设备登记))
 > **📖 实战前必读**:[docs/W1-W7-followup.md](docs/W1-W7-followup.md)(P0 已完成,留 Phase 1.5/2/3 续做项)

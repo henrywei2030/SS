@@ -5,6 +5,33 @@
 
 ---
 
+## 2026-06-09(周二,mac-mini · 剧本上传修复:docx 解析器绑定误配根治)— 承六四,真打剧本管理上传暴露 binding 被误配成模型
+
+**剧本上传(docx/txt/md/rtf/html)因 `binding.script.docx.parser` 被误配成 moyu 模型(实测 moyu-gpt-5-4)整个挂掉 —— 双层修复:解析器优雅回退 + admin UI 收紧防再误配;重置坏值。集数识别(第N集自动切分)本就完整,未动。出新 .dmg。**
+
+### 根因(双层)
+- `script-extract.ts`:docx parser binding 非 'mammoth' 就**硬抛错** → 上传/预览全挂。
+- `admin/binding.ts`:docx.parser(OTHER 类)**列出所有 provider 不过滤 + set 不校验** → 被误选成 moyu 模型(本该只是解析库选择 mammoth)。
+
+### 修复
+- **script-extract.ts**:docx 永远用 mammoth(唯一实现),binding 值异常(空 / 模型 ID / 未接入)一律 warn + 回退,**绝不阻断上传**(覆盖 uploadFile / previewParseFile / uploadMultiEpisode 三入口)。
+- **admin/binding.ts**:docx.parser 只列已实现 parser(`IMPLEMENTED_DOCX_PARSERS=['mammoth']`)+ set 校验值 ∈ 该列表 → 根除误配。
+- **重置**:mac-mini 数据目录 `binding.script.docx.parser` moyu-gpt-5-4 → mammoth。
+- typecheck 干净 + api 51/51。出 `.dmg`(238M aarch64)。
+
+### 集数识别(未动,确认健全)
+`parseEpisodeBoundaries`(第N集 / Episode N / EP N + 场头 N-M)+ 前端 previewParseFile 预览 / uploadMultiEpisode 自动切 / uploadFile 单集手填 —— 上传不挂即正常区分集数。
+
+**问题/待决策**
+- ❓ 用户用真实 docx 验证上传 + 集数识别效果未回报(下次核对;若集号写法非「第N集」需调 `parseEpisodeBoundaries` 识别规则)。
+- ❓ 仅实现 mammoth 一个 docx 解析器;docx2md 等未接(IMPLEMENTED_DOCX_PARSERS 留扩展位,script-extract switch 同步)。
+
+**下次接着做**
+- 📌 真实 docx 上传 + 多集切分端到端确认。
+- 📌 其它设备 `git pull` 拿本修复。
+
+---
+
 ## 2026-06-09(周二,mac-mini · AIGC 真打修复链 + 首次激活功能 + 2 遍审查)— 承同日六三,真打 AIGC 暴露 3 层阻断逐一修通 + 加桌面激活门禁
 
 **真打 AIGC(灵感/拆解/视频生成)逐层修通:合规门禁、视频队列/进度的 Next standalone 模块单例、UI 预览;新增桌面「首次激活(共享密钥)」门禁(端到端 curl 验证全过);2 遍代码审查 + pg 启动重试。本批 ~11 文件,收工提交 push。**
