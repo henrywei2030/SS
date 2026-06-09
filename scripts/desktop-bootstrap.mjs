@@ -281,7 +281,21 @@ export async function bootstrapDesktop() {
     await pg.initialise();
   }
   console.log('[desktop] 启动内嵌 postgres...');
-  await pg.start();
+  // 启动退避重试(2026-06-09 审查):relaunch 时上一实例的 pg 可能还在释放 :54329(SIGTERM 后
+  //   短暂占端口)→ 直接 start 撞 EADDRINUSE → bootstrap 崩、app 卡在启动。退避重试等旧实例释放
+  //   (纯等待、不杀进程、零数据风险;若是持久 orphan 仍会失败 → 那归退出钩子加固,另议)。
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await pg.start();
+      break;
+    } catch (e) {
+      if (attempt >= 4) throw e;
+      console.warn(
+        `[desktop] 内嵌 pg 启动失败(第 ${attempt}/4 次),1.5s 后重试:${e instanceof Error ? e.message : e}`,
+      );
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  }
 
   // 建库(幂等)
   await ensureDatabase(secrets.SS_DESKTOP_PG_PASSWORD);
@@ -303,6 +317,8 @@ export async function bootstrapDesktop() {
     QUEUE_DRIVER: 'in-process',
     EVENT_BUS_DRIVER: 'in-process',
     AUTH_DRIVER: 'local',
+    // 桌面态总开关 —— 首次激活门禁(requireActivation)等据此判定;web/云端不设此旗标 → 行为不变。
+    SS_DESKTOP: '1',
     // 桌面 web 经 http://localhost(明文 loopback)提供 → 关 Secure cookie。否则 WKWebView 丢弃
     //   Secure 的 session cookie(NEXT_LOCALE 等非 Secure cookie 不受影响),登录 200 却存不住 → 登不进。
     SS_DESKTOP_INSECURE_COOKIE: '1',

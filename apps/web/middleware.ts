@@ -15,7 +15,8 @@ const intlMiddleware = createMiddleware({
 const SESSION_COOKIE = 'ss_session'; // 与 lib/auth/session.ts 保持一致
 
 // 不需要登录的路径（已去掉 locale 前缀后比较）
-const PUBLIC_PATHS = ['/login', '/signup'];
+// /activate:桌面首次激活页(未登录可达;实际"是否需激活"由 server 守卫 requireActivation 判定）
+const PUBLIC_PATHS = ['/login', '/signup', '/activate'];
 
 export function middleware(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;

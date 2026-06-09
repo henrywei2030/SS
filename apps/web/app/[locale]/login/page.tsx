@@ -4,6 +4,7 @@ import { getTranslations } from 'next-intl/server';
 import { LoginForm } from './login-form';
 import { LanguageSwitcher } from '@/components/lang-switcher';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { requireActivation } from '@/lib/auth/activation';
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations('auth.login');
@@ -11,10 +12,15 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function LoginPage({
+  params,
   searchParams,
 }: {
+  params: Promise<{ locale: string }>;
   searchParams: Promise<{ redirect?: string }>;
 }): Promise<React.ReactElement> {
+  const { locale } = await params;
+  // 桌面态未激活 → 跳 /activate(web/云端 SS_DESKTOP 未设 → 直接返回,无影响)
+  await requireActivation(locale);
   const sp = await searchParams;
   return (
     <div className="relative flex min-h-screen flex-col">

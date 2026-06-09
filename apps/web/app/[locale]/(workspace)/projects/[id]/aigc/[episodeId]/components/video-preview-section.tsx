@@ -410,7 +410,7 @@ export function VideoPreviewSection({
       <div>
         {selectedTake && selectedTake.videoUrl ? (
           <div
-            className={`relative overflow-hidden rounded-md border border-[hsl(var(--color-border))] bg-black ${
+            className={`relative mx-auto max-w-[18rem] overflow-hidden rounded-md border border-[hsl(var(--color-border))] bg-black ${
               ASPECT_CLASS[selectedTake.aspectRatio as AspectRatio] ??
               'aspect-[9/16]'
             }`}
@@ -440,7 +440,7 @@ export function VideoPreviewSection({
         ) : (
           // 2026-05-27 用户反馈:placeholder 区分 FAILED/RUNNING/empty 显具体原因
           <div
-            className={`flex flex-col items-center justify-center gap-2 rounded-md border border-dashed p-4 text-center text-xs ${
+            className={`mx-auto flex max-w-[18rem] flex-col items-center justify-center gap-2 rounded-md border border-dashed p-4 text-center text-xs ${
               ASPECT_CLASS[aspectRatio] ?? 'aspect-[9/16]'
             } ${
               selectedTake?.status === 'FAILED'

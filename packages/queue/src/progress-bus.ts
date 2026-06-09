@@ -100,25 +100,31 @@ class RedisProgressBus implements ProgressBus {
   }
 }
 
-let _instance: ProgressBus | null = null;
+// ⚠️ 存 globalThis,不能用模块级 let:in-process 档下 publish(processor)与 subscribe(SSE route)
+//   可能落在 Next standalone 的不同模块实例 → 两个不同 EventEmitter → 进度推不到前端(视频照常
+//   生成、只是没实时进度)。globalThis 同进程跨实例共享同一 bus;redis 档不受影响(redis 本就跨进程)。
+type GlobalWithProgressBus = typeof globalThis & {
+  __ss_progressBus?: ProgressBus | null;
+};
 
 export function getProgressBus(): ProgressBus {
-  if (_instance) return _instance;
+  const g = globalThis as GlobalWithProgressBus;
+  if (g.__ss_progressBus) return g.__ss_progressBus;
   const driver = (process.env.PROGRESS_BUS_DRIVER ?? 'redis').toLowerCase();
   switch (driver) {
     case 'redis':
-      _instance = new RedisProgressBus();
+      g.__ss_progressBus = new RedisProgressBus();
       break;
     case 'in-process':
-      _instance = new InProcessProgressBus();
+      g.__ss_progressBus = new InProcessProgressBus();
       break;
     default:
       throw new Error(`Unknown PROGRESS_BUS_DRIVER: ${driver}`);
   }
-  return _instance;
+  return g.__ss_progressBus;
 }
 
 /** 测试用:重置单例 */
 export function resetProgressBus(): void {
-  _instance = null;
+  (globalThis as GlobalWithProgressBus).__ss_progressBus = null;
 }

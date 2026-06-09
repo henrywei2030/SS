@@ -61,11 +61,17 @@ export async function addVideoGenJob(payload: VideoGenJobData): Promise<string> 
 // 注册进来(DI),避免 queue → core 依赖。Sub-step B 接上 registerInProcessVideoHandler。
 // ---------------------------------------------------------------------------
 type InProcessVideoHandler = (payload: VideoGenJobData) => Promise<void>;
-let inProcessHandler: InProcessVideoHandler | null = null;
+
+// ⚠️ 存 globalThis,不能用模块级 let:Next standalone 把 instrumentation(注册方)与 tRPC route
+//   (入队方)编进不同 bundle / 模块实例,模块级变量不共享 → 注册的 handler 在入队侧读不到、报
+//   "未注册"(dev 单模块图无此问题,故 dev 验证时没暴露)。globalThis 同进程跨实例共享。
+type GlobalWithVideoHandler = typeof globalThis & {
+  __ss_inProcessVideoHandler?: InProcessVideoHandler | null;
+};
 
 /** 桌面档:web 进程启动时注册进程内视频处理器(见 apps/web instrumentation)。 */
 export function registerInProcessVideoHandler(fn: InProcessVideoHandler): void {
-  inProcessHandler = fn;
+  (globalThis as GlobalWithVideoHandler).__ss_inProcessVideoHandler = fn;
 }
 
 /**
@@ -76,12 +82,12 @@ export async function enqueueVideoGenJob(payload: VideoGenJobData): Promise<stri
   const driver = (process.env.QUEUE_DRIVER ?? 'bullmq').toLowerCase();
   if (driver === 'in-process') {
     const parsed = VideoGenJobDataSchema.parse(payload);
-    if (!inProcessHandler) {
+    const handler = (globalThis as GlobalWithVideoHandler).__ss_inProcessVideoHandler;
+    if (!handler) {
       throw new Error(
         'QUEUE_DRIVER=in-process 但未注册进程内处理器(需 web instrumentation 调 registerInProcessVideoHandler)',
       );
     }
-    const handler = inProcessHandler;
     // fire-and-forget:不阻塞 enqueue;processor 内部已处理失败(标 FAILED + publish 'failed')
     void handler(parsed).catch((err) => {
       console.error(`[queue:in-process] video job ${parsed.attemptId} crashed:`, err);

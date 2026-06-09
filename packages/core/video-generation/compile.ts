@@ -42,6 +42,8 @@ export async function compileVideoPromptForGroup(
     assetName: string;
     complianceStatus: string;
   }[];
+  // 项目类型 —— router 据此只对 AI_REAL(伪真人剧)启用合规门禁(动漫/国漫等不做合规)
+  projectType: string | undefined;
 }> {
   // 1. 取项目风格
   const project = await tx.project.findUnique({
@@ -178,5 +180,5 @@ export async function compileVideoPromptForGroup(
     extraNegative: args.extraNegative,
   });
 
-  return { compiled, isRelayProvider, characterBindingsForCompliance };
+  return { compiled, isRelayProvider, characterBindingsForCompliance, projectType: project?.type };
 }

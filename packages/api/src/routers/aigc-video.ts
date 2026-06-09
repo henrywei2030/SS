@@ -296,7 +296,7 @@ export const videoProcedures = {
 
       // 三十六收工 R2:compile 整段(project + dbBindings + media + refs + compileShotGroupVideoPrompt)
       // 抽到 compileVideoPromptForGroup helper(132 行 → 1 调用),compliance check 保留 router 内(需要 failPlaceholder)
-      const { compiled, characterBindingsForCompliance } = await compileVideoPromptForGroup(
+      const { compiled, characterBindingsForCompliance, projectType } = await compileVideoPromptForGroup(
         ctx.prisma,
         {
           group: {
@@ -314,7 +314,10 @@ export const videoProcedures = {
       );
 
       // W1-W5 audit P1 followup(P1-5):合规守卫 — 引用了任何 CHARACTER 且 complianceStatus !== APPROVED 则拒
-      if (bindings.requireComplianceForVideo) {
+      // 2026-06-09:合规审查仅针对 AI_REAL(伪真人剧)。动漫/国漫/海报/自定义项目人物的
+      //   complianceStatus 恒为默认 NOT_REQUIRED,旧逻辑 !== APPROVED 把它们误拒(用户反馈)。
+      //   AI_REAL 仍保持严格(要求 APPROVED),不放松真人合规。
+      if (bindings.requireComplianceForVideo && projectType === 'AI_REAL') {
         const blockedChars = characterBindingsForCompliance.filter(
           (c) => c.complianceStatus !== 'APPROVED',
         );
