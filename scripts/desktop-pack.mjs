@@ -11,6 +11,7 @@
 // 前置:已 `pnpm --filter @ss/web build`(产 .next/standalone)。
 // =============================================================================
 import { execFileSync } from 'node:child_process';
+import { build as esbuildBuild } from 'esbuild';
 import {
   cpSync,
   mkdirSync,
@@ -144,6 +145,47 @@ for (const pkg of ['@prisma/client', '@prisma/adapter-pg']) {
     log(`  ⚠ 仓库 .pnpm 未找到 ${pkg}`);
   }
 }
+
+// 预编译 @ss/db(含生成的 Prisma client)→ JS,放进 standalone node_modules/@ss/db。
+//   配合 next.config 的 SS_DESKTOP_BUILD 把 @ss/db 外置 → 运行时 require 这份 esbuild 编译的 client
+//   (seed 已验证能跑),绕开 Next/SWC 编译生成的 Prisma client 导致的查询构建器损坏(findFirst 空 detail)。
+const dbPkgOut = join(webOut, 'node_modules/@ss/db');
+rmSync(dbPkgOut, { recursive: true, force: true });
+mkdirSync(dbPkgOut, { recursive: true });
+const dbBanner = {
+  js: "import { createRequire as __ssCr } from 'module'; const require = __ssCr(import.meta.url);",
+};
+for (const [entry, out] of [
+  ['index.ts', 'index.mjs'],
+  ['client.ts', 'client.mjs'],
+  ['enums.ts', 'enums.mjs'],
+]) {
+  await esbuildBuild({
+    entryPoints: [join(root, 'packages/db/src', entry)],
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'esm',
+    outfile: join(dbPkgOut, out),
+    external: ['pg-native', 'cloudflare:sockets'],
+    banner: dbBanner,
+    logLevel: 'warning',
+  });
+}
+writeFileSync(
+  join(dbPkgOut, 'package.json'),
+  JSON.stringify(
+    {
+      name: '@ss/db',
+      version: '0.1.0',
+      type: 'module',
+      exports: { '.': './index.mjs', './client': './client.mjs', './enums': './enums.mjs' },
+    },
+    null,
+    2,
+  ),
+);
+log('  ✓ 预编译 @ss/db(esbuild)→ standalone(绕开 Next 编译 Prisma client)');
 log('  ✓ standalone + static + public');
 
 // ---- 3. Runtime(bootstrap 脚本 + 平铺 node_modules:embedded-pg + pg)----

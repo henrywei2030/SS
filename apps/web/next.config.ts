@@ -4,22 +4,26 @@ import createNextIntlPlugin from 'next-intl/plugin';
 
 const withNextIntl = createNextIntlPlugin('./i18n.ts');
 
+// 桌面打包专用开关(desktop-pack / CI 设 SS_DESKTOP_BUILD=1):
+//   把 @ss/db 移出 transpilePackages、放进 serverExternalPackages —— 运行时 require 预编译好的
+//   @ss/db JS(由 desktop-pack 用 esbuild 编译后放进 standalone node_modules)。
+//   原因:Next/SWC 编译生成的 Prisma client 会搞坏查询构建器(打包态 findFirst 报空 detail
+//   Invalid invocation);而 esbuild 编译的同款 client(seed 已验证)正常。默认档(dev/docker)
+//   不开此开关 → @ss/db 仍走 transpile,行为完全不变。
+const isDesktopBuild = process.env.SS_DESKTOP_BUILD === '1';
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   transpilePackages: [
     '@ss/api',
     '@ss/core',
-    '@ss/db',
+    ...(isDesktopBuild ? [] : ['@ss/db']),
     '@ss/shared',
     '@ss/i18n',
     '@ss/adapters',
   ],
   experimental: {
     serverActions: { bodySizeLimit: '10mb' },
-    // 桌面打包:Next 服务端 minify 会 mangle 生成的 Prisma client 元数据 → standalone 里查询
-    // 构建器报 `Invalid prisma.X.findFirst() invocation`(空 detail)。关掉服务端压缩 → 生成的
-    // client 完整,查询正常(server bundle 略大,桌面可接受)。
-    serverMinification: false,
     // r8 性能优化:tree-shake 大型 icon / utility 库
     // lucide-react 默认全量打包 ~600KB,优化后只引导入的 icon ~5KB/个
     // 实测首屏 JS bundle 减 250-400KB
@@ -56,7 +60,15 @@ const nextConfig: NextConfig = {
    *   解析失败致 500。这些都是服务端 Node 包(含原生/动态 require),本就该外部化;
    *   对默认档同样正确(standalone build 会 trace 进产物 node_modules)。
    */
-  serverExternalPackages: ['pg', '@prisma/client', '@prisma/adapter-pg', 'bullmq', 'ioredis'],
+  serverExternalPackages: [
+    'pg',
+    '@prisma/client',
+    '@prisma/adapter-pg',
+    'bullmq',
+    'ioredis',
+    // 桌面构建:@ss/db 外置,运行时 require desktop-pack 用 esbuild 预编译的 JS(绕开 Next 编译 Prisma client)
+    ...(isDesktopBuild ? ['@ss/db'] : []),
+  ],
 
   /**
    * 第 13 轮 audit:基础 security headers

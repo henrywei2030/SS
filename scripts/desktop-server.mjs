@@ -14,17 +14,29 @@
 
 import { bootstrapDesktop } from './desktop-bootstrap.mjs';
 import { spawn } from 'node:child_process';
+import { openSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 async function main() {
-  const { env, stop } = await bootstrapDesktop();
+  const { env, stop, paths } = await bootstrapDesktop();
   console.log('[desktop] bootstrap 完成,启动 web 服务...');
 
   const mode = process.env.SS_DESKTOP_WEB_MODE ?? 'dev';
   const port = process.env.PORT ?? '3000';
+
+  // 文件日志:.app GUI 启动会 detach、stdout 丢失 → 把关键信息 + web 服务输出写进数据目录,便于诊断。
+  mkdirSync(paths.logs, { recursive: true });
+  const logPath = join(paths.logs, 'desktop.log');
+  const maskedUrl = (env.DATABASE_URL || '(未设)').replace(/:[^:@/]+@/, ':***@');
+  writeFileSync(
+    logPath,
+    `[desktop] ${new Date().toISOString?.() ?? ''} mode=${mode} port=${port}\n[desktop] DATABASE_URL=${maskedUrl}\n`,
+    { flag: 'a' },
+  );
+  const logFd = openSync(logPath, 'a');
 
   let webChild;
   if (mode === 'standalone') {
@@ -42,7 +54,7 @@ async function main() {
     webChild = spawn(process.execPath, ['server.js'], {
       cwd: serverDir,
       env: { ...env, PORT: port, HOSTNAME: host },
-      stdio: 'inherit',
+      stdio: ['ignore', logFd, logFd], // 输出写进 desktop.log(survive .app detach,便于诊断)
     });
   } else {
     webChild = spawn('pnpm', ['--filter', '@ss/web', 'dev'], {

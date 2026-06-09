@@ -59,9 +59,11 @@ jobs:
       - name: Prisma generate
         run: pnpm db:generate
 
-      - name: Build web (standalone)
+      - name: Build web (standalone, desktop mode)
         run: pnpm --filter @ss/web build
         env:
+          # SS_DESKTOP_BUILD=1:@ss/db 外置(运行时用 esbuild 预编译版,绕开 Next 编译 Prisma client)
+          SS_DESKTOP_BUILD: '1'
           # 构建期不连库(页面均 dynamic,SSG 仅 locale 参数);给占位串满足 schema 解析
           DATABASE_URL: postgresql://build:build@localhost:5432/build?schema=public
           NEXT_TELEMETRY_DISABLED: '1'
