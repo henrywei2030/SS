@@ -1,6 +1,6 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-06-09(**六三收工 · mac-mini 桌面包本地构建 + 首次真打修 3 处阻断:登录 cookie 去 Secure / 文本生成改流式 / 拆解分块 4→2 · 详见 [PROGRESS](PROGRESS.md)**)
+> 最后更新:2026-06-09(**六四收工 · mac-mini AIGC 真打修复链(合规只卡伪真人剧 / 视频队列+进度 globalThis / 预览收窄)+ 首次激活门禁(共享密钥)+ 2 遍审查 · 详见 [PROGRESS](PROGRESS.md)**)
 > 仓库:https://github.com/henrywei2030/SS
 > **🚀 一键启动**:`pnpm start`(详见 [README.md](README.md#快速启动) / [CLAUDE.md](CLAUDE.md#设备登记))
 > **📖 实战前必读**:[docs/W1-W7-followup.md](docs/W1-W7-followup.md)(P0 已完成,留 Phase 1.5/2/3 续做项)
@@ -176,6 +176,8 @@
 
 ## 💡 想法池（idea backlog，暂不排期）
 
+- **激活升级:签名授权码(2026-06-09 六四)** — 当前共享密钥(全机通用、无到期/吊销)。可升级 Ed25519 签名授权码:私钥离线出码(绑用户名/有效期)、app 内置公钥验签、每人/每机不同码;代码大部分复用,换校验逻辑 + 加出码脚本。
+- **公开仓库下激活加固(2026-06-09 六四)** — 仓库 public → 激活哈希在公开源码(密钥 ~50-55bit、格式已知,执着攻击者约 1 天可破)。选项:换更长密钥 / 构建期 env 注入哈希(不入源码)/ 私有化仓库。密钥可随时轮换。
 - **拆解链路深度优化(2026-06-09 mac-mini 真打后记,见 [PROGRESS](PROGRESS.md))** — ① 去重复生成(传已识别人物名给后续块、只补新人,省钱但块间串行)② 真·流式进度(token 边生成边推 UI,需 tRPC→SSE)③ 拆解绑更快模型(sonnet via moyu ~40 tok/s 是慢根,/admin/bindings 零代码换)
 - **桌面退出钩子加固** — osascript/Apple Events `quit` 不触发 main.rs 整组 SIGTERM → sidecar(pg+web)orphan;确认 Cmd+Q/关窗是否覆盖,否则补退出清理
 - **代码健康渐进优化(见 [ADR-31](docs/05-tech-decisions.md))** — 3 agent 审计结论:不是屎山,骨架优秀、局部有债。**已落地**:P0-1 fileToBase64 统一+修 bug(`3a001f0`)/ P1 pricing.ts 计费公式集中+12 测锁口径(`031314d`)/ P1 sanitizeErrorMsg 12 测锁脱敏(`c129192`)。**待续**:① P2 拆 god 文件(asset.ts 2636 等先抽 `*-shared` 再逐组移 procedure,每组 typecheck+test+计数校验)② P3 抽 `runGenerationAttempt`/`writeLedgerEntry` 收 13 处样板 + worker refund 改调已测 core ③ 删死 EventBus(0 订阅) ④ `resolveMediaFetchUrl` 收 media→URL ×3 ⑤ top-bar 导出器/批量池下沉。**原则**:逐块独立改动 + 验证,不在 live app 单次重排巨石

@@ -5,6 +5,41 @@
 
 ---
 
+## 2026-06-09(周二,mac-mini · AIGC 真打修复链 + 首次激活功能 + 2 遍审查)— 承同日六三,真打 AIGC 暴露 3 层阻断逐一修通 + 加桌面激活门禁
+
+**真打 AIGC(灵感/拆解/视频生成)逐层修通:合规门禁、视频队列/进度的 Next standalone 模块单例、UI 预览;新增桌面「首次激活(共享密钥)」门禁(端到端 curl 验证全过);2 遍代码审查 + pg 启动重试。本批 ~11 文件,收工提交 push。**
+
+### 一、合规门禁只卡伪真人剧(动漫/国漫跳过)
+视频生成对动漫项目报"合规未通过(NOT_REQUIRED)"。根因:`aigc-video.ts` 门禁 `complianceStatus !== 'APPROVED'` 一刀切,把默认 `NOT_REQUIRED` 也拒。修:`compile.ts` 返 `projectType`,门禁加 `&& projectType === 'AI_REAL'` —— 仅伪真人剧需合规,ANIM_2D/3D/POSTER/CUSTOM 跳过;AI_REAL 仍严格要 APPROVED。
+
+### 二、视频队列 + 进度:Next standalone 模块单例陷阱(globalThis 根治)
+合规修通后视频生成报"QUEUE_DRIVER=in-process 但未注册进程内处理器"。根因:`inProcessHandler` 是**模块级 let**,Next standalone 把 instrumentation(注册方)与 tRPC route(入队方)编进**不同模块实例** → 注册在 A、入队读 B(null)。dev 单模块图无此问题(又一"dev 正常打包炸")。修:handler 存 **globalThis**。**同款隐患的 `progress-bus._instance` 一并修**(否则视频能生成、进度推不到 SSE)。
+
+### 三、视频预览收窄(治分镜组间隔过大)
+9:16 竖屏预览在 28rem 列里高 ~796px → 组间隔过大。`video-preview-section.tsx` 预览框 + placeholder 加 `mx-auto max-w-[18rem]`,竖屏 288×512 居中无黑边、各比例通吃,列宽不动。
+
+### 四、首次激活门禁(共享密钥 · 仅桌面态)
+新增:`lib/auth/activation.ts`(内置 `sha256(密钥)` 校验 + DB SystemSetting `desktop.activatedAt` 标记 + `requireActivation` 守卫)、`/api/activate`(POST 校验,CSRF 同 login)、`/activate` 页 + 表单(镜像 login)、`login/page.tsx` 加守卫、`middleware.ts` 白名单加 `/activate`、`desktop-bootstrap.mjs` 注入 `SS_DESKTOP=1`。**仅 SS_DESKTOP=1 启用,web/云端零影响**;各机独立 DB → 同一密钥每台激活一次。端到端 curl:未激活跳 /activate(307)→ 错码 401 → 对码 200 → 已激活放行 200 → 登录 200 → 重置标记复跳,**全过**。**密钥明文不入 git(单独给用户),源码只存哈希。**
+
+### 五、2 遍审查 + pg 启动重试
+- 第 1 遍 standalone 模块单例:全仓 6 个,2 临界(handler/progress-bus)已 globalThis 修,4 安全(eventbus 零订阅者=write-only;auth/crypto/storage 无状态懒加载)。
+- 第 2 遍视频链路:`enqueue→handler→processor→progress→SSE→UI` 健全,SSE 进入查 DB 终态 + listVideoTakes 5s 轮询双冗余,advisory 锁退款 embedded pg 有效。
+- 实修:`desktop-bootstrap.mjs` pg.start() 退避重试(relaunch 时旧 pg 释放 :54329 竞态,纯等待不杀进程)。
+- 出最终 `.dmg`(238M aarch64)含本日全部 + 激活。
+
+**问题/待决策**
+- ❓ 视频生成真打(真扣费 Seedance)用户最终是否成功未回报 —— 下次核对。
+- ❓ **⚠️ 仓库 public**:激活哈希进了公开源码(sha256 不可逆,但密钥 ~50-55bit + 格式已知 → 有 GPU 的执着攻击者约 1 天可破)。casual 门槛够;要强控制 → 私有仓库 / 构建期 env 注入哈希 / 升级签名授权码 / 换更长密钥(密钥可随时轮换,旧哈希泄露无碍)。
+- ❓ 动漫人物 L4/L5 就绪度徽章 cosmetic(`computeMaturity` 未传 projectType)—— 产品语义待定。
+- ❓ pg orphan 根治(main.rs 退出钩子覆盖 Apple Events quit)留想法池。
+
+**下次接着做**
+- 📌 真打视频生成确认 end-to-end(动漫走通 Seedance)。
+- 📌 其它设备 `git pull` 拿本日改动(含激活);装 .dmg 用密钥激活(密钥不在 git)。
+- 📌 按需:L4/L5 徽章 / 签名授权码升级 / 公开仓库下激活加固。
+
+---
+
 ## 2026-06-09(周二,mac-mini · 桌面包本地构建 + 首次真打修 3 处阻断:登录 cookie / 文本流式 / 拆解分块)— 承同日 mac-studio Phase 2,在 mac-mini 真跑桌面程序并修真打暴露的问题
 
 **桌面 .app 在 mac-mini 本地构建 + 真启动通过(内嵌 pg + 登录 HTTP 200);真打灵感/拆解暴露并修复 3 处阻断 —— ① WKWebView 丢 Secure cookie 登不进 ② 非流式中转大输出撞 headersTimeout ③ 拆解大块撞 maxTokens 截断丢数据。本地提交 2 commit,收工 push。**
