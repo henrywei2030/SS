@@ -1254,6 +1254,24 @@ ADR-29(剧本拆解)· ADR-30(图生图/参考音频/出场集)· 范本 `core/v
 
 ---
 
+## ADR-36 · 桌面打包实现(Step C/D/E):Tauri sidecar + esbuild 外置 @ss/db 根治 Prisma(2026-06-09)
+
+ADR-35 定方向,本 ADR 记 Phase 2 落地的关键实现决策与踩坑(详见 PROGRESS 2026-06-09 通宵条)。
+
+**结论**:Mac `.app`(576M)+ `.dmg`(300M)出包,实测内嵌 pg 引导 + 登录鉴权全通、自包含离线;Windows 走 CI。
+
+1. **内嵌 pg 版本对齐**:`embedded-postgres@16.11.0-beta.15`(匹配 docker pg16)。坑:主包与 `@embedded-postgres/<platform>` 二进制包 beta 版号不同步 → 选「主包 + 4 平台二进制都存在」的版本。
+2. **打包态无工具链**:打包后无 pnpm/prisma CLI/tsx。自写 SQL migration runner(读 `migration.sql` + prisma 兼容 `_prisma_migrations` 记账)+ esbuild 把 `seed.ts` 打成自包含 bundle;首跑全量 / 后续增量。
+3. **★esbuild 外置 @ss/db 根治 Prisma**:打包态 prisma 查询报空 detail `Invalid invocation` = **Next/SWC 编译生成的 Prisma client 会搞坏查询构建器**(同款 client 经 esbuild 编译则正常)。解:`SS_DESKTOP_BUILD` 开关 —— 桌面构建时 @ss/db 移出 `transpilePackages`、进 `serverExternalPackages`;desktop-pack 用 esbuild 预编译 @ss/db(含生成 client)放进 standalone `node_modules`。**默认档(dev/docker)不开,零变化。**
+4. **自包含 node_modules**:Next standalone 在 pnpm monorepo 需 `outputFileTracingRoot=仓库根`;`.pnpm` 扁平化 hoist(补 styled-jsx/@swc/helpers)+ 补 Next 漏 trace 的 @prisma/client·adapter-pg;**embedded-pg 的 dylib 是指向安装目录的绝对符号链接 → 必须 flatten 成真文件**(否则拷走/打包后断链 initdb 崩)。
+5. **Tauri 壳**:`main.rs` spawn node sidecar + TCP 健康轮询 + 整组 SIGTERM 优雅退出;dev/打包双模(`cfg!(debug_assertions)`)。standalone host 用 `localhost`(修 next-intl rewrite 的 IPv4/IPv6 自代理 ECONNREFUSED)。
+6. **CI**:macOS(aarch64)+ Windows(x64)双 runner(Tauri 不能交叉编译,Win 包只能 CI/Win 机出)。坑:全新 checkout 无 `packages/db/.env` → prisma generate 需占位 DATABASE_URL;desktop-pack 在 Windows 调 npm/rustc 需 `shell:true`。
+7. **签名**:当前未签名/未公证 → 新机首次打开需绕 Gatekeeper(右键打开 / `xattr -cr "<app>"`);纯双击需 Apple Developer($99/yr)+ Win 代码签名证书(行政待办)。
+
+**关联**:承 ADR-35(桌面化方向 + 驱动档 + 嵌入式 pg)。
+
+---
+
 ## 待补充的决策(占位)
 
 📋 ADR-32 · 桌面端 vs 移动端的代码共享策略(Phase 2 拆分时)
