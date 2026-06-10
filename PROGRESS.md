@@ -5,6 +5,30 @@
 
 ---
 
+## 2026-06-10(周三,mac-studio · 七功能 AIGC 增强路线图 M0–M6 定稿)— 承六六深审后规划讨论,锁定模型 + 动态 prompt 架构
+
+**完成**
+- ✅ 规划讨论:基于今日开发文档的全盘认知 + 对比同类(剪映/智影/即梦/LTX/Runway)提 7 个改进方向,用户全部采纳
+- ✅ 落盘 **docs/06-feature-plan-2026H2.md**(可直接 coding 蓝图):M0 基建 → M1 成片 → M2′ 配音 → M3 关键帧+链式+QC → M4+M5 批量/并抽 → M6 动态 prompt;含一致性四层方案、动态 prompt ContextContributor 架构、决策记录 D1–D8、真打验证清单、排期(约 12–13 session)
+- ✅ **视频模型锁定 3 家**:`seedance-2.0-fast`(快速出片)/ `kling-v3`(旗舰,用户指定)/ `happyhorse-r2v`(9 图参考·强一致性主力)
+- ✅ 关键事实澄清:**moyu catalog 无 kling v3**(最高 v2-6)→ 蓝图标注 M5 真接前确认 / 回落 v2-6;**seedance-2.0-fast 描述未提音频/首尾帧** → M2′/M3 真打验证
+- ✅ 配音定调(D1):用**原生参考音频链路**(Asset.voiceMediaId→refAudioUrls→模型,五八+r13 已全通),**弃独立 TTS 管线**(造平行轮子+丢免费口型同步)
+- ✅ 动态 prompt(D3/D4/D8):固定模板 → **优化器层**(`claude-opus-4-6`,预生成+缓存写回 ShotGroup.prompt)+ **ContextContributor 可扩展架构**(新维度=加 contributor+开关,素材走 profileJson 免迁移 / 多模态 / VLM 转述)+ **text-embedding-v4 编辑飞轮**(应用层余弦,绕开 pgvector 桌面装不了)
+
+**问题/待决策**
+- ❓ kling v3 moyu 暂无 → M5 真接前确认真实 modelId,否则回落 `kling-v2-6` 并回报
+- ❓ seedance-2.0-fast 是否透传 reference_audio / generate_audio / 首尾帧 → M2′/M3 真打;不支持则配音主力切 kling-v2-6
+- ❓ 六六遗留:本机 REFUND 唯一索引 migration 仍未 apply
+
+**下次接着做**
+- 📌 **开工 M0 基建**:通用任务队列 `packages/queue/src/job-queue.ts`(globalThis 注册表,bullmq/in-process 双驱动)+ `ffmpeg-static` 封装 + 通知服务(Notification 表已存在)
+- 📌 本机 `pnpm db:migrate:deploy`(六六遗留 REFUND 唯一索引)
+- 📌 真打端到端:docx 多集切分 / 视频生成
+
+> 本次为规划 + 文档会话,未改功能代码(无 typecheck/test 需求)。
+
+---
+
 ## 2026-06-10(周三,mac-studio · 12 维全库深审实修 + 完整开发文档/流程图 + 新 .dmg)— 开工追平六四/六五后系统性查漏 + 文档化
 
 **完成**
