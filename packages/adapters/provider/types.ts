@@ -124,6 +124,13 @@ export interface TextRequest {
    * 默认 `{`,调用方按业务 schema 显式传更长 prefix
    */
   jsonPrefill?: string;
+  /**
+   * M3c 多模态(QC VLM 判官):随 prompt 一起发给模型的图片。
+   * 支持 http(s) URL(上游服务端拉取,需公网可达)或 data:image/...;base64(内联,
+   * QC 抽帧走这条 — 本地存储不可公网达)。纯文本 provider 忽略该字段会静默丢图,
+   * 调用方自行确认绑定的是视觉模型。
+   */
+  imageUrls?: string[];
   temperature?: number;
   maxTokens?: number;
   model?: string;

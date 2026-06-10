@@ -86,17 +86,20 @@
 
 ### M3 · F2 关键帧先行 + 链式 + F6 质检(~3 sessions)
 
-> **状态(2026-06-10 六八 mac-studio)**:3a/3b ✅ 落地并真打通;3c 待做。两个实施备注:① `VideoRequest.firstFrameUrl` 当时仅 adapter 层 ✓,queue payload + worker 透传是六八补的;② **moyu /images/edits img2img ~300s 服务端硬限**(六八四次实证,gpt-image-2/seedream 均被掐,文生图正常)— 带参考图的关键帧重抽暂受影响,详见 TODO 真打债。
+> **状态(2026-06-11 六九 mac-studio)**:**M3 三关全清** — 3a/3b ✅ 真打通(六八);3c ✅ 落地(六九,真打待 gate)。实施备注:① `VideoRequest.firstFrameUrl` 当时仅 adapter 层 ✓,queue payload + worker 透传是六八补的;② **moyu /images/edits img2img ~300s 服务端硬限**(六八四次实证)— 带参考图的关键帧重抽暂受影响,详见 TODO 真打债;③ 3c 实现备注(六九):判官图片走 **base64 内联**(本地 MinIO 公网不可达,绕开 relay 素材同步依赖);`qcScore` 定调**不可信信号**(提示词可注入操纵评分,当前仅驱动 UI 徽章/排序 — 未来任何基于它的自动化须先做注入隔离)。
 
 - **3a 关键帧** ✅(钩子全在:`Shot.startFrameMediaId` ADR-23 ✓、`VideoRequest.firstFrameUrl` ✓):`aigc.generateKeyframe`(用已编译组提示词走 seedream → 候选)+ `confirmKeyframe`(写组首 shot startFrameMediaId,**0 migration**);**生成 N+1 关键帧时把 N 关键帧作 img2img 参考**(图层收敛一致性)。
 - **3b 链式** ✅(scene-aware):按 `Shot.sceneId` 分段,**同场景内**可选尾帧链(ffmpeg 抽 N 采纳 take 尾帧 → N+1 首帧);**切场自动断链**;happyhorse-r2v 9 图参考作多参考备选。
-- **3c 质检**:`GenerationAttempt + qcScore/qcJson` → migration;**TextRequest 扩 `imageUrls?`**(多模态判官);`core/qc/`(ffmpeg 抽首/中/尾帧 → VLM 评分 + 人脸一致性对比 portrait);新 kind `qc`,process-job 成功末尾入队(`take.qc.enabled` 默认关);web takes 画廊 QC 徽章 + 按分排序 + 漂移标记。
-- 验收:带/不带首帧对照一致性肉眼可辨;QC 给黑帧/跑题低分。
+- **3c 质检** ✅(六九):`GenerationAttempt + qcScore/qcJson` migration ✓;**TextRequest 扩 `imageUrls?`** ✓(openai-compat image_url parts / claude base64 source,multimodal.ts 纯函数);`core/qc/` ✓(ffmpeg 抽首/中/尾帧 ≤768px → 连同绑定人物形象图(≤2 张/3MB 上限)→ VLM 评分 + 人脸一致性);kind `qc` ✓(`take.qc.enabled` 默认关 + `binding.shot.qc.modelId`);web takes QC 徽章 + 按分排序 + 漂移标记 ✓。
+- 验收:带/不带首帧对照一致性肉眼可辨;QC 给黑帧/跑题低分(**3c 真打待 gate**,见 TODO 真打债置顶)。
 
 ### M4 + M5 · F4 批量 + F5 并抽/failover(~3.5 sessions)
-- **先决重构**:`generateVideo` 主体下沉 `core/video-generation/submit.ts`(锁/sweep/占位/预算/编译/合规/入队),core 返判别、TRPCError 留 router(同 stale-sweep 分层纪律)。单点真打回归后再叠加。
-- **F4**:`batchGenerateForEpisode`(待生成 groups → **成本预估强制确认** → 按 `Shot.priority` S>A>B>C 排序,**接上 `ScriptAnalysis.productionPlan`**)+ `cancelQueuedForEpisode`(退款复用 helper)+ 失败 retryable 自动重抽 ≤ `batch.retry.max`;web 批量工具条 + 总进度 + 完成/全败**通知推手机**。
-- **F5**:seedance relay endpointStyle **泛化为通用 relay 视频适配器**(model 参数化);并抽 `providerIds?:string[]`(≤2,同事务双占位各 PREPAY,共享 `GenerationAttempt.groupId` 对决标记 ✓);failover 用 `healthScore`/`lastErrorAt`(✓ 预留)+ `shot.video.fallbackProviderIds`;web A/B 并排对比卡。
+
+> **状态(2026-06-11 六九 mac-studio)**:先决重构 ✅ + F4 ✅ + F5a(relay 泛化)✅,经两遍深审 16 实修(含 2 条资金 P1:取消白嫖序列 / worker 终态覆写)。**剩 F5b**(并抽/failover/A/B),压在「单点真打回归 gate + M5 各家请求形状真打」之后。
+
+- **先决重构** ✅:`generateVideo` 主体下沉 `core/video-generation/submit.ts`(锁/sweep/占位/预算/编译/合规/入队),core 返判别、TRPCError 留 router(同 stale-sweep 分层纪律);机械对账零漂移。单点真打回归后再叠 F5b。
+- **F4** ✅:`batchGenerateForEpisode`(待生成 groups → **成本预估强制确认**(confirmTotalCny+confirmGroupIds 双比对)→ 按 `Shot.priority` S>A>B>C 排序,**接上 `ScriptAnalysis.productionPlan`** 场级回退(ordinal 从 Scene.number 解析))+ `cancelQueuedForEpisode`(只摘 BullMQ waiting 的批量任务,先落库后摘 job + worker CANCELLED 幂等门)+ 失败 retryable 自动重抽 ≤ `batch.retry.max`(默认 0)+ web 批量工具条 + 总进度 + 完成/全败**通知推手机**(batch-followup:advisory lock + payload.batchId 判重)。
+- **F5a** ✅:seedance relay endpointStyle **泛化为通用 relay 视频适配器**(model 参数化)— admin 配 `defaultParams.adapter='relay-video'` 即接任意 moyu 视频模型,形状不合时在 buildCreateBody 按 modelId 加分支。**F5b 待做**:并抽 `providerIds?:string[]`(≤2,同事务双占位各 PREPAY,共享 `GenerationAttempt.groupId` 对决标记 ✓ 字段已加索引);failover 用 `healthScore`/`lastErrorAt`(✓ 预留)+ `shot.video.fallbackProviderIds`;web A/B 并排对比卡。
 - **第一家并抽 = happyhorse 或 kling-v2-6 / wan2.6**(M5 实测定,见 §1);各家经 moyu 请求形状逐家真打。
 - 验收:整集按优先级跑完 + 推送;预估与实扣偏差 <10%;双模型并排;拔 key 自动 failover。
 

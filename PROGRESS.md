@@ -5,6 +5,30 @@
 
 ---
 
+## 2026-06-11(周四凌晨,mac-studio · 六九跨夜:M3c QC 质检 + M4 先决重构 + F4 整集批量 + 两遍深审 16 实修 + F5a relay 泛化)— 零真打开销,纯代码推进 + 自主深审
+
+**完成**
+- ✅ **开工**:强同步 behind 2 → `944e715`;长间隔诊断条件③触发(lock/schema/migration/seed 全在 reset 改动)→ pnpm install + Prisma client 重生成 + **4 migration 点头应用**(六六 REFUND 唯一索引 + 六七 episode_render + 六八 shot_sound 存量补 + 新 qc 列;本机 39→40 后述索引)。**存疑记录**:六八 PROGRESS 标 mac-studio,但本 checkout 当时落后 2 且 migration 未应用 — 六八实际可能不在这台机/这个库,记账设备代号下次留意。**db:sync 实证新能力**:storyboard_main v2 按 versionTag 被增量自动补进本机(跨机模板债缓解,见 TODO)
+- ✅ **M3c QC 质检(M3 三关全清)**:`GenerationAttempt.qcScore/qcJson` migration;**TextRequest.imageUrls 多模态**(multimodal.ts 纯函数:openai-compat 转 image_url parts / claude 转 base64 source;**抽帧 base64 内联**绕开本地 MinIO 公网不可达,与 relay 投喂债解耦);`core/qc`(下载 take → ffmpeg 抽首/中/尾帧 ≤768px(extractFrame 新 scale 参数)→ 绑定人物形象图(compile 同口径 binding 走查,≤2 张/3MB 上限)→ VLM 判官 jsonSchema 评分 → qcScore 0-100+dims/drift/notes 落库 + `qc.evaluate` 记账;**失败不抛** qcJson.error,幂等 qcScore-null 守卫);kind `qc` 双驱动注册 + take SUCCESS 后按 `take.qc.enabled`(默认关)+`binding.shot.qc.modelId` 入队(均进 seed);listVideoTakes qc 五字段 + qcPending 轮询窗(15min,锚 finishedAt);UI 徽章(≥80 绿/60-79 琥珀/<60 红 + ⚠漂移 + 失败灰 + 评分中)+ 按分排序(未评分压底)
+- ✅ **M4 先决重构**:generateVideo 主体下沉 `core/video-generation/submit.ts`(锁/sweep/占位+PREPAY/gacha/预算/编译/合规/能力门/升 RUNNING/入队),**core 返判别 deny**(deny 前占位已 FAILED+REFUND 退净)、TRPCError 留 router(同 stale-sweep 分层纪律);router 906→571 行;sanitize-prompt 随迁 core;**机械对账**(新旧 DB 操作序列/7 拒绝点/全部用户文案 diff)零搬丢零搬错;inflight CONFLICT 保留"事务内抛"让 sweep 写入回滚(语义不变)
+- ✅ **F4 整集批量(叠在 submit 单一真相源上,单点链路零改动)**:`aigc-batch.ts` 三 procedure — estimate(逐组报价与 PREPAY 同公式 batchDurationS)/ batchGenerate(**成本确认强制闭环**:confirmTotalCny+**confirmGroupIds 组集双比对**(防陈旧报价+等额换组);**S>A>B>C**(组内最高 shot.priority,全空回退 ScriptAnalysis.productionPlan 场级 — **ordinal 从 Scene.number 解析**防删场错位);BUDGET_EXCEEDED 止损;2/min 限频)/ cancelQueued(**只摘 BullMQ waiting 的批量任务**(batch_ 标签)→ CANCELLED+退款归原提交者;**先落库后摘 job**,摘失败由 worker CANCELLED 幂等门兜底);批次标签 attemptGroupId 下穿 prepay/submit;`batch-followup.ts`(失败 retryable **自动重抽** ≤batch.retry.max(默认 0,clamp≤3,startedAt 过滤防占位吃额度)+ **批次完成/全败通知**(落库+Bark/飞书 webhook,advisory lock+payload.batchId 判重防双发));bindings 读取下沉 core(worker 重抽同真相源);UI 工具条(估算→确认弹窗(优先级 chip/逐组价/总额/真扣费警示)→进行中横幅(listGroups 5s 条件轮询)→取消)+ CANCELLED 全链中性化(主预览/历史行/状态柱);batch 纯函数 7 测
+- ✅ **两遍深审(用户指令,六七同法)**:第一遍 4 维 agent 并行(资金并发/安全/QC 链路/API+前端)→ **20 findings(P0×0/P1×4/P2×16)**,且关键面验证干净(三 procedure 访问控制完整、webhook SSRF 黑名单未绕过、submit 对账零漂移);第二遍对抗复核 → **16 实修**:🔴 取消白嫖序列(getState 窗口内 worker 完成 → SUCCESS+全额退款;修:先落库+RUNNING→CANCELLED 命中才退款)/ 🔴 worker 终态条件迁移(updateMany status:RUNNING 守卫 — 僵尸 worker 不再把 CANCELLED/被清扫态翻回 SUCCESS 白嫖,**连既有 stale-sweep 同形洞一并修**;迟到结果丢弃+审计)/ qcPending 锚点 createdAt→finishedAt(批量排队>15min 必踩)/ 估价 fetch staleTime:0(全局 30s 缓存致 CONFLICT 确认死循环+烧光限频)/ ENQUEUE_FAILED 脱敏(基线携带 gap 顺手补)/ 退款归属 createdBy / 组集双比对 / scene ordinal / portrait 3MB / 抽帧 allSettled+rmSync 防御(win EBUSY)/ 判官注入护栏+**qcScore 标注不可信信号**(任何未来自动化须先做注入隔离)/ 多模态图片 token 估算(~1000/图进预算门+usage 兜底)/ 单点 float durationS round(范围外既有 bug:7.5s 组默认时长必 ENQUEUE_FAILED)等;**复查抓到第一遍自引 bug**(六七剧情重演):失败路径 claim=0 仍触发 followup → 自动重抽会复活用户刚取消的组 → failClaimed gate;4 项记账入代码注释(跨 worker 完成通知 ms 级竞态/预算止损保守取舍/百组级 loop 时长/媒体 fetch 内网守卫属既有基线)
+- ✅ **F5a relay 视频适配器泛化**:registry 加 `adapter:'relay-video'` 显式逃生门(seedance 适配器本就 model 参数化+relay 平铺协议分支)→ admin 配 defaultParams 即把 kling-v2-6/wan2.6 等任意 moyu 视频模型零代码接入;displayName 带真实模型名;**F5b(并抽/failover/A/B)按蓝图纪律压后**:第三次资金路径改动 + "第一家并抽 M5 实测定",不在真打 gate 未过状态下叠
+- ✅ **GenerationAttempt.groupId 索引**(深审建议项,migration 点头应用,40/40)— batch-followup 每终态 3 查按批次标签
+- ✅ 回归口径:**typecheck 16/16 多轮全过 · 测试 321+2skip**(core 215:qc9+batch7+ffmpeg/multimodal 等新用例,api 57,adapters 38,queue 11)· migration 40/40 · db:sync 三新 KEY(`binding.shot.qc.modelId`/`take.qc.enabled`/`batch.retry.max`)落库
+
+**问题/待决策**
+- ❓ **真打回归 gate 三连**(TODO 真打债置顶):单点抽卡(验 submit)→ QC 配置+出分(验 M3c)→ 批量整集(验 F4 顺序/预估偏差<10%/推送/取消退费)。一次整集批量可全验;过 gate 才叠 F5b
+- ❓ QC 判官 qcScore 为不可信信号(prompt 注入面),当前仅驱动 UI 无妨 — 未来任何基于它的自动化先做隔离
+- ❓ 深审 4 项已知权衡记账在代码注释(搜「深审」「记账」可索引)
+
+**下次接着做**
+- 📌 **真打回归 gate 三连**(需用户在线:bindings 配置 + 真扣费 ≈ 单点 ¥2 + QC ¥0.05/take + 批量按集)
+- 📌 gate 过后:**F5b 并抽/failover/A/B 卡**(并抽双 PREPAY 同事务)或 **M6 动态 Prompt 优化**(不依赖真打,可先行)
+- 📌 跨机:mac-mini/win-laptop 开工时 5 个 migration 待 deploy(开工流程自动提示)+ db:sync 自动补三新 KEY 与 storyboard_main v2(开工后验证)
+
+---
+
 ## 2026-06-10(周三,mac-studio · 六八七轮连推:TTS 三需求全链 + 命名规范 + 资产总览 + 四维分镜 + M3a/3b + 视频缓存下载 + 素材全投喂 + 3 轮 dmg)— 用户全程在线驱动,真打开销合计 ¥0.38
 
 **完成**

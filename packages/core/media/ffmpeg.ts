@@ -167,6 +167,8 @@ export interface ExtractFrameArgs {
   output: string;
   /** 抽帧时间点(秒);省略 = 抽尾帧 */
   atS?: number;
+  /** 输出缩放(ffmpeg scale 值,如 '768:-2' / '-2:768')— M3c QC 抽帧降采样控 VLM 负载;省略不缩放 */
+  scale?: string;
 }
 
 /**
@@ -177,12 +179,14 @@ export interface ExtractFrameArgs {
  *   逐帧覆写同一输出,结束时文件必是真·最后一帧。
  */
 export function buildExtractFrameArgs(a: ExtractFrameArgs): string[] {
+  const scaleArgs = a.scale ? ['-vf', `scale=${a.scale}`] : [];
   if (a.atS !== undefined) {
     return [
       '-y',
       '-ss', a.atS.toFixed(3),
       '-i', a.input,
       '-frames:v', '1',
+      ...scaleArgs,
       '-q:v', '2',
       a.output,
     ];
@@ -192,6 +196,7 @@ export function buildExtractFrameArgs(a: ExtractFrameArgs): string[] {
     '-sseof', '-1',
     '-i', a.input,
     '-update', '1',
+    ...scaleArgs,
     '-q:v', '2',
     a.output,
   ];
@@ -206,6 +211,7 @@ export async function extractFrame(opts: {
   input: string;
   output: string;
   atS?: number;
+  scale?: string;
 }): Promise<void> {
   await runFfmpeg(buildExtractFrameArgs(opts));
   if (!existsSync(opts.output)) {

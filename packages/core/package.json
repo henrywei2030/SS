@@ -16,7 +16,8 @@
     "./media": "./media/index.ts",
     "./notify": "./notify/index.ts",
     "./compose": "./compose/index.ts",
-    "./voice": "./voice/index.ts"
+    "./voice": "./voice/index.ts",
+    "./qc": "./qc/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -30,6 +30,14 @@ import { EVENTS } from '@ss/shared/events';
 import { enqueueJob } from '@ss/queue/job-queue';
 import { CACHE_VIDEO_JOB_KIND } from '../media/cache-video.js';
 import { shotTakeFilename } from '../media/naming.js';
+import {
+  QC_JOB_KIND,
+  QC_JUDGE_BINDING_KEY,
+  TAKE_QC_ENABLED_KEY,
+  type QcJobData,
+} from '../qc/process-job.js';
+// F4 批量:终态跟进(retryable 自动重抽 + 批次完成通知)— 仅 batch_ 标签 attempt 生效
+import { handleBatchTerminal } from './batch-followup.js';
 // 第 18 轮 audit P1:errorMsg 入库 + SSE + OperationLog 前脱敏,防真接 Provider 后 URL/token 泄漏
 import { sanitizeErrorMsg, billingCycle } from '@ss/shared';
 
@@ -46,6 +54,18 @@ type IdempotencyDecision =
   | { kind: 'continue' }
   | { kind: 'skip-success'; mediaId: string | null; costCny: number }
   | { kind: 'skip-failed'; errorMsg: string };
+
+/**
+ * 深审修(F-2):worker 终态宣告时 attempt 已不是 RUNNING(被取消/被 stale 清扫)。
+ * 抛出让成功事务整体回滚(MediaItem 行一并消失),不覆写终态、不写结算 ledger —
+ * 否则「stalled 取消 + 僵尸 worker 完成」序列会把 CANCELLED 覆写成 SUCCESS,
+ * 叠加取消已写的全额 REFUND = 用户免费拿片。provider 成本平台自担(用户已退款)。
+ */
+class TerminalStateLostError extends Error {
+  constructor() {
+    super('attempt 已是终态(被取消/清扫),迟到结果丢弃');
+  }
+}
 
 async function checkIdempotency(attemptId: string): Promise<IdempotencyDecision> {
   const existing = await prisma.generationAttempt.findUnique({
@@ -64,6 +84,11 @@ async function checkIdempotency(attemptId: string): Promise<IdempotencyDecision>
   }
   if (existing.status === 'FAILED') {
     return { kind: 'skip-failed', errorMsg: existing.errorMsg ?? 'already failed' };
+  }
+  // F4 cancelQueuedForEpisode:取消已标 CANCELLED + 退 PREPAY,但 BullMQ job 可能已 dispatch
+  // (remove 竞态漏网)→ 这里兜底跳过,**不调 provider 不写 refund**(取消时已退净)
+  if (existing.status === 'CANCELLED') {
+    return { kind: 'skip-failed', errorMsg: existing.errorMsg ?? 'attempt 已被用户取消' };
   }
   return { kind: 'continue' };
 }
@@ -195,10 +220,15 @@ export async function processVideoGenJob(
     //
     // Phase 1.5 P0-1:失败时不再写 NORMAL failed entry,改写 REFUND 全退 PREPAY
     // (PREPAY 由 router 创建 attempt 时写入,此处需查出来算退还额)
+    // 复查修(F-2 自查):claim 结果要带出事务 — 已被取消的 attempt 不能再触发 batch
+    // followup(否则自动重抽会复活用户刚取消的组)
+    let failClaimed = false;
     try {
       await prisma.$transaction(async (tx) => {
-        await tx.generationAttempt.update({
-          where: { id: attemptId },
+        // 深审修(F-2 镜像):已被取消/清扫的 attempt 不覆写终态;其退款已由取消/清扫方
+        // 写入(幂等),这里直接退出事务即可
+        const claim = await tx.generationAttempt.updateMany({
+          where: { id: attemptId, status: 'RUNNING' },
           data: {
             status: 'FAILED',
             errorMsg: errMsg,
@@ -206,6 +236,8 @@ export async function processVideoGenJob(
             durationMs: finishedAt.getTime() - startedAt.getTime(),
           },
         });
+        if (claim.count === 0) return;
+        failClaimed = true;
         // Audit P1-3(2026-05-24 r21):advisory_xact_lock 防 BullMQ stalled re-queue race
         // 两个 worker 同时 process 同 attempt 时各自 findFirst → null → create 双 REFUND
         await tx.$executeRawUnsafe(
@@ -269,6 +301,27 @@ export async function processVideoGenJob(
       retryable: !unrecoverable,
     });
 
+    // F4 批量:失败终态跟进(retryable 自动重抽 ≤ batch.retry.max + 批次完成通知)。
+    // 单点 attempt(无 batch_ 标签)函数内零开销返回;任何异常不影响失败主流程。
+    // 复查修:仅在本 worker 真正完成 RUNNING→FAILED 迁移时跟进 — claim 失败说明已被
+    // 取消/清扫,重抽/通知由取消方语义接管(取消的组不该被自动复活)
+    if (failClaimed) {
+      try {
+        await handleBatchTerminal(prisma, {
+          attemptId,
+          shotGroupId,
+          projectId,
+          episodeId,
+          userId,
+          outcome: 'failed',
+          unrecoverable,
+          requestId,
+        });
+      } catch (followupErr) {
+        console.warn(`[${workerId}]${reqTag} batch 终态跟进失败(不影响主流程):`, followupErr);
+      }
+    }
+
     if (unrecoverable) {
       throw new Error(errMsg);
     }
@@ -281,7 +334,9 @@ export async function processVideoGenJob(
 
   // Phase 1.5 P0-1:成功时不再写 NORMAL success entry,改写 REFUND 退多扣(prepaid - actual)
   // (PREPAY 已由 router 写入,此处只补充 REFUND;最终 sum = prepaid - (prepaid - actual) = actual)
-  const { mediaId, updatedAttemptId } = await prisma.$transaction(async (tx) => {
+  let txOut: { mediaId: string; updatedAttemptId: string };
+  try {
+    txOut = await prisma.$transaction(async (tx) => {
     // 需求3:友好命名「项目名-第N集-分镜M-第K次」(替原 groupNumber-时间戳)+ 视频生成物自动归"视频"资产类
     const [proj, ep] = await Promise.all([
       tx.project.findUnique({ where: { id: projectId }, select: { name: true } }),
@@ -319,8 +374,11 @@ export async function processVideoGenJob(
         sourceRef: attemptId,
       },
     });
-    const a = await tx.generationAttempt.update({
-      where: { id: attemptId },
+    // 深审修(F-2):条件迁移 RUNNING→SUCCESS — 已被取消(CANCELLED)/stale 清扫(FAILED)
+    // 的 attempt 不覆写不结算(原无条件 update 会让僵尸 worker 把终态翻回 SUCCESS,
+    // 叠加取消/清扫已写的全额 REFUND = 免费视频)。count=0 抛 sentinel 回滚整事务。
+    const claim = await tx.generationAttempt.updateMany({
+      where: { id: attemptId, status: 'RUNNING' },
       data: {
         status: 'SUCCESS',
         providerJobId: result.providerJobId,
@@ -334,6 +392,9 @@ export async function processVideoGenJob(
         durationMs: finishedAt.getTime() - startedAt.getTime(),
       },
     });
+    if (claim.count === 0) {
+      throw new TerminalStateLostError();
+    }
     // Audit P1-3(2026-05-24 r21):advisory_xact_lock 防 BullMQ stalled re-queue race
     await tx.$executeRawUnsafe(
       `SELECT pg_advisory_xact_lock(hashtext('attempt_refund:' || $1)::bigint)`,
@@ -381,8 +442,30 @@ export async function processVideoGenJob(
         });
       }
     }
-    return { mediaId: media.id, updatedAttemptId: a.id };
-  });
+    return { mediaId: media.id, updatedAttemptId: attemptId };
+    });
+  } catch (e) {
+    if (e instanceof TerminalStateLostError) {
+      const cur = await prisma.generationAttempt.findUnique({
+        where: { id: attemptId },
+        select: { status: true },
+      });
+      console.warn(
+        `[${workerId}]${reqTag} attempt ${attemptId} 已是终态(${cur?.status ?? '?'}),迟到的成功结果丢弃(用户已退款,provider 成本平台自担)`,
+      );
+      await writeOperationLog({
+        actorId: userId,
+        projectId,
+        action: 'aigc.generateVideo.lateResultDiscarded',
+        targetType: 'shotGroup',
+        targetId: shotGroupId,
+        after: { attemptId, currentStatus: cur?.status, providerJobId: result.providerJobId },
+      });
+      return { attemptId };
+    }
+    throw e;
+  }
+  const { mediaId, updatedAttemptId } = txOut;
 
   // 六八:视频落本地缓存(异步 cache-video job)— 播放/成片/抽帧走本地不卡顿,
   // provider 直链 24h 过期前留底。入队失败不影响主流程(直链仍可播)。
@@ -390,6 +473,35 @@ export async function processVideoGenJob(
     await enqueueJob(CACHE_VIDEO_JOB_KIND, { mediaId });
   } catch (e) {
     console.warn(`[${workerId}]${reqTag} cache-video 入队失败(直链仍可播):`, e);
+  }
+
+  // M3c:QC 质检(take.qc.enabled 默认关 + 判官 binding 配了才入队)— 成功 take 异步
+  // VLM 抽帧评分,失败/未配置都不影响主流程。prompt 随队列透传(同 VideoGenJobData 敏感度)。
+  try {
+    const [enabledRow, judgeRow] = await Promise.all([
+      prisma.systemSetting.findUnique({
+        where: { key: TAKE_QC_ENABLED_KEY },
+        select: { value: true },
+      }),
+      prisma.systemSetting.findUnique({
+        where: { key: QC_JUDGE_BINDING_KEY },
+        select: { value: true },
+      }),
+    ]);
+    if (enabledRow?.value === 'true' && judgeRow?.value?.trim()) {
+      const qcData: QcJobData = {
+        attemptId,
+        projectId,
+        episodeId,
+        shotGroupId,
+        userId,
+        prompt,
+        ...(requestId ? { requestId } : {}),
+      };
+      await enqueueJob(QC_JOB_KIND, qcData);
+    }
+  } catch (e) {
+    console.warn(`[${workerId}]${reqTag} qc 入队失败(take 可用性不受影响):`, e);
   }
 
   await writeOperationLog({
@@ -439,6 +551,21 @@ export async function processVideoGenJob(
     thumbnailUrl: result.thumbnailUrl,
     costCny: result.costCny,
   });
+
+  // F4 批量:成功终态跟进(批次完成判定 + 通知)— 非批量 attempt 零开销返回
+  try {
+    await handleBatchTerminal(prisma, {
+      attemptId,
+      shotGroupId,
+      projectId,
+      episodeId,
+      userId,
+      outcome: 'success',
+      requestId,
+    });
+  } catch (followupErr) {
+    console.warn(`[${workerId}]${reqTag} batch 终态跟进失败(不影响主流程):`, followupErr);
+  }
 
   return {
     attemptId,

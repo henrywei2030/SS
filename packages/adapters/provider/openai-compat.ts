@@ -66,6 +66,7 @@ function ensureGlobalDispatcher(): void {
 }
 
 import { BaseProvider } from './base.js';
+import { buildOpenAIUserContent, type OpenAIContentPart } from './multimodal.js';
 import { tryParseLlmJson } from './parse-llm-json.js';
 import type {
   CallContext,
@@ -189,7 +190,11 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
   }
 
   estimateCost(req: TextRequest): number {
-    const approxIn = Math.ceil((req.prompt.length + (req.system?.length ?? 0)) / 4);
+    // M3c 深审修(P2):多模态图片按 ~1000 token/图粗估(768px 档)— 不计会让 VLM 调用的
+    //   事前预算护栏系统性偏松(图常占 QC 判官输入 >70%)
+    const approxImageTokens = (req.imageUrls?.length ?? 0) * 1000;
+    const approxIn =
+      Math.ceil((req.prompt.length + (req.system?.length ?? 0)) / 4) + approxImageTokens;
     // 全盘审查 #7:不再钳 4096 — storyboard 实传 maxTokens=16000,钳死会让事前预算护栏
     //   把大输出请求的成本系统性低估 ~3/4(真实记账走 calcCost 用实际 usage,不受影响)
     const approxOut = req.maxTokens ?? 4096;
@@ -205,9 +210,10 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
     await this.checkBudget(ctx.projectId, this.estimateCost(req));
 
     // 构造 messages:system 可选,跟 user content 一起放 messages 数组
-    const messages: Array<{ role: string; content: string }> = [];
+    // M3c:imageUrls 时 user content 转 parts 数组(multimodal.ts 纯函数,无图零变化)
+    const messages: Array<{ role: string; content: string | OpenAIContentPart[] }> = [];
     if (req.system) messages.push({ role: 'system', content: req.system });
-    messages.push({ role: 'user', content: req.prompt });
+    messages.push({ role: 'user', content: buildOpenAIUserContent(req.prompt, req.imageUrls) });
 
     // 三十六收工 P0 复审(真相):
     //   1) Sonnet 4.6 / Gemini 3 Flash / Haiku 4.5 via moyu 都能在 response_format=json_object 下产 JSON
@@ -271,8 +277,11 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
       }
       if (stream.content || stream.usage || stream.finishReason) {
         // usage 优先用流尾 stream_options 的真实值;中转站若没返则按字符估算兜底(仅影响计费估值)
+        // M3c 深审修(P2):兜底估算补图片 token(~1000/图),否则 VLM 调用记账系统性偏低
         const usage = stream.usage ?? {
-          prompt_tokens: Math.ceil((req.prompt.length + (req.system?.length ?? 0)) / 4),
+          prompt_tokens:
+            Math.ceil((req.prompt.length + (req.system?.length ?? 0)) / 4) +
+            (req.imageUrls?.length ?? 0) * 1000,
           completion_tokens: Math.ceil(stream.content.length / 4),
         };
         resp = {

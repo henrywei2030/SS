@@ -378,7 +378,15 @@ function constructVideoProvider(cfg: ResolvedConfig): IVideoProvider {
     cfg.providerId.startsWith('doubao-seedance') ||
     cfg.providerId.startsWith('relay-doubao-seedance');
 
-  if (isSeedance) {
+  // F5a 泛化(蓝图 docs/06 §M5):中转站通用视频适配器 — admin 在 defaultParams 配
+  //   { adapter: 'relay-video', endpointStyle: 'relay', defaultModel: 'kling-v2-6' / 'wan2.6' / ... }
+  // 即把任意 moyu 视频模型路由到 relay 协议(POST /video/generations 平铺
+  // { model, prompt, duration, ratio } + 任务轮询,见 seedance.ts buildCreateBody 1.x 分支;
+  // seedance-2 系按 modelId 自动切 metadata 结构)。⚠️ kling/wan/happyhorse 的真实请求
+  // 形状以 M5 逐家真打为准 — 形状不合时在 buildCreateBody 按 modelId 加分支,本路由不再动。
+  const isRelayVideo = adapterHint === 'relay-video' && endpointStyle === 'relay';
+
+  if (isSeedance || isRelayVideo) {
     return new SeedanceProvider({
       apiUrl: cfg.apiUrl || (endpointStyle === 'relay' ? '' : 'https://ark.cn-beijing.volces.com/api/v3'),
       apiKey: cfg.apiKey,
@@ -389,7 +397,7 @@ function constructVideoProvider(cfg: ResolvedConfig): IVideoProvider {
       endpointStyle,
     });
   }
-  // TODO Phase 2:Kling / HappyHorse / 本地模型按上述注释模板接入
+  // TODO Phase 2:Kling / HappyHorse 原生直连按上述注释模板接入(经 moyu 走上面 relay-video)
   console.warn(
     `[providers] no concrete class for ${cfg.providerId} (defaultModel=${defaultModel}), falling back to MockVideoProvider`,
   );

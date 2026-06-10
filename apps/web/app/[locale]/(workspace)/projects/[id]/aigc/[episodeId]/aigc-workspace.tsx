@@ -14,6 +14,8 @@ import { ConfirmDialog } from './components/confirm-dialog';
 import { GroupDetail } from './components/group-detail';
 // M1 成片:工作台「成片」tab(?tab=renders)
 import { RenderPanel } from './components/render-panel';
+// F4(M4):整集批量生成工具条(估算→确认→入队 + 总进度 + 取消排队)
+import { BatchToolbar } from './components/batch-toolbar';
 // 三十六收工 UX 改造:全局返回按钮
 import { BackButton } from '@/components/ui/back-button';
 
@@ -35,7 +37,14 @@ export function AigcWorkspace({
   const searchParams = useSearchParams();
 
   const utils = trpc.useUtils();
-  const { data: groups } = trpc.aigc.listGroups.useQuery({ episodeId });
+  // F4 批量:有组在跑时 5s 轮询(总进度横幅 + 组卡状态跟进;无任务零开销)
+  const { data: groups } = trpc.aigc.listGroups.useQuery(
+    { episodeId },
+    {
+      refetchInterval: (query) =>
+        query.state.data?.some((g) => g.videoTakes.running > 0) ? 5_000 : false,
+    },
+  );
 
   // M1 成片 tab:?tab=renders(默认 groups)— 对齐 storyboard 的 URL tab 约定
   const tab = searchParams.get('tab') === 'renders' ? 'renders' : 'groups';
@@ -330,29 +339,42 @@ export function AigcWorkspace({
               </>
             )}
           </div>
-          {/* 字号控制器(跟分镜共享 --storyboard-fs · localStorage 同 key) */}
-          <div className="flex items-center gap-0.5 rounded border border-[hsl(var(--color-border))] px-1 py-0.5">
-            <button
-              type="button"
-              onClick={() => changeFontSize(-1)}
-              disabled={fontSize <= 11}
-              className="rounded px-1.5 py-0.5 text-[10px] hover:bg-[hsl(var(--color-muted))] disabled:cursor-not-allowed disabled:opacity-30"
-              title="字号减小"
-              aria-label="字号减小"
-            >
-              A-
-            </button>
-            <span className="w-6 text-center font-mono text-[10px]">{fontSize}</span>
-            <button
-              type="button"
-              onClick={() => changeFontSize(1)}
-              disabled={fontSize >= 18}
-              className="rounded px-1.5 py-0.5 text-[10px] hover:bg-[hsl(var(--color-muted))] disabled:cursor-not-allowed disabled:opacity-30"
-              title="字号增大"
-              aria-label="字号增大"
-            >
-              A+
-            </button>
+          <div className="flex items-center gap-2">
+            {/* F4:批量生成工具条(估算→成本确认→按优先级入队 + 进行中横幅 + 取消排队) */}
+            {tab === 'groups' && (
+              <BatchToolbar
+                episodeId={episodeId}
+                groups={groups}
+                onAfterChange={() => {
+                  void utils.aigc.listGroups.invalidate({ episodeId });
+                  void utils.aigc.listVideoTakes.invalidate();
+                }}
+              />
+            )}
+            {/* 字号控制器(跟分镜共享 --storyboard-fs · localStorage 同 key) */}
+            <div className="flex items-center gap-0.5 rounded border border-[hsl(var(--color-border))] px-1 py-0.5">
+              <button
+                type="button"
+                onClick={() => changeFontSize(-1)}
+                disabled={fontSize <= 11}
+                className="rounded px-1.5 py-0.5 text-[10px] hover:bg-[hsl(var(--color-muted))] disabled:cursor-not-allowed disabled:opacity-30"
+                title="字号减小"
+                aria-label="字号减小"
+              >
+                A-
+              </button>
+              <span className="w-6 text-center font-mono text-[10px]">{fontSize}</span>
+              <button
+                type="button"
+                onClick={() => changeFontSize(1)}
+                disabled={fontSize >= 18}
+                className="rounded px-1.5 py-0.5 text-[10px] hover:bg-[hsl(var(--color-muted))] disabled:cursor-not-allowed disabled:opacity-30"
+                title="字号增大"
+                aria-label="字号增大"
+              >
+                A+
+              </button>
+            </div>
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-4">

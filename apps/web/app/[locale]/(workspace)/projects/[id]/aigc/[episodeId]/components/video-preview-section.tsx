@@ -69,7 +69,9 @@ export function VideoPreviewSection({
         const hasCaching = data?.some(
           (t) => t.status === 'SUCCESS' && !!t.videoUrl && !t.cached,
         );
-        return hasInflight || hasCaching ? 5_000 : false;
+        // M3c:QC 评分中(开关已启用且在评分时间窗内)也轮询,等徽章出分
+        const hasQcPending = data?.some((t) => t.qcPending);
+        return hasInflight || hasCaching || hasQcPending ? 5_000 : false;
       },
     },
   );
@@ -101,11 +103,15 @@ export function VideoPreviewSection({
   // (项目_第E集_分镜G_第K次.mp4)带出,原前端 buildDownloadFilename 退役。
   const utils = trpc.useUtils();
 
+  // M3c:按 QC 分排序开关(默认时间序;开了高分在前,未评分压底保持时间序 — sort 稳定)
+  const [sortByQc, setSortByQc] = React.useState(false);
+
   // 2026-05-27 用户反馈:rejected take 视为"已删除",列表 + 主预览候选都 filter 掉
-  const visibleTakes = React.useMemo(
-    () => (takes ?? []).filter((t) => !t.rejected),
-    [takes],
-  );
+  const visibleTakes = React.useMemo(() => {
+    const base = (takes ?? []).filter((t) => !t.rejected);
+    if (!sortByQc) return base;
+    return [...base].sort((a, b) => (b.qcScore ?? -1) - (a.qcScore ?? -1));
+  }, [takes, sortByQc]);
 
   // 2026-05-27 用户反馈:动态进度条 — 基于 RUNNING take.createdAt + 预期时长估算
   // 真 SSE percent 优先,没有用时间估算(Seedance 2.0 fast ≈ 3min, std ≈ 6min)
@@ -469,6 +475,16 @@ export function VideoPreviewSection({
                   可点上方"生成视频"重试,或调整提示词避开版权 / 敏感词
                 </div>
               </>
+            ) : selectedTake?.status === 'CANCELLED' ? (
+              // F4 深审修(P2):取消批量后最新 take 是 CANCELLED — 原 else 分支显示
+              // "还没有视频"误导;主动取消用中性灰呈现,不当失败
+              <>
+                <span className="text-lg">−</span>
+                <span className="font-medium">已取消</span>
+                <span className="text-[10px] opacity-70">
+                  批量排队时被取消,预扣费用已退还 — 点右上"生成视频"可重新抽卡
+                </span>
+              </>
             ) : selectedTake?.status === 'RUNNING' ||
               selectedTake?.status === 'QUEUED' ? (
               <>
@@ -502,6 +518,8 @@ export function VideoPreviewSection({
                         ● 缓存中…
                       </span>
                     ))}
+                  {/* M3c:QC 徽章(分数色阶/漂移/失败/评分中) */}
+                  <QcBadge take={selectedTake} />
                 </div>
                 <div className="truncate text-[length:0.7em]">
                   {new Date(selectedTake.createdAt).toLocaleString()}
@@ -564,6 +582,21 @@ export function VideoPreviewSection({
               <History className="mr-1 inline size-3" />
               历史 {visibleTakes.length}
             </span>
+            {/* M3c:有 QC 分的 take 才显示排序切换(否则排了也没意义) */}
+            {visibleTakes.some((t) => t.qcScore !== null) && (
+              <button
+                type="button"
+                onClick={() => setSortByQc((v) => !v)}
+                className={`rounded border px-1.5 py-0.5 transition-colors ${
+                  sortByQc
+                    ? 'border-blue-500 bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                    : 'border-[hsl(var(--color-border))] hover:bg-[hsl(var(--color-muted))]'
+                }`}
+                title={sortByQc ? '当前按 QC 分排序(高分在前,未评分压底)' : '当前按时间排序(最新在前)'}
+              >
+                {sortByQc ? 'QC 分 ↓' : '时间 ↓'}
+              </button>
+            )}
           </div>
           <div className="max-h-[40vh] space-y-1.5 overflow-y-auto pr-1">
             {visibleTakes.map((t) => (
@@ -588,7 +621,9 @@ export function VideoPreviewSection({
                       ? '点击切到主预览并自动播放'
                       : t.status === 'FAILED'
                         ? `失败:${t.errorMsg ?? '无 video URL'}`
-                        : '生成中,稍候'
+                        : t.status === 'CANCELLED'
+                          ? '已取消(批量排队被摘除,费用已退还)'
+                          : '生成中,稍候'
                   }
                 >
                   <div
@@ -597,18 +632,26 @@ export function VideoPreviewSection({
                         ? 'bg-green-600/20 text-green-700 dark:text-green-400'
                         : t.status === 'FAILED'
                           ? 'bg-red-600/20 text-red-700 dark:text-red-400'
-                          : 'bg-amber-500/20 text-amber-700 dark:text-amber-400'
+                          : t.status === 'CANCELLED'
+                            ? 'bg-zinc-500/20 text-zinc-500 dark:text-zinc-400'
+                            : 'bg-amber-500/20 text-amber-700 dark:text-amber-400'
                     }`}
                   >
                     {t.status === 'SUCCESS'
                       ? '✓'
                       : t.status === 'FAILED'
                         ? '✕'
-                        : '⋯'}
+                        : t.status === 'CANCELLED'
+                          ? '−'
+                          : '⋯'}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[length:0.78em] font-medium">
-                      {new Date(t.createdAt).toLocaleString()}
+                    <div className="flex items-center gap-1.5 text-[length:0.78em] font-medium">
+                      <span className="truncate">
+                        {new Date(t.createdAt).toLocaleString()}
+                      </span>
+                      {/* M3c:QC 徽章(分数色阶/漂移/失败/评分中) */}
+                      <QcBadge take={t} />
                     </div>
                     <div className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
                       {Number(t.costCny ?? 0).toFixed(2)}¥
@@ -616,9 +659,16 @@ export function VideoPreviewSection({
                         ` · 耗时 ${Math.round(t.durationMs / 100) / 10} s`}
                     </div>
                     {/* 2026-05-27 用户反馈:errorMsg 完整显(不再 slice),失败原因可见 */}
+                    {/* F4 深审修:CANCELLED 是主动取消,中性灰呈现不当失败 */}
                     {t.errorMsg && (
-                      <div className="mt-0.5 break-words text-[10px] leading-tight text-red-700 dark:text-red-400">
-                        ❌ {t.errorMsg}
+                      <div
+                        className={`mt-0.5 break-words text-[10px] leading-tight ${
+                          t.status === 'CANCELLED'
+                            ? 'text-zinc-500 dark:text-zinc-400'
+                            : 'text-red-700 dark:text-red-400'
+                        }`}
+                      >
+                        {t.status === 'CANCELLED' ? '−' : '❌'} {t.errorMsg}
                       </div>
                     )}
                   </div>
@@ -659,4 +709,68 @@ export function VideoPreviewSection({
       )}
     </section>
   );
+}
+
+/**
+ * M3c:take QC 徽章 — 分数色阶(≥80 绿 / 60-79 琥珀 / <60 红)+ 漂移红标 + 失败灰 + 评分中。
+ * hover 看判官点评(qcNotes)/失败原因(qcError);未启用 QC 的 take 四态全空,渲染 null。
+ */
+function QcBadge({
+  take,
+}: {
+  take: {
+    qcScore: number | null;
+    qcDrift: boolean;
+    qcNotes: string | null;
+    qcError: string | null;
+    qcPending: boolean;
+  };
+}): React.ReactElement | null {
+  if (take.qcScore !== null) {
+    const tone =
+      take.qcScore >= 80
+        ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+        : take.qcScore >= 60
+          ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+          : 'bg-rose-500/15 text-rose-600 dark:text-rose-400';
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1">
+        <span
+          title={take.qcNotes ?? 'QC 质检分(VLM 判官)'}
+          className={`shrink-0 rounded px-1 py-0.5 text-[10px] font-medium ${tone}`}
+        >
+          QC {take.qcScore}
+        </span>
+        {take.qcDrift && (
+          <span
+            title="人物漂移:帧中人物与参考形象图不一致"
+            className="shrink-0 rounded bg-rose-500/15 px-1 py-0.5 text-[10px] font-medium text-rose-600 dark:text-rose-400"
+          >
+            ⚠ 漂移
+          </span>
+        )}
+      </span>
+    );
+  }
+  if (take.qcError) {
+    return (
+      <span
+        title={`QC 评分失败:${take.qcError}`}
+        className="shrink-0 rounded bg-zinc-500/15 px-1 py-0.5 text-[10px] font-medium text-zinc-500 dark:text-zinc-400"
+      >
+        QC 失败
+      </span>
+    );
+  }
+  if (take.qcPending) {
+    return (
+      <span
+        title="QC 评分中(VLM 判官抽帧打分,分钟级)"
+        className="shrink-0 rounded bg-sky-500/15 px-1 py-0.5 text-[10px] font-medium text-sky-600 dark:text-sky-400"
+      >
+        QC…
+      </span>
+    );
+  }
+  return null;
 }

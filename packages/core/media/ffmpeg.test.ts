@@ -124,6 +124,14 @@ describe('buildExtractFrameArgs(纯函数)', () => {
     expect(args.join(' ')).toContain('-update 1');
     expect(args.join(' ')).not.toContain('-ss ');
   });
+
+  it('M3c scale:两种模式都插 -vf scale=...;省略时无 -vf', () => {
+    const seek = buildExtractFrameArgs({ input: 'v.mp4', output: 'f.jpg', atS: 1, scale: '768:-2' });
+    expect(seek.join(' ')).toContain('-vf scale=768:-2');
+    const tail = buildExtractFrameArgs({ input: 'v.mp4', output: 'f.jpg', scale: '-2:768' });
+    expect(tail.join(' ')).toContain('-vf scale=-2:768');
+    expect(buildExtractFrameArgs({ input: 'v.mp4', output: 'f.jpg' })).not.toContain('-vf');
+  });
 });
 
 describe('buildNormalizeAudioArgs(纯函数)', () => {

@@ -31,6 +31,36 @@ export {
   type CharacterImageRef,
 } from './compile.js';
 export { enqueueVideoJobOrRefund } from './enqueue.js';
+// M4 先决重构:generateVideo 主体下沉(锁/sweep/占位/预算/编译/合规/入队)— core 返判别,
+// TRPCError 留 router;F4 batch 复用此单一真相源逐组提交
+export {
+  submitVideoGeneration,
+  type SubmitVideoArgs,
+  type SubmitVideoGroup,
+  type SubmitVideoResult,
+  type SubmitVideoDenyCode,
+} from './submit.js';
+// W7 audit R8 P0 脱敏 helper(M4 随 submit 下沉自 api/utils,inputJson 写入与 submit 同层)
+export {
+  sanitizePromptForLedger,
+  sanitizeReferencesForLedger,
+  type RawVideoReference,
+} from './sanitize-prompt.js';
+// F4 批量:binding 解析下沉(worker 重抽与 router 同一真相源)+ 纯函数层 + 终态跟进
+export { loadVideoGenBindings, type VideoGenBindings } from './bindings.js';
+export {
+  BATCH_GROUP_PREFIX,
+  BATCH_RETRY_MAX_KEY,
+  batchDurationS,
+  candidateRank,
+  isBatchGroupId,
+  orderBatchCandidates,
+  parseBatchRetryMax,
+  parseProductionPlanPriorities,
+  type BatchGroupCandidate,
+  type BatchPriority,
+} from './batch.js';
+export { handleBatchTerminal, type BatchTerminalArgs } from './batch-followup.js';
 // 桌面化 Phase 1:processor 搬进 core(解耦 BullMQ),BullMQ worker 与进程内驱动共用
 export {
   processVideoGenJob,

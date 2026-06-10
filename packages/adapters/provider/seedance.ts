@@ -99,7 +99,11 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
     super();
     this.info = {
       id: cfg.defaultModel,
-      displayName: cfg.endpointStyle === 'relay' ? 'Seedance via 中转站 (视频)' : 'Seedance（视频）',
+      // F5a:relay 档已泛化为通用中转站视频适配器(kling/wan 等同走),名字带上真实模型
+      displayName:
+        cfg.endpointStyle === 'relay'
+          ? `${cfg.defaultModel} via 中转站 (视频)`
+          : 'Seedance（视频）',
       kind: 'video',
       unitName: 'second',
       defaultUnitPriceCny: cfg.unitPriceCny,

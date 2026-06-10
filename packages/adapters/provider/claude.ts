@@ -9,6 +9,7 @@ import { Agent, request } from 'undici';
 import { ProviderError } from '@ss/shared';
 
 import { BaseProvider } from './base.js';
+import { buildAnthropicUserContent } from './multimodal.js';
 import { tryParseLlmJson } from './parse-llm-json.js';
 import type {
   CallContext,
@@ -62,7 +63,10 @@ export class ClaudeTextProvider extends BaseProvider implements ITextProvider {
   }
 
   estimateCost(req: TextRequest): number {
-    const approxTokens = Math.ceil((req.prompt.length + (req.system?.length ?? 0)) / 4);
+    // M3c 深审修(P2):多模态图片按 ~1000 token/图粗估(与 openai-compat 同口径)
+    const approxTokens =
+      Math.ceil((req.prompt.length + (req.system?.length ?? 0)) / 4) +
+      (req.imageUrls?.length ?? 0) * 1000;
     // 全盘审查 #7:不再钳 4096(与 openai-compat 对齐)— 大输出请求事前预算预估不再系统性偏低
     const approxOut = req.maxTokens ?? 4096;
     return ((approxTokens + approxOut) / 1000) * this.cfg.unitPriceCny;
@@ -78,7 +82,8 @@ export class ClaudeTextProvider extends BaseProvider implements ITextProvider {
       max_tokens: req.maxTokens ?? 4096,
       ...(req.temperature !== undefined && { temperature: req.temperature }),
       ...(req.system && { system: req.system }),
-      messages: [{ role: 'user', content: req.prompt }],
+      // M3c:imageUrls 时 content 转 parts(data: URL → base64 source);无图零变化
+      messages: [{ role: 'user', content: buildAnthropicUserContent(req.prompt, req.imageUrls) }],
     };
 
     let resp: AnthropicResponse;

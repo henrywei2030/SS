@@ -1004,6 +1004,11 @@ model GenerationAttempt {
   // 关联抽卡（一次重抽群组）
   groupId String? // UUID 把同 shot 多次抽卡归组
 
+  // M3c QC 质检(蓝图 docs/06 §M3):VLM 判官对成功视频 take 抽帧评分。
+  // null = 未评(开关未开 / 旧数据 / 评分失败 — 失败明细在 qcJson.error)
+  qcScore Float? // 0-100 总分(VLM 输出 clamp 后)
+  qcJson  Json? // 评分明细 {dims:{clarity,promptAdherence,faceConsistency},drift,notes,judge,...} 或 {error}
+
   createdAt DateTime @default(now())
   createdBy String
 
@@ -1019,6 +1024,7 @@ model GenerationAttempt {
   @@index([projectId, createdAt]) // r8 性能优化:insights / api-usage CSV 时间窗 query 高频用
   @@index([shotId])
   @@index([shotGroupId, action, status]) // W5.4:listVideoTakes 用
+  @@index([groupId]) // F4 批量:batch-followup 每个终态按批次标签查重试数/完成判定(深审 F-5.4)
   @@index([providerId, status])
   @@index([createdBy, createdAt])
   @@index([episodeId, action, status]) // 三十九收工 perf:aigc.listEpisodes 集数总览首屏高频(episodeId IN + action=VIDEO + status=SUCCESS)

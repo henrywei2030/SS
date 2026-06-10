@@ -24,6 +24,8 @@ export async function createPlaceholderAttemptWithPrepay(
     providerId: string;
     durationS: number;
     prepayEstimateCny: number;
+    /** F4 批量:同批次 attempt 共享标签(写 GenerationAttempt.groupId,batch_ 前缀)— 重抽/完成通知按它聚合 */
+    attemptGroupId?: string;
   },
 ): Promise<{ attempt: { id: string }; prepayEntryId: string }> {
   const attempt = await tx.generationAttempt.create({
@@ -35,6 +37,7 @@ export async function createPlaceholderAttemptWithPrepay(
       modelId: args.providerId,
       action: 'VIDEO',
       inputJson: { kind: 'aigc.generateVideo.placeholder' },
+      groupId: args.attemptGroupId,
       outputMediaIds: [],
       inputUnits: 0,
       outputUnits: 0,

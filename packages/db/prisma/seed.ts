@@ -614,6 +614,27 @@ async function main() {
       category: 'model_binding',
       description: '分镜视频生成使用的 Video Provider — 必须 admin 显式选(例:seedance-2.0 / relay-doubao-seedance-1-0-pro / relay-doubao-seedance-2-0 等)',
     },
+    {
+      // M3c QC 质检(蓝图 docs/06 §M3 F6):take 成功后 VLM 抽帧评分的判官模型
+      key: 'binding.shot.qc.modelId',
+      value: '',
+      category: 'model_binding',
+      description: 'take QC 质检判官 LLM modelId — 必须是支持图片输入的视觉模型(如 relay-gemini-3-flash / relay-qwen3-vl 等);留空 = QC 不跑',
+    },
+    {
+      // M3c:QC 总开关 — 默认关(每个成功 take 都多一次判官调用,有真金成本)
+      key: 'take.qc.enabled',
+      value: 'false',
+      category: 'feature_flag',
+      description: '视频 take 成功后是否自动 VLM 质检评分(抽首/中/尾帧+人物参考图喂判官,写 qcScore/qcJson)。需同时配好 binding.shot.qc.modelId;每 take 一次判官调用,按文本模型计费',
+    },
+    {
+      // F4 批量(蓝图 docs/06 §M4):失败 retryable 自动重抽上限 — 默认 0=关(自动重抽=自动花钱)
+      key: 'batch.retry.max',
+      value: '0',
+      category: 'general',
+      description: '整集批量生成时,take 失败且可重试(网络/超时/限流,非内容违规)的自动重抽次数上限(0=不自动重抽;最大 3)。每次重抽按正常视频生成计费',
+    },
 
     // ----- W5.0 视频生成业务参数 -----
     {

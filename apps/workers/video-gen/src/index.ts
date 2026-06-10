@@ -20,6 +20,7 @@ import { prisma } from '@ss/db';
 import { COMPOSE_JOB_KIND, processComposeRender } from '@ss/core/compose';
 import { VOICE_SAMPLE_JOB_KIND, processVoiceSampleJob } from '@ss/core/voice';
 import { CACHE_VIDEO_JOB_KIND, processCacheVideoJob } from '@ss/core/media';
+import { QC_JOB_KIND, processQcJob } from '@ss/core/qc';
 import { registerJobHandler } from '@ss/queue/job-queue';
 import { getPrimaryRedis } from '@ss/queue/redis';
 // 桌面化 Phase 1:启动回收孤儿 attempt 抽到 core(worker boot 与桌面 web instrumentation 共用)
@@ -53,6 +54,7 @@ async function bootstrap(): Promise<void> {
   registerJobHandler(COMPOSE_JOB_KIND, (data) => processComposeRender(data)); // M1 成片
   registerJobHandler(VOICE_SAMPLE_JOB_KIND, (data) => processVoiceSampleJob(data)); // TTS-B 声线样本
   registerJobHandler(CACHE_VIDEO_JOB_KIND, (data) => processCacheVideoJob(data)); // 六八 视频本地缓存
+  registerJobHandler(QC_JOB_KIND, (data) => processQcJob(data)); // M3c take QC 质检
   const ssJobsWorker = createSsJobsWorker(workerId);
   await ssJobsWorker.waitUntilReady();
   console.log(`[${workerId}] ss-jobs worker ready`);

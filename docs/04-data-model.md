@@ -224,7 +224,11 @@ model GenerationAttempt {
   adoptedAt     DateTime?
   adoptedBy     String?
 
-  groupId       String?         // 同镜头多次抽卡归组
+  groupId       String?         // 同镜头多次抽卡归组;F4(六九)复用作批次标签(batch_<uuid>,@@index)
+
+  // M3c QC 质检(六九):VLM 判官对成功视频 take 抽帧评分;null=未评(开关关/旧数据/失败)
+  qcScore       Float?          // 0-100 总分(不可信信号 — 提示词可注入,仅驱动 UI)
+  qcJson        Json?           // {dims,drift,notes,judge,...} 或失败 {error}
 }
 ```
 
@@ -456,7 +460,7 @@ model SystemSetting {
 - `Shot`: `[episodeId]` / `[status]` / `[priority]` / `@@unique([episodeId, positionIdx])`
 - `Asset`: `[projectId, type]` / `[projectId, name]`
 - `MediaItem`: `[projectId, kind]` / `[scope, kind]`
-- `GenerationAttempt`: `[projectId]` / `[shotId]` / `[providerId, status]` / `[createdBy, createdAt]`
+- `GenerationAttempt`: `[projectId]` / `[shotId]` / `[providerId, status]` / `[createdBy, createdAt]` / `[groupId]`(F4 批次标签查询)
 - `CostLedgerEntry`: `[projectId, createdAt]` / `[userId, createdAt]` / `[providerId, modelId, createdAt]` / `[billingCycle]`
 - `OperationLog`: `[projectId, createdAt]` / `[actorId, createdAt]` / `[targetType, targetId]`
 

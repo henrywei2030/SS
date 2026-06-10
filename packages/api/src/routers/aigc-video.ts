@@ -10,26 +10,19 @@ import { z } from 'zod';
 
 import { getVideoProvider } from '@ss/adapters/provider';
 import { getStorageAdapter } from '@ss/adapters/storage';
-// 三十五收工 R2 Phase A + 三十六收工 R2 完整推进:共享 video generation helper
+// M4 先决重构:generateVideo 主体下沉 core submitVideoGeneration(锁/sweep/占位/预算/
+// 编译/合规/入队全在 core,本层只做 binding 解析 + 判别结果 → TRPCError 映射)
 import {
-  acquireAigcVideoLock,
-  refundPrepayForAttempt,
-  sweepStaleGroupAttempts,
-  checkDailyVideoBudget,
-  createPlaceholderAttemptWithPrepay,
-  compileVideoPromptForGroup,
-  enqueueVideoJobOrRefund,
+  loadVideoGenBindings,
+  submitVideoGeneration,
+  type VideoGenBindings,
 } from '@ss/core/video-generation';
 
-// 三十一收工 S3:SystemSetting 单 key 读 helper
-// 三十二收工 S3 followup:加 batch 版
-import { resolveMediaFetchUrl } from '@ss/core/media';
-import { loadSystemSetting, loadSystemSettings } from '../utils/system-bindings.js';
-// r11 audit:错误消息脱敏(防 Provider URL/token/stack 泄漏到前端)
-import { sanitizeErrorMsg } from '@ss/shared';
+// 三十二收工 S3 followup:SystemSetting batch 读 helper
+import { QC_JUDGE_BINDING_KEY, TAKE_QC_ENABLED_KEY } from '@ss/core/qc';
+import { loadSystemSettings } from '../utils/system-bindings.js';
 import { ASPECT_RATIOS, type AspectRatio } from '@ss/shared/constants';
 import { aspectRatioSchema } from '@ss/shared/schemas';
-import { enqueueVideoGenJob } from '@ss/queue/video-gen';
 import { signStreamToken } from '@ss/queue/sse-token';
 
 import { protectedProcedure, rateLimit } from '../trpc.js';
@@ -37,66 +30,34 @@ import type { Context } from '../context.js';
 import { logOperation } from '../middleware/audit.js';
 import { isEpisodeLockedNow } from '../utils/episode-lock.js';
 import { assertProjectAccess } from '../middleware/access.js';
-import {
-  sanitizePromptForLedger,
-  sanitizeReferencesForLedger,
-} from '../utils/sanitize-prompt.js';
 
 import { loadGroupOrThrow } from './aigc-shared.js';
 
-// W5.4:视频生成相关 SystemSetting 读取
-// W1-W5 audit P1 followup(P1-5):加 requireForVideo 守卫(原 setting dead,从未被读)
-async function getVideoBindings(ctx: Context): Promise<{
-  providerId: string;
-  maxDurationS: number;
-  defaultAspectRatio: AspectRatio;
-  dailyBudgetCny: number;
-  requireComplianceForVideo: boolean;
-  defaultGenerateAudio: boolean;
-  audioSurchargeCnyPerS: number;
-}> {
-  // 三十二收工 S3 followup:helper batch
-  const settings = await loadSystemSettings(ctx.prisma, [
-    'binding.shot.video.providerId',
-    'shot.video.maxDurationS',
-    'shot.video.defaultAspectRatio',
-    'shot.video.dailyBudgetCny',
-    'asset.compliance.requireForVideo',
-    // M2′ 配音产品化(2026-06-10):有声默认开关 + 有声差价(catalog 无差价字段,admin 按真实账单校准)
-    'shot.video.generateAudio.default',
-    'shot.video.audioSurchargeCnyPerS',
-  ]);
-  const rawAr = settings['shot.video.defaultAspectRatio'] ?? '9:16';
-  // 2026-05-27:扩到 6 比例后用 ASPECT_RATIOS 真相源校验,白名单外的默认 9:16
-  const ar: AspectRatio = (ASPECT_RATIOS as readonly string[]).includes(rawAr)
-    ? (rawAr as AspectRatio)
-    : '9:16';
-  // 2026-05-27 audit r12:Number() 非法值返 NaN 会污染下游 Math.min / Decimal 计算
-  // SystemSetting 老值 / admin 误填 null/字符串时,fallback 到合理默认而非 NaN
-  const parseNum = (
-    raw: string | undefined,
-    fallback: number,
-    min = -Infinity,
-    max = Infinity,
-  ): number => {
-    if (raw == null) return fallback;
-    const n = Number(raw);
-    if (!Number.isFinite(n)) return fallback;
-    return Math.max(min, Math.min(n, max));
-  };
+// M3c:qcPending 时间窗 — QC 在 take 成功后即入队,正常分钟级出分;超窗仍未出分
+// (开关后开 / 历史 take / job 丢失)不再让前端为它轮询
+const QC_PENDING_WINDOW_MS = 15 * 60_000;
+
+/** M3c:qcJson(Json 列)安全读取 — 写入形状见 core/qc process-job,这里防御性窄化 */
+function readQcJson(qcJson: unknown): {
+  drift: boolean;
+  notes: string | null;
+  error: string | null;
+} {
+  if (!qcJson || typeof qcJson !== 'object' || Array.isArray(qcJson)) {
+    return { drift: false, notes: null, error: null };
+  }
+  const o = qcJson as Record<string, unknown>;
   return {
-    // 二十收工后用户反馈:不 hardcode 默认 provider,空时调用方判断(generateVideo 有 input.providerOverride 优先)
-    providerId: settings['binding.shot.video.providerId'] ?? '',
-    maxDurationS: parseNum(settings['shot.video.maxDurationS'], 15),
-    defaultAspectRatio: ar,
-    dailyBudgetCny: parseNum(settings['shot.video.dailyBudgetCny'], 500),
-    requireComplianceForVideo:
-      (settings['asset.compliance.requireForVideo'] ?? 'false') === 'true',
-    // seedance 2.0 文档默认 generate_audio=true → 系统默认跟随,admin 可改
-    defaultGenerateAudio: (settings['shot.video.generateAudio.default'] ?? 'true') === 'true',
-    // clamp [0,100]:防 admin 误填负数/超大值污染 UI 预估(六七深审 P2)
-    audioSurchargeCnyPerS: parseNum(settings['shot.video.audioSurchargeCnyPerS'], 0, 0, 100),
+    drift: o.drift === true,
+    notes: typeof o.notes === 'string' && o.notes.length > 0 ? o.notes : null,
+    error: typeof o.error === 'string' ? o.error : null,
   };
+}
+
+// W5.4:视频生成相关 SystemSetting 读取
+// F4:实现下沉 core loadVideoGenBindings(批量自动重抽在 worker 侧复用同一解析),本层转调
+async function getVideoBindings(ctx: Context): Promise<VideoGenBindings> {
+  return loadVideoGenBindings(ctx.prisma);
 }
 
 export const videoProcedures = {
@@ -165,373 +126,57 @@ export const videoProcedures = {
       }
       // 2026-05-27:不再支持 'auto',undefined 时 fallback 到 binding 默认值
       const aspectRatio = input.aspectRatio ?? bindings.defaultAspectRatio;
+      // 深审修(范围外既有 bug 顺手清):grp.durationS 是 Float(LLM 可产 7.5),直传会被
+      // VideoGenJobDataSchema 的 int() 拒 → 必然 ENQUEUE_FAILED;round 后再 clamp。
+      // input.durationS 本身已被 zod int() 保证,不动。
       const durationS = Math.min(
-        input.durationS ?? grp.durationS ?? 5,
+        input.durationS ?? Math.round(grp.durationS ?? 5),
         bindings.maxDurationS,
       );
-
-      // Phase 1.5 P0-1:提前 fetch provider + 算 prepayEstimate(transaction 前算好)
-      // 预扣 = max_duration × unitPriceCny(按当前 cfg 估算,真实抽卡完成时 worker 写 REFUND 退多扣)
       const wantAudio = input.generateAudio ?? bindings.defaultGenerateAudio;
-      const provider = await getVideoProvider(providerId);
-      // 预扣严格 = provider.estimateCost(按 max 时长上限);worker 完成时按 provider 实际 costCny 退差。
-      // ⚠️ 六七深审 P1:有声差价**不进 PREPAY** — provider 返回的 costCny 不含它,若进预扣会被退款
-      //   逻辑(refund = prepaid - actual)当作"多扣"退还 → 差价收不到 + 破坏「PREPAY=provider 估算」
-      //   不变量。audioSurcharge 仅用于 capabilities 返回前端做「有声更贵」预估提示,真实计费以 provider 为准。
-      const prepayEstimateCny = provider.estimateCost({
-        prompt: '',
+
+      // M4 先决重构:主体下沉 core submitVideoGeneration(锁/sweep/占位+PREPAY/抽卡上限/
+      // 预算/编译/合规/能力门/升 RUNNING/入队),core 返判别 — deny 时占位已 FAILED + REFUND
+      // 退净,这里只做 TRPCError 映射。binding 读取/参数 fallback 留本层(api 关注点)。
+      const result = await submitVideoGeneration(ctx.prisma, {
+        group: {
+          id: grp.id,
+          number: grp.number,
+          prompt: grp.prompt,
+          durationS: grp.durationS,
+          episodeId: grp.episodeId,
+          projectId: grp.episode.projectId,
+        },
+        userId: ctx.user.id,
+        providerId,
         durationS,
         aspectRatio,
-      });
-
-      // W1-W5 audit 三轮 G1 + 7 轮 audit P0(A1):advisory lock 必须在 $transaction 内,
-      // 否则 pg_advisory_xact_lock 在 implicit transaction(单条 raw)立即释放,串行失效。
-      //
-      // 模式:transaction 内 锁 + inflight check + 占位 attempt(status=QUEUED)+ PREPAY entry。
-      // 锁释放后占位 attempt 仍在 DB,其他并发 inflight check 会看到 QUEUED → 拒。
-      // 后续检查(gachaMax/budget/compile)失败时 update 占位为 FAILED + 写 REFUND 退还 PREPAY;通过则 worker 接管。
-      const { attempt: earlyAttempt } = await ctx.prisma.$transaction(async (tx) => {
-        // 三十五收工 R2 Phase A:共享 helper(原 inline lock raw → acquireAigcVideoLock)
-        await acquireAigcVideoLock(tx, grp.id);
-        // 2026-05-27 audit r13 P0:stale RUNNING 自愈 — 12 维深审下沉 core(纯搬运,语义不变):
-        //   worker 崩/失踪导致永久卡 RUNNING → 自动标 FAILED + 退 PREPAY;清理后仍存活的才拒(真在跑)
-        const { aliveInflight } = await sweepStaleGroupAttempts(tx, {
-          shotGroupId: grp.id,
-          userId: ctx.user.id,
-          projectId: grp.episode.projectId,
-          episodeId: grp.episodeId,
-        });
-        if (aliveInflight) {
-          throw new TRPCError({
-            code: 'CONFLICT',
-            message: `本生成段已有进行中的视频任务(provider=${aliveInflight.providerId})— 等完成或失败后再点`,
-          });
-        }
-        // 三十六收工 R2:placeholder attempt + PREPAY ledger 抽到 createPlaceholderAttemptWithPrepay
-        return createPlaceholderAttemptWithPrepay(tx, {
-          userId: ctx.user.id,
-          projectId: grp.episode.projectId,
-          episodeId: grp.episodeId,
-          shotGroupId: grp.id,
-          providerId,
-          durationS,
-          prepayEstimateCny,
-        });
-      });
-
-      // 7 轮 audit A1:任何前置 check 失败都要把占位 attempt 标 FAILED 释放
-      // Phase 1.5 P0-1:**同时**写 REFUND 退还 PREPAY(否则用户被多扣)
-      const failPlaceholder = async (err: Error, code: 'TOO_MANY_REQUESTS' | 'PRECONDITION_FAILED' | 'BAD_REQUEST') => {
-        await ctx.prisma.$transaction(async (tx) => {
-          await tx.generationAttempt.updateMany({
-            where: { id: earlyAttempt.id, status: 'QUEUED' },
-            data: {
-              status: 'FAILED',
-              errorMsg: err.message,
-              finishedAt: new Date(),
-            },
-          });
-          // 四十收工 P2:用共享 refundPrepayForAttempt(查 PREPAY + idempotent 防双退),
-          //   收敛退费单一真相源(跟 stale-sweep / enqueue-fail 一致),消除未来重构引入双退风险。
-          await refundPrepayForAttempt(tx, {
-            attemptId: earlyAttempt.id,
-            userId: ctx.user.id,
-            projectId: grp.episode.projectId,
-            episodeId: grp.episodeId,
-            providerId,
-            reason: 'video_task_precheck_failed',
-          });
-        });
-        // r11 audit:err.message 可能含 Provider URL / token / stack trace,
-        //   走 sanitizeErrorMsg 脱敏(已 import 自 @ss/shared L20)防泄漏
-        throw new TRPCError({ code, message: sanitizeErrorMsg(err) });
-      };
-
-      // W1-W5 audit P2 followup(P2-5):接通 system.gacha.max_attempts(原 dead config)
-      // 单 group 累计非 rejected attempt 数(含成功/失败)超 max_attempts 时拒,防失控烧钱
-      const gachaMax = Number(
-        (await loadSystemSetting(ctx.prisma, 'system.gacha.max_attempts')) ?? '0',
-      );
-      if (gachaMax > 0) {
-        const used = await ctx.prisma.generationAttempt.count({
-          where: {
-            shotGroupId: grp.id,
-            action: 'VIDEO',
-            rejected: false,
-            status: { in: ['SUCCESS', 'FAILED'] },
-          },
-        });
-        if (used >= gachaMax) {
-          await failPlaceholder(
-            new Error(`本生成段已抽 ${used} 次(上限 ${gachaMax}),把废片标 rejected 或在后台调高 system.gacha.max_attempts 再试`),
-            'TOO_MANY_REQUESTS',
-          );
-        }
-      }
-
-      // Phase 1.5 P0-1:provider 实例 + prepayEstimateCny 已在 transaction 前 fetch,此处直接复用
-      // (estimateCost 也已用,不再二次调用)
-
-      // 三十六收工 R2:每日预算守卫抽到 checkDailyVideoBudget(Decimal 比较防 IEEE-754 漂移)
-      const budgetDenyMsg = await checkDailyVideoBudget(ctx.prisma, {
-        projectId: grp.episode.projectId,
+        wantAudio,
         dailyBudgetCny: bindings.dailyBudgetCny,
-        prepayEstimateCny,
-        excludeAttemptId: earlyAttempt.id,
+        requireComplianceForVideo: bindings.requireComplianceForVideo,
+        extraInstruction: input.extraInstruction,
+        extraNegative: input.extraNegative,
+        resolution: input.resolution,
+        addWatermark: input.addWatermark,
+        webSearchEnabled: input.webSearchEnabled,
+        refVideoUrl: input.refVideoUrl,
+        refAudioUrl: input.refAudioUrl,
+        // 第 19 轮 audit P1:requestId 贯通到 worker,运维 grep 日志可看全链路
+        requestId: ctx.requestId,
       });
-      if (budgetDenyMsg) {
-        await failPlaceholder(new Error(budgetDenyMsg), 'TOO_MANY_REQUESTS');
-      }
-
-      // 三十六收工 R2:compile 整段(project + dbBindings + media + refs + compileShotGroupVideoPrompt)
-      // 抽到 compileVideoPromptForGroup helper(132 行 → 1 调用),compliance check 保留 router 内(需要 failPlaceholder)
-      const { compiled, voiceRefs, voiceMissing, characterImageRefs, characterBindingsForCompliance, projectType } = await compileVideoPromptForGroup(
-        ctx.prisma,
-        {
-          group: {
-            id: grp.id,
-            prompt: grp.prompt,
-            durationS: grp.durationS,
-            episode: { projectId: grp.episode.projectId },
-          },
-          providerId,
-          durationS,
-          aspectRatio,
-          extraInstruction: input.extraInstruction,
-          extraNegative: input.extraNegative,
-          // 六八:有声生成时把人物声音设定描述编进 prompt【声线】段
-          includeVoiceDescriptions: wantAudio,
-        },
-      );
-
-      // W1-W5 audit P1 followup(P1-5):合规守卫 — 引用了任何 CHARACTER 且 complianceStatus !== APPROVED 则拒
-      // 2026-06-09:合规审查仅针对 AI_REAL(伪真人剧)。动漫/国漫/海报/自定义项目人物的
-      //   complianceStatus 恒为默认 NOT_REQUIRED,旧逻辑 !== APPROVED 把它们误拒(用户反馈)。
-      //   AI_REAL 仍保持严格(要求 APPROVED),不放松真人合规。
-      if (bindings.requireComplianceForVideo && projectType === 'AI_REAL') {
-        const blockedChars = characterBindingsForCompliance.filter(
-          (c) => c.complianceStatus !== 'APPROVED',
-        );
-        if (blockedChars.length > 0) {
-          await failPlaceholder(
-            new Error(
-              `合规未通过的人物不允许生成视频:${blockedChars
-                .map((c) => `${c.assetName}(${c.complianceStatus})`)
-                .join(', ')} — 在美术工作台完成合规后再试`,
-            ),
-            'PRECONDITION_FAILED',
-          );
-        }
-      }
-
-      // 2. 提示词缺图 / 未关联 token 阻断 — 让用户先修
-      if (compiled.warnings.missingMedia.length > 0) {
-        await failPlaceholder(
-          new Error(
-            `${compiled.warnings.missingMedia
-              .map((m) => `${m.assetName} 缺主图`)
-              .join(' / ')} — 去美术工作台补图后再试`,
-          ),
-          'BAD_REQUEST',
-        );
-      }
-      if (compiled.warnings.unknownTokens.length > 0) {
-        await failPlaceholder(
-          new Error(
-            `提示词里用了未关联的 token:${compiled.warnings.unknownTokens.join(', ')} — 先关联或删除 token`,
-          ),
-          'BAD_REQUEST',
-        );
-      }
-      if (!grp.prompt.trim()) {
-        await failPlaceholder(
-          new Error('提示词为空 — 去导演工作台生成或手编'),
-          'BAD_REQUEST',
-        );
-      }
-
-      // 全盘审查 #2:Provider 能力(caps)查询 + refVideoUrl 校验必须在「升级 RUNNING」之前!
-      //   failPlaceholder 的 updateMany 只匹配 status:'QUEUED';若该校验在 RUNNING 之后失败,
-      //   updateMany 命中 0 行 → 占位 attempt 卡死 RUNNING、阻塞该 group 抽卡直到 stale-sweep(10min)。
-      //   caps/refVideoUrl 只依赖 input + providerId,与 attempt 状态无关,故提前到升 RUNNING 前。
-      // 2026-05-27 audit r14 P0:删 `.catch(() => null)` — 吞 DB 异常会致 capsParams={} → 校验失效;
-      //   真异常应往上抛,trpc 返 INTERNAL_SERVER_ERROR。
-      const caps = await ctx.prisma.providerConfig.findUnique({
-        where: { providerId },
-        select: { defaultParams: true },
-      });
-      const capsParams =
-        caps?.defaultParams && typeof caps.defaultParams === 'object'
-          ? (caps.defaultParams as Record<string, unknown>)
-          : {};
-      if (input.refVideoUrl && capsParams.supportsRefVideo !== true) {
-        await failPlaceholder(
-          new Error(`当前 Provider 不支持 refVideo(请去 admin/providers 配 supportsRefVideo:true)`),
-          'BAD_REQUEST',
-        );
-      }
-
-      // 3. 升级占位 attempt 到 RUNNING + 真实 inputJson(7 轮 audit A1)
-      // 注:projectId/episodeId/shotGroupId/providerId/modelId/action 在占位时已写,不重复 set
-      const startedAt = new Date();
-      const attempt = await ctx.prisma.generationAttempt.update({
-        where: { id: earlyAttempt.id },
-        data: {
-          // W7 audit R8 P0:inputJson 脱敏 — 不存明文 prompt + 不存资产 name/mediaUrl
-          // 保留 preview/hash/length 便于追溯;references 只留 idx+kind+assetId
-          inputJson: {
-            kind: 'aigc.generateVideo',
-            groupNumber: grp.number,
-            positivePrompt: sanitizePromptForLedger(compiled.positive),
-            negativePrompt: sanitizePromptForLedger(compiled.negative),
-            aspectRatio,
-            durationS,
-            references: sanitizeReferencesForLedger(compiled.references),
-            // 六八:人到声必到 — 自动附带的人物参考声线(只记 assetId,脱敏口径同 references)
-            voiceRefAssetIds: voiceRefs.map((r) => r.assetId),
-            // 六八下:身份级图参考(形象/三视图)条数(审计:这次喂了几张人物图)
-            characterImageRefCount: characterImageRefs.length,
-            // 缺声线人物记名(审计:该次生成没带谁的声音参考)
-            voiceMissing: voiceMissing.map((m) => m.name),
-          },
-          status: 'RUNNING',
-          startedAt,
-          createdBy: ctx.user.id,
-        },
-      });
-
-      // 4. 入队 BullMQ video-gen worker(ADR-25 W5.5)
-      //    handler 立即返回 attemptId,worker 收到 job 后:
-      //      - 调 provider.generate(ctx.skipLedger=true)
-      //      - 写 MediaItem + 升 attempt SUCCESS|FAILED + costLedgerEntry
-      //      - publish EVENTS.GENERATION_COMPLETED + Redis 'success'/'failed' 推 SSE
-      //    失败分类(白名单):timeout/429/5xx → retry;censored/compliance → UnrecoverableError
-      // 六八下(关联即全喂):token 引用图 + 人物身份级图参考(形象/三视图全送)合并去重
-      const refImageUrls = Array.from(
-        new Set([
-          ...compiled.references
-            .filter((r) => r.kind === 'IMAGE')
-            .map((r) => r.mediaUrl)
-            .filter((u): u is string => !!u),
-          ...characterImageRefs.map((r) => r.mediaUrl),
-        ]),
-      );
-      // 2026-05-27 audit r13:binding 含 AUDIO 类资产(角色配音 voiceMediaId)时收集
-      // capsParams.supportsRefAudio !== true 时静默丢弃(Provider 不支持就别传,避 422)
-      // 六八(人到声必到):voiceRefs(人物绑定的参考声线)无条件并入 — 不依赖 @音频N token /
-      //   「自动 @」点击;显式 SOUND_VOICE binding 与之重复时靠下方 Set 去重
-      const rawRefAudioUrls = [
-        ...compiled.references
-          .filter((r) => r.kind === 'AUDIO')
-          .map((r) => r.mediaUrl)
-          .filter((u): u is string => !!u),
-        ...voiceRefs.map((r) => r.mediaUrl),
-      ];
-      // 2026-05-27 audit r14 P1:audio 处理统一(input.refAudioUrl + binding 来的 audio 都 silent drop)
-      // 之前 input.refAudioUrl 不支持时直接 failPlaceholder 拒,但 binding 来的 audio silent drop —
-      // 用户体感不一致(同样不支持,一种拒一种丢)。统一改 silent drop + 日志,不阻断生成
-      const allAudioUrls =
-        capsParams.supportsRefAudio === true
-          ? [
-              ...rawRefAudioUrls,
-              ...(input.refAudioUrl ? [input.refAudioUrl] : []),
-            ]
-          : [];
-      const droppedAudio =
-        (capsParams.supportsRefAudio === true ? 0 : rawRefAudioUrls.length) +
-        (capsParams.supportsRefAudio !== true && input.refAudioUrl ? 1 : 0);
-      if (droppedAudio > 0) {
-        console.warn(
-          `[generateVideo] provider ${providerId} 不支持 refAudio,丢弃 ${droppedAudio} 个音频 URL`,
-        );
-      }
-      // 五七-3:去重(角色形象绑定自动带的 voiceMediaId 可能与显式 SOUND_VOICE 绑定重复)
-      const refAudioUrls = Array.from(new Set(allAudioUrls));
-      // 六八:缺声线人物记警(不阻断 — 没有声线也允许生成,但日志可查"为什么这条没带某人声音")
-      if (voiceMissing.length > 0) {
-        console.warn(
-          `[generateVideo] group ${grp.number} 人物缺参考声线,本次生成不带其声音参考:${voiceMissing.map((m) => m.name).join('、')}`,
-        );
-      }
-
-      // M3a(六八)关键帧先行:组首 shot.startFrameMediaId 已确认 → 解析 URL 作首帧约束。
-      // caps 门:supportsFirstFrame !== true 时静默丢弃 + 日志(口径同 refAudio;
-      // seedance-2.0-fast 首尾帧支持待真打,kling/happyhorse 各家能力在 admin/providers 配)。
-      let firstFrameUrl: string | undefined;
-      const firstShot = await ctx.prisma.shot.findFirst({
-        where: { groupId: grp.id, deletedAt: null },
-        orderBy: { positionIdx: 'asc' },
-        select: { startFrameMediaId: true },
-      });
-      if (firstShot?.startFrameMediaId) {
-        if (capsParams.supportsFirstFrame === true) {
-          const m = await ctx.prisma.mediaItem.findFirst({
-            where: { id: firstShot.startFrameMediaId, deletedAt: null },
-            select: { cdnUrl: true, storageKey: true },
+      if (!result.ok) {
+        if (result.code === 'ENQUEUE_FAILED') {
+          throw new TRPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: result.message,
+            cause: result.cause,
           });
-          const u = m ? await resolveMediaFetchUrl(m, { expiresInSeconds: 12 * 3600 }) : null;
-          if (u) firstFrameUrl = u;
-          else {
-            console.warn(
-              `[generateVideo] group ${grp.number} 首帧媒体 URL 解析失败,本次不带首帧约束`,
-            );
-          }
-        } else {
-          console.warn(
-            `[generateVideo] provider ${providerId} 未声明 supportsFirstFrame,丢弃组 ${grp.number} 的首帧约束(去 admin/providers 配 supportsFirstFrame:true)`,
-          );
         }
-      }
-
-      // 三十六收工 R2:入队 + 失败时回滚 attempt + REFUND 抽到 enqueueVideoJobOrRefund helper
-      // (同 failPlaceholder/refundPrepayForAttempt 单一真相源,enqueue 失败统一走 helper)
-      try {
-        await enqueueVideoJobOrRefund(ctx.prisma, {
-          attemptId: attempt.id,
-          startedAt,
-          userId: ctx.user.id,
-          projectId: grp.episode.projectId,
-          episodeId: grp.episodeId,
-          providerId,
-          payload: {
-            attemptId: attempt.id,
-            projectId: grp.episode.projectId,
-            episodeId: grp.episodeId,
-            shotGroupId: grp.id,
-            userId: ctx.user.id,
-            providerId,
-            modelId: providerId,
-            prompt: compiled.positive,
-            durationS,
-            aspectRatio,
-            refImageUrls: refImageUrls.length > 0 ? refImageUrls : undefined,
-            refAudioUrls: refAudioUrls.length > 0 ? refAudioUrls : undefined,
-            // M3a:关键帧首帧约束(已过 caps 门;adapter 收 VideoRequest.firstFrameUrl)
-            firstFrameUrl,
-            // W5.5.1 扩展参数透传(Provider 自己消费 extra)
-            resolution: input.resolution,
-            generateAudio: wantAudio,
-            addWatermark: input.addWatermark,
-            webSearchEnabled: input.webSearchEnabled,
-            refVideoUrl: input.refVideoUrl,
-            refAudioUrl: input.refAudioUrl,
-            groupNumber: grp.number,
-            // 第 19 轮 audit P1:requestId 贯通到 worker,运维 grep 日志可看全链路
-            requestId: ctx.requestId,
-          },
-          enqueue: (p) => enqueueVideoGenJob(p),
-        });
-      } catch (enqueueErr) {
-        const errMsg = enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr);
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: `视频任务入队失败,请稍后重试:${errMsg}`,
-          cause: enqueueErr,
-        });
+        throw new TRPCError({ code: result.code, message: result.message });
       }
 
       await logOperation(ctx, 'aigc.generateVideo.enqueued', 'shotGroup', grp.id, null, {
-        attemptId: attempt.id,
+        attemptId: result.attemptId,
         providerId,
         aspectRatio,
         durationS,
@@ -539,7 +184,7 @@ export const videoProcedures = {
       });
 
       return {
-        attemptId: attempt.id,
+        attemptId: result.attemptId,
         status: 'RUNNING' as const,
       };
     }),
@@ -751,6 +396,14 @@ export const videoProcedures = {
         skipLockCheck: true,
         allowArchived: true,
       });
+      // M3c:QC 配置态(开关 + 判官 binding 都有才算启用)— qcPending 轮询判定用
+      const qcSettings = await loadSystemSettings(ctx.prisma, [
+        TAKE_QC_ENABLED_KEY,
+        QC_JUDGE_BINDING_KEY,
+      ]);
+      const qcConfigured =
+        qcSettings[TAKE_QC_ENABLED_KEY] === 'true' &&
+        !!qcSettings[QC_JUDGE_BINDING_KEY]?.trim();
       const attempts = await ctx.prisma.generationAttempt.findMany({
         where: {
           shotGroupId: grp.id,
@@ -795,6 +448,8 @@ export const videoProcedures = {
             /* 签名失败回退直链 */
           }
         }
+        // M3c:QC 字段(qcJson 形状由 core/qc 写入,这里防御性窄化)
+        const qc = readQcJson(a.qcJson);
         results.push({
           id: a.id,
           status: a.status,
@@ -809,6 +464,20 @@ export const videoProcedures = {
           aspectRatio: media?.aspectRatio ?? null,
           mediaId: media?.id ?? null,
           rejected: a.rejected,
+          // M3c QC:分数/漂移/点评/失败原因 + pending(轮询依据,时间窗防旧 take 永轮询)
+          qcScore: a.qcScore,
+          qcDrift: qc.drift,
+          qcNotes: qc.notes,
+          qcError: qc.error,
+          // 深审修(P1):时间窗锚点用 finishedAt(成功时刻,QC 真正起算点)— 原 createdAt
+          // 在批量排队 >15min 时窗口提前耗尽,评分中却不显示"QC…"也不轮询
+          qcPending:
+            qcConfigured &&
+            a.status === 'SUCCESS' &&
+            !a.rejected &&
+            a.qcScore === null &&
+            !qc.error &&
+            (a.finishedAt ?? a.createdAt).getTime() > Date.now() - QC_PENDING_WINDOW_MS,
         });
       }
       return results;
