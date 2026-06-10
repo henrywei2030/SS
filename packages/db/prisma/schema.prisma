@@ -1240,6 +1240,7 @@ enum PromptCategory {
   PANORAMA_360 // 360 全景
   PROMPT_FRAGMENT // 复用片段
   PROMPT_PRESET // 预设组合（景别/机位/运镜/光线等）
+  PROMPT_OPTIMIZER // M6 动态 prompt 优化器 meta-prompt(按目标 provider 自适应)
 }
 
 model StyleProfile {

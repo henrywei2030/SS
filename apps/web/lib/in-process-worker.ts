@@ -9,6 +9,7 @@ import { processVideoGenJob, recoverStaleVideoAttempts } from '@ss/core/video-ge
 import { VOICE_SAMPLE_JOB_KIND, processVoiceSampleJob } from '@ss/core/voice';
 import { CACHE_VIDEO_JOB_KIND, processCacheVideoJob } from '@ss/core/media';
 import { QC_JOB_KIND, processQcJob } from '@ss/core/qc';
+import { OPTIMIZE_EPISODE_JOB_KIND, processOptimizeEpisodeJob } from '@ss/core/prompt-optimizer';
 import { registerJobHandler } from '@ss/queue/job-queue';
 import { registerInProcessVideoHandler } from '@ss/queue/video-gen';
 
@@ -32,6 +33,7 @@ export async function startInProcessVideoWorker(): Promise<void> {
   registerJobHandler(VOICE_SAMPLE_JOB_KIND, (data) => processVoiceSampleJob(data));
   registerJobHandler(CACHE_VIDEO_JOB_KIND, (data) => processCacheVideoJob(data)); // 六八 视频本地缓存
   registerJobHandler(QC_JOB_KIND, (data) => processQcJob(data)); // M3c take QC 质检
+  registerJobHandler(OPTIMIZE_EPISODE_JOB_KIND, (data) => processOptimizeEpisodeJob(data)); // M6 整集提示词优化
 
   // 回收孤儿(上次 app 退出时未完成的视频 job)
   await recoverStaleVideoAttempts(workerId);

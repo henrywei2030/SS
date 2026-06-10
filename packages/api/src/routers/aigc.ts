@@ -21,6 +21,7 @@ import { videoProcedures } from './aigc-video.js';
 import { groupsProcedures } from './aigc-groups.js';
 import { keyframeProcedures } from './aigc-keyframe.js';
 import { batchProcedures } from './aigc-batch.js';
+import { optimizeProcedures } from './aigc-optimize.js';
 
 // ---------------------------------------------------------------------------
 // Router(各 procedure 见同目录 aigc-<组>.ts;共用 helper 见 aigc-shared.ts)
@@ -36,4 +37,6 @@ export const aigcRouter = router({
   ...keyframeProcedures,
   // F4(M4):整集批量生成 / 取消排队
   ...batchProcedures,
+  // M6:动态 Prompt 优化(单组同步 / 整集后台 job)
+  ...optimizeProcedures,
 });

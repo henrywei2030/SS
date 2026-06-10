@@ -106,6 +106,8 @@
 ### M6 · F7 动态 Prompt 优化(~2.5 sessions)
 见 §5。
 
+> **状态(2026-06-11 七十 mac-studio)**:**M6a 优化器层 + M6b ContextContributor 架构 ✅ 落地**(单组✨同步 + 整集后台 job + @token 保全守卫 + 乐观锁 + `[AI优化]` 编辑标记);**M6c(editHistory embedding 飞轮)并入 [docs/07-prompt-harness.md](07-prompt-harness.md) H3 作超集** — 八维知识库 × mini-harness 方案已定稿,后续 prompt 线演进以 07 为准。
+
 ---
 
 ## 4. 跨分镜一致性方案(四层)

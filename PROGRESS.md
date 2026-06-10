@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-06-11(周四,mac-studio · 七十:M6a/b 动态 Prompt 优化落地 + 八要素文章研读 + 八维 Prompt Mini-Harness 方案定稿)— 代码 + 规划双线
+
+**完成**
+- ✅ **M6a 优化器层**(`core/prompt-optimizer/`):复用预留 binding `binding.storyboard.prompt.modelId`(留空=功能关,静态编译零影响)→ meta-prompt(DB 模板 `prompt_optimizer_main` + core 兜底双写,PROMPT_OPTIMIZER 枚举 migration 点头 41/41)→ LLM 改写 → **@token 保全守卫**(extractAtTokens/findLostTokens,丢任一 @图片N/@音频N 即拒写回 — 编译期 unknownTokens 会拒生成,坏提示词绝不入库)→ `applyOptimizedPrompt`(normalizePrompt 归一 + **乐观锁**防覆盖优化期间的人工编辑 + PromptEdit 记 `[AI优化 model]` 标记(H3 飞轮的 AI/人工区分依据)+ `prompt.optimize` 记账,**并入 text.generate 同一日预算池**,inspiration 守卫口径同步)
+- ✅ **M6b ContextContributor 架构**:首批 shot(四维+音效+时长逐镜)/ assets(token→实体对照)/ style(风格+禁用词)/ continuity(上组衔接即时推导,切场改"新场开场"指引,零落库)四个 contributor;`prompt.optimizer.contributors` CSV 开关;**新维度=加文件+加 key,核心零改动**;按目标模型家族(seedance 叙事段/kling 关键词运镜/happyhorse 参考图×动作/generic)自适应文风
+- ✅ **两条入口**:单组「✨AI 优化」(同步即点即得)+「✨优化整集」(**ss-jobs 后台 job** `optimize-prompts`:N 组×LLM 数秒不占 HTTP,逐组过预算打满即止,NO_BINDING 全局缺失即中止,完成铃铛+webhook 通知,bullmq jobId 同集去重;双驱动注册);admin 模板分类标签补「提示词优化器」
+- ✅ 回归:typecheck 16/16 · 测试 330+2skip(core 224 含优化器纯函数 9 测:token 守卫/CSV 解析/LLM 包裹剥离/家族识别/装配段落顺序)· db:sync 落库验证(9 模板+35 设置)
+- ✅ **八要素文章研读**(用户提供正文 — WebFetch/curl/Chrome 扩展限制/jina+全网搜 四路拉取全被微信风控拦,如实报告后用户粘贴):八要素公式/时间轴切片/强化词五类/避坑五条 全文吃透
+- ✅ **Prompt Mini-Harness 方案两轮迭代定稿** → 落盘 **[docs/07-prompt-harness.md](docs/07-prompt-harness.md)**:第一轮 = 八要素×系统逐维对账(6/8 已有;时间轴=最大金矿 — 每镜 durationS 数据全有从未送进 prompt;画质/约束全缺)+ P0-P3;用户升级需求(八维独立 RAG + LLM 编排 + mini-harness)→ 五段装配流水线(Planner/Retriever/Composer/Checkers 硬门软门/Repair ≤2 轮)+ PromptKnowledge 单表多维(projectId 作用域=世界观条目)+ 飞轮三回路;第二轮按真实代码压出 **6 个修正点**:`[i/N]` 是显示约定非结构契约 → timelinePart 从 Shot 表生成结构段不解析正文 / mergeShots 默认拼接丢 movement/lighting/sound(5 行捡漏)/ ProviderKind 'embedding' 枚举早已预留 / H1 零核心改动(一个 knowledge contributor)/ 种子 embedding 懒回填(离线可 seed,tags 降级链)/ 记账统一 action 收口
+- ✅ docs:07 新建(架构/数据模型/H0-H3 分期/退化阶梯/延迟分档/ADR D-A~D-F)· 06 蓝图 M6 节标注 a/b ✅ + M6c 并入 07 H3 · TODO 主线区新增 Harness 队列
+
+**问题/待决策**
+- ❓ 真打 gate 扩为"三连+一":④ 可选顺验 ✨优化(token 保全/写回/乐观锁)
+- ❓ H0 起手待用户确认开工时机(不碰资金路径,可与 gate 并行)
+
+**下次接着做**
+- 📌 **H0 基座**(docs/07 §5):timelinePart/enhancerPart 编译段 + mergeShots 捡漏 + PromptKnowledge 表&种子语料&懒 embedding + 检索纯函数(migration ×1 点头)
+- 📌 真打回归 gate 三连+一(用户在线时)
+- 📌 gate 后:F5b 并抽/failover 或 H1
+
+---
+
 ## 2026-06-11(周四凌晨,mac-studio · 六九跨夜:M3c QC 质检 + M4 先决重构 + F4 整集批量 + 两遍深审 16 实修 + F5a relay 泛化)— 零真打开销,纯代码推进 + 自主深审
 
 **完成**

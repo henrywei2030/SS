@@ -76,6 +76,14 @@ export function BatchToolbar({
     onError: (e) => toast.error(`批量生成失败:${e.message}`),
   });
 
+  // M6:整集提示词优化(后台 job,完成铃铛通知)— 与批量生成同属集级动作,共驻工具条
+  const optimizeEpisodeMutation = trpc.aigc.optimizeEpisodePrompts.useMutation({
+    onSuccess: (r) => {
+      toast.success(`已进后台优化 ${r.candidates} 组提示词 — 完成后铃铛通知,期间可继续操作`);
+    },
+    onError: (e) => toast.error(`整集优化失败:${e.message}`),
+  });
+
   const cancelMutation = trpc.aigc.cancelQueuedForEpisode.useMutation({
     onSuccess: (data) => {
       if (data.note) toast.info(data.note);
@@ -142,6 +150,21 @@ export function BatchToolbar({
           取消排队
         </button>
       )}
+      {/* M6:整集提示词优化(优化在生成之前 — 蓝图预生成+缓存语义) */}
+      <button
+        type="button"
+        onClick={() => optimizeEpisodeMutation.mutate({ episodeId })}
+        disabled={optimizeEpisodeMutation.isPending}
+        className="flex items-center gap-1 rounded-md border border-[hsl(var(--color-border))] px-2 py-1 text-[11px] hover:bg-[hsl(var(--color-muted))] disabled:opacity-50"
+        title="用 LLM 后台优化本集所有组的提示词(完成铃铛通知;需配 binding.storyboard.prompt.modelId)"
+      >
+        {optimizeEpisodeMutation.isPending ? (
+          <Loader2 className="size-3 animate-spin" />
+        ) : (
+          '✨'
+        )}
+        优化整集
+      </button>
       <button
         type="button"
         onClick={() => void openConfirm()}

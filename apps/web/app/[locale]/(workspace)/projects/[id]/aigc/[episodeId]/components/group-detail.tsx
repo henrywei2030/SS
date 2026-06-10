@@ -83,6 +83,21 @@ export function GroupDetail({
     }
   }, [data, editingPrompt, savePromptPending, normalizedGroupPrompt]);
 
+  // M6:单组 AI 优化(写回 ShotGroup.prompt,人可审可改;binding 未配时服务端引导去 /admin/bindings)
+  const groupUtils = trpc.useUtils();
+  const optimizeMut = trpc.aigc.optimizeGroupPrompt.useMutation({
+    onSuccess: (r) => {
+      toast.success(
+        r.changed
+          ? `提示词已优化(${r.modelId} · ¥${r.costCny.toFixed(3)} · 维度:${r.contributorsUsed.join('+')})`
+          : `优化器认为当前提示词已最佳,未改动(¥${r.costCny.toFixed(3)})`,
+      );
+      void groupUtils.aigc.getGroupDetail.invalidate({ groupId });
+      void groupUtils.aigc.previewCompiledPrompt.invalidate({ groupId });
+    },
+    onError: (e) => toast.error(`优化失败:${e.message}`),
+  });
+
   if (isLoading || !data) {
     return (
       <div className="text-sm text-[hsl(var(--color-muted-foreground))]">
@@ -203,12 +218,23 @@ export function GroupDetail({
                 </button>
               </>
             ) : (
-              <button
-                onClick={() => setEditingPrompt(true)}
-                className="rounded border border-[hsl(var(--color-border))] px-2 py-1 text-[length:0.78em] hover:bg-[hsl(var(--color-muted))]"
-              >
-                编辑
-              </button>
+              <>
+                <button
+                  onClick={() => setEditingPrompt(true)}
+                  className="rounded border border-[hsl(var(--color-border))] px-2 py-1 text-[length:0.78em] hover:bg-[hsl(var(--color-muted))]"
+                >
+                  编辑
+                </button>
+                {/* M6:AI 优化(LLM 按目标视频模型风格改写,@token 服务端保全校验) */}
+                <button
+                  onClick={() => optimizeMut.mutate({ groupId })}
+                  disabled={optimizeMut.isPending}
+                  className="rounded border border-[hsl(var(--color-border))] px-2 py-1 text-[length:0.78em] hover:bg-[hsl(var(--color-muted))] disabled:opacity-50"
+                  title="用 LLM 优化本组提示词(写回后仍可手动编辑;需先在 /admin/bindings 配优化器模型)"
+                >
+                  {optimizeMut.isPending ? '✨ 优化中…' : '✨ AI 优化'}
+                </button>
+              </>
             )}
           </div>
         </div>

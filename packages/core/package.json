@@ -17,7 +17,8 @@
     "./notify": "./notify/index.ts",
     "./compose": "./compose/index.ts",
     "./voice": "./voice/index.ts",
-    "./qc": "./qc/index.ts"
+    "./qc": "./qc/index.ts",
+    "./prompt-optimizer": "./prompt-optimizer/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -14,6 +14,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   PANORAMA_360: '360 全景',
   PROMPT_FRAGMENT: '复用片段',
   PROMPT_PRESET: '预设组合',
+  PROMPT_OPTIMIZER: '提示词优化器',
 };
 
 export function PromptsManager(): React.ReactElement {
