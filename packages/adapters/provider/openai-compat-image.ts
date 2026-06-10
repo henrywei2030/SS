@@ -65,22 +65,41 @@ interface OpenAIErrorResponse {
 }
 
 /**
- * 把 aspectRatio (如 '16:9') 映射到 size 字符串 (像素)。
- * ⚠️ 五八-fix:Seedream 5.0 要求图像 ≥3,686,400 像素(≈2.5K),原映射(1080x1920=2.07M)太小被拒。
- *   统一提到 ~2.5K 档,各比例总像素均 ≥3.69M。(注:gpt-image/DALL-E 只接受固定 1024 档 —
- *   当前 binding 是 Seedream;真正的 per-model 尺寸映射留 Phase 2,届时按 cfg.defaultModel 分支。)
+ * 把 aspectRatio (如 '16:9') 映射到 size 字符串 (像素)— **按模型分档**(Phase 2 预留项六八落地)。
+ *
+ * Seedream 档(~2.5K):五八-fix,Seedream 5.0 要求 ≥3,686,400 像素,各比例均 ≥3.69M。
+ * gpt-image 档(~1.5K):六八真打 — gpt-image-2 经 moyu 用 2.5K 档时 img2img 必超 4 分钟,
+ *   moyu 服务端 ~4-5min 主动断连(write EPIPE);gpt-image 本不需要 2.5K,降到 ~1.5M 像素
+ *   生成提速一倍以上,稳进服务端窗口。两档全部 16 对齐(gpt-image-2 要求宽高可被 16 整除)。
  */
-function aspectRatioToSize(aspect: string | undefined, fallback: string): string {
+function aspectRatioToSize(
+  aspect: string | undefined,
+  fallback: string,
+  model?: string,
+): string {
   if (!aspect) return fallback;
+  if (model && /gpt-image/i.test(model)) {
+    const gptMap: Record<string, string> = {
+      '1:1': '1024x1024', // 1.05M
+      '16:9': '1600x896', // 1.43M(100×16 / 56×16,比例 1.786≈16:9)
+      '9:16': '896x1600', // 1.43M
+      '4:3': '1344x1008', // 1.35M(84×16 / 63×16)
+      '3:4': '1008x1344', // 1.35M
+      '2:3': '1024x1536', // 1.57M
+      '3:2': '1536x1024', // 1.57M
+      '2:1': '1792x896', //  1.61M(全景,严格 2:1)
+    };
+    return gptMap[aspect] ?? '1024x1024';
+  }
   const map: Record<string, string> = {
     '1:1': '2048x2048', //  4.19M
-    '16:9': '2688x1512', // 4.06M
-    '9:16': '1512x2688', // 4.06M
+    '16:9': '2688x1520', // 4.09M(95×16)
+    '9:16': '1520x2688', // 4.09M
     '4:3': '2304x1728', //  3.98M
     '3:4': '1728x2304', //  3.98M
     '2:3': '1664x2496', //  4.15M
     '3:2': '2496x1664', //  4.15M
-    '2:1': '2912x1456', //  4.24M(全景)
+    '2:1': '2880x1440', //  4.15M(全景,严格 2:1 且 16 对齐)
   };
   return map[aspect] ?? '2048x2048';
 }
@@ -115,7 +134,7 @@ export class OpenAICompatImageProvider extends BaseProvider implements IImagePro
   async generate(req: ImageRequest, ctx: CallContext): Promise<ImageResult> {
     const modelId = req.model ?? this.cfg.defaultModel;
     const n = req.count ?? 1;
-    const size = aspectRatioToSize(req.aspectRatio, this.cfg.defaultSize ?? '1024x1024');
+    const size = aspectRatioToSize(req.aspectRatio, this.cfg.defaultSize ?? '1024x1024', modelId);
 
     await this.checkBudget(ctx.projectId, this.estimateCost(req));
 
@@ -141,10 +160,11 @@ export class OpenAICompatImageProvider extends BaseProvider implements IImagePro
           Authorization: `Bearer ${this.cfg.apiKey}`,
         },
         body: JSON.stringify(body),
-        bodyTimeout: 180_000,
         // 五六-2 链路优化:图像非流式生成(多 GPU kernel)常需 1-3min,headers 只在生成完才返,
-        //   原 60s 必撞 Headers Timeout → 提到 180s 与 bodyTimeout 对齐(对照文本 LLM 的 300s 调优)
-        headersTimeout: 180_000,
+        //   原 60s 必撞 Headers Timeout。六八真打:gpt-image-2 经 moyu 2K 档 3-6min
+        //   (尤其 img2img),180s 仍必撞 → 提到 600s(三视图/九宫格/关键帧真打实测口径)
+        bodyTimeout: 600_000,
+        headersTimeout: 600_000,
       });
       const text = await respBody.text();
       if (statusCode >= 400) {
@@ -250,7 +270,9 @@ export class OpenAICompatImageProvider extends BaseProvider implements IImagePro
         method: 'POST',
         headers: { Authorization: `Bearer ${this.cfg.apiKey}` },
         body: form,
-        signal: AbortSignal.timeout(180_000),
+        // 六八真打:gpt-image-2 经 moyu 的 img2img(三视图/九宫格/关键帧)实测 3-6min,
+        // 原 180s 必超时("The operation was aborted due to timeout")→ 600s
+        signal: AbortSignal.timeout(600_000),
       });
       const text = await r.text();
       if (!r.ok) {

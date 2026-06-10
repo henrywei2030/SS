@@ -17,7 +17,10 @@ import { getStorageAdapter, buildStorageKey } from '@ss/adapters/storage';
 import { sanitizeErrorMsg } from '@ss/shared/errors';
 import { z } from 'zod';
 
-import { normalizeAudio } from '../media/ffmpeg.js';
+import { extractVoiceLabel } from '../asset/profile.js';
+import { normalizeAudio, probeMedia } from '../media/ffmpeg.js';
+import { voiceSampleFilename } from '../media/naming.js';
+import { syncMediaToRelay } from '../media/relay-sync.js';
 import { notify } from '../notify/index.js';
 import { decodeAudioToPcm, encodeWavPcm16 } from './audio-io.js';
 import { getNanoTtsRuntime } from './nano-runtime.js';
@@ -32,6 +35,8 @@ export const VoiceSampleJobDataSchema = z.object({
   seedVoice: z.string().default('builtin:Yuewen'),
   /** 不传则用角色独白/小传自动取材 */
   textOverride: z.string().max(120).optional(),
+  /** 六八批量生成:成功时不发铃铛(防 N 连铃);失败仍通知 */
+  silent: z.boolean().default(false),
 });
 export type VoiceSampleJobData = z.infer<typeof VoiceSampleJobDataSchema>;
 
@@ -59,6 +64,7 @@ export async function processVoiceSampleJob(data: unknown): Promise<void> {
       monologue: true,
       bio: true,
       voiceMediaId: true,
+      profileJson: true,
     },
   });
   if (!asset) {
@@ -113,12 +119,16 @@ export async function processVoiceSampleJob(data: unknown): Promise<void> {
         : { voice: job.seedVoice.replace(/^builtin:/, '') }),
     });
 
-    // 4. WAV → M2-3 规范化(掐静音 + 响度归一 -16 LUFS)→ m4a
+    // 4. WAV → M2-3 规范化(掐静音 + 响度归一 -16 LUFS + 截 15s)→ m4a
     const rawWav = join(tmp, 'raw.wav');
     await writeFile(rawWav, encodeWavPcm16(result.channels, result.sampleRate));
     const outM4a = join(tmp, 'sample.m4a');
     await normalizeAudio({ input: rawWav, output: outM4a });
     const outBuf = await readFile(outM4a);
+    // 六八小修:meta 记成品时长(规范化掐静音+截 15s 后),原 result.durationS 是合成原始时长
+    const probed = await probeMedia(outM4a).catch(() => null);
+    const finalDurationS =
+      Math.round((probed?.durationS ?? result.durationS) * 10) / 10;
 
     // 5. 落库 + 闭环绑定
     const key = buildStorageKey({
@@ -128,20 +138,41 @@ export async function processVoiceSampleJob(data: unknown): Promise<void> {
       ext: 'm4a',
     });
     await getStorageAdapter().putObject(key, outBuf, { contentType: 'audio/mp4' });
+    // 六八:声音设定描述(profileJson.voiceLabel)记入 meta 可追溯;
+    //   Nano 不支持音色 instruct,描述的生成期作用在「推荐种子声线」(recommend-seed.ts)
+    const voiceDescription = extractVoiceLabel(asset.profileJson);
+    // 六八:按开关 best-effort 同步中转站素材库(远端 provider 投喂用,本地 dev 默认关)
+    const syncSetting = await prisma.systemSetting.findUnique({
+      where: { key: 'voice.sample.syncToRelay' },
+      select: { value: true },
+    });
+    const relayMeta =
+      syncSetting?.value === 'true'
+        ? await syncMediaToRelay({
+            storageKey: key,
+            kind: 'AUDIO',
+            filename: voiceSampleFilename(asset.name),
+          })
+        : null;
     const media = await prisma.mediaItem.create({
       data: {
         projectId: asset.projectId,
         scope: 'PROJECT',
         kind: 'AUDIO',
-        filename: `${asset.name}-声线样本.m4a`,
+        // 六八命名规范:主体_用途(素材库一眼可读,与人物设定绑定)
+        filename: voiceSampleFilename(asset.name),
+        assetCategory: 'CHARACTER',
         mimeType: 'audio/mp4',
         sizeBytes: outBuf.length,
         storageKey: key,
         meta: {
-          durationS: Math.round(result.durationS * 10) / 10,
+          durationS: finalDurationS,
+          synthDurationS: Math.round(result.durationS * 10) / 10,
           tts: 'moss-tts-nano',
           seedVoice: voiceLabel,
           sampleText: text,
+          ...(voiceDescription ? { voiceDescription } : {}),
+          ...(relayMeta ?? {}),
         },
         source: 'AIGC',
         sourceRef: `voice-sample:${asset.id}`,
@@ -161,7 +192,7 @@ export async function processVoiceSampleJob(data: unknown): Promise<void> {
         providerId: 'local-moss-tts-nano',
         modelId: 'MOSS-TTS-Nano-100M-ONNX',
         action: 'AUDIO',
-        inputJson: { text, seedVoice: voiceLabel },
+        inputJson: { text, seedVoice: voiceLabel, voiceDescription },
         outputMediaId: media.id,
         unitPriceCny: '0',
         costCny: '0',
@@ -172,13 +203,16 @@ export async function processVoiceSampleJob(data: unknown): Promise<void> {
       },
     });
 
-    await notify(prisma, {
-      userId: job.userId,
-      type: 'job_done',
-      title: `「${asset.name}」声线样本已生成`,
-      body: `${voiceLabel} · ${Math.round(result.durationS)}s · 已自动设为该角色参考音频(本地生成,免费)`,
-      payload: { assetId: asset.id, mediaId: media.id },
-    });
+    // 六八:批量生成时静默成功(防 N 连铃);失败通知不受 silent 影响
+    if (!job.silent) {
+      await notify(prisma, {
+        userId: job.userId,
+        type: 'job_done',
+        title: `「${asset.name}」声线样本已生成`,
+        body: `${voiceLabel} · ${Math.round(finalDurationS)}s · 已自动设为该角色参考音频(本地生成,免费)`,
+        payload: { assetId: asset.id, mediaId: media.id },
+      });
+    }
   } catch (err) {
     const msg = sanitizeErrorMsg(err, 400);
     console.error(`[voice-sample] asset ${job.assetId} failed:`, msg);

@@ -12,8 +12,14 @@ const withNextIntl = createNextIntlPlugin('./i18n.ts');
 //   不开此开关 → @ss/db 仍走 transpile,行为完全不变。
 const isDesktopBuild = process.env.SS_DESKTOP_BUILD === '1';
 
+// 六八:桌面构建走独立 distDir — `next build` 与 `next dev` 共用 .next 会互踩
+// (打包期间用户正在用 dev server 时页面直接报错)。隔离后打包随时可跑,互不影响。
+// desktop-pack.mjs 读 standalone 的路径同步用 .next-desktop。
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // 桌面构建独立产物目录(见上注),dev 仍用默认 .next
+  ...(isDesktopBuild ? { distDir: '.next-desktop' } : {}),
   transpilePackages: [
     '@ss/api',
     '@ss/core',
@@ -120,9 +126,16 @@ const nextConfig: NextConfig = {
     };
     // TTS-B:onnxruntime-node 的 .node 原生绑定经 instrumentation→in-process-worker 链
     // 被 webpack 嚼(serverExternalPackages 在该编译图未生效,实测)→ 手动 externals 兜底
+    // M3b(六八):ffmpeg-static/ffprobe-static 同款 — chainTailFrame 在 tRPC route 里调 extractFrame,
+    // __dirname 定位的二进制路径被打进 vendor-chunks(实测 "ffmpeg 二进制不存在 .next/...")→ 一并兜底
     if (isServer) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (config.externals as any[]).push('onnxruntime-node', 'sentencepiece-js');
+      (config.externals as any[]).push(
+        'onnxruntime-node',
+        'sentencepiece-js',
+        'ffmpeg-static',
+        'ffprobe-static',
+      );
     }
     return config;
   },

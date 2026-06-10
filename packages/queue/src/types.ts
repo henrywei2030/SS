@@ -41,6 +41,10 @@ export const VideoGenJobDataSchema = z.object({
   // 2026-05-27 audit r13:binding 含 AUDIO 类资产(角色配音等)时 server 收集 voiceMediaId 入队
   // Seedance 2.0 metadata.content audio_url role:reference_audio 消费
   refAudioUrls: z.array(z.string().min(1)).optional(),
+  // M3a 关键帧先行(六八):组首 shot.startFrameMediaId 解析的首/尾帧约束 URL(FLF2V)
+  // provider adapter 已支持(seedance first_frame_image / content role 等),这里补透传
+  firstFrameUrl: z.string().min(1).optional(),
+  lastFrameUrl: z.string().min(1).optional(),
 
   // ============================================================================
   // W5.5.1 扩展参数(2026-05-24)— 对照即梦 / 可灵等同行 UI

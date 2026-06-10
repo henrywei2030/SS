@@ -49,27 +49,33 @@ export function defaultTtsModelsDir(): string {
 
 /**
  * 18 条内置声线静态清单(manifest 同源快照)— UI 在权重未下载时也能展示选项。
- * lang 仅 UI 标注用(按名称推断),不影响功能;真相源是 manifest.builtin_voices。
+ * lang/gender/desc 仅 UI 标注 + 推荐用,不影响功能;真相源是 manifest.builtin_voices
+ * (gender 来自 manifest.group,desc 按 display_name 人工转写,2026-06-10 六八快照)。
  */
-export const NANO_BUILTIN_VOICES: Array<{ name: string; lang: 'zh' | 'en' | 'jp' }> = [
-  { name: 'Yuewen', lang: 'zh' },
-  { name: 'Xiaoyu', lang: 'zh' },
-  { name: 'Lingyu', lang: 'zh' },
-  { name: 'Junhao', lang: 'zh' },
-  { name: 'Zhiming', lang: 'zh' },
-  { name: 'Weiguo', lang: 'zh' },
-  { name: 'Ava', lang: 'en' },
-  { name: 'Bella', lang: 'en' },
-  { name: 'Adam', lang: 'en' },
-  { name: 'Nathan', lang: 'en' },
-  { name: 'Trump', lang: 'en' },
-  { name: 'Soyo', lang: 'jp' },
-  { name: 'Saki', lang: 'jp' },
-  { name: 'Mortis', lang: 'jp' },
-  { name: 'Umiri', lang: 'jp' },
-  { name: 'Mei', lang: 'jp' },
-  { name: 'Anon', lang: 'jp' },
-  { name: 'Arisa', lang: 'jp' },
+export const NANO_BUILTIN_VOICES: Array<{
+  name: string;
+  lang: 'zh' | 'en' | 'jp';
+  gender: 'M' | 'F';
+  desc: string;
+}> = [
+  { name: 'Yuewen', lang: 'zh', gender: 'F', desc: '飒爽利落(机车)' },
+  { name: 'Xiaoyu', lang: 'zh', gender: 'F', desc: '明亮(明星范)' },
+  { name: 'Lingyu', lang: 'zh', gender: 'F', desc: '低沉温柔(深夜电台)' },
+  { name: 'Junhao', lang: 'zh', gender: 'M', desc: '标准青年' },
+  { name: 'Zhiming', lang: 'zh', gender: 'M', desc: '京味闲聊' },
+  { name: 'Weiguo', lang: 'zh', gender: 'M', desc: '说书苍劲' },
+  { name: 'Ava', lang: 'en', gender: 'F', desc: '英文女声' },
+  { name: 'Bella', lang: 'en', gender: 'F', desc: '英文女声(轻柔)' },
+  { name: 'Adam', lang: 'en', gender: 'M', desc: '英文男声(新闻)' },
+  { name: 'Nathan', lang: 'en', gender: 'M', desc: '英文男声(舒缓)' },
+  { name: 'Trump', lang: 'en', gender: 'M', desc: '英文男声(特朗普)' },
+  { name: 'Soyo', lang: 'jp', gender: 'F', desc: '日文女声' },
+  { name: 'Saki', lang: 'jp', gender: 'F', desc: '日文女声' },
+  { name: 'Mortis', lang: 'jp', gender: 'F', desc: '日文女声' },
+  { name: 'Umiri', lang: 'jp', gender: 'F', desc: '日文女声' },
+  { name: 'Mei', lang: 'jp', gender: 'F', desc: '日文女声' },
+  { name: 'Anon', lang: 'jp', gender: 'F', desc: '日文女声' },
+  { name: 'Arisa', lang: 'jp', gender: 'F', desc: '日文女声' },
 ];
 
 function isLfsPointer(path: string): boolean {

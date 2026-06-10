@@ -5,3 +5,7 @@
  *   防被 edge bundle 误拉(六二 instrumentation pg 同款坑)。
  */
 export * from './ffmpeg.js';
+export * from './naming.js';
+export * from './relay-sync.js';
+export * from './resolve-url.js';
+export * from './cache-video.js';

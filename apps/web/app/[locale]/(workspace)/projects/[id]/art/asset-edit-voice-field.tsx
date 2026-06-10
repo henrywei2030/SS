@@ -40,9 +40,17 @@ export function VoiceField({
 
   // TTS-B:按设定生成声线样本(本地 MOSS-TTS-Nano,免费)— 异步 job,完成后自动设为参考音频
   const [seedVoice, setSeedVoice] = React.useState('builtin:Yuewen');
+  // 六八:用户没手动选过 → 自动选中按设定(声音描述/性别/年龄)推荐的种子声线
+  const [seedTouched, setSeedTouched] = React.useState(false);
   const [generating, setGenerating] = React.useState(false);
   const utils = trpc.useUtils();
-  const { data: voiceSeeds } = trpc.asset.listVoiceSeeds.useQuery();
+  const { data: voiceSeeds } = trpc.asset.listVoiceSeeds.useQuery({ assetId });
+  const recommendedSeed = voiceSeeds?.recommended?.seed;
+  React.useEffect(() => {
+    if (!seedTouched && recommendedSeed) {
+      setSeedVoice(`builtin:${recommendedSeed}`);
+    }
+  }, [seedTouched, recommendedSeed]);
 
   // 主动轮询:utils.fetch 绕开与详情面板共享的 asset.get useQuery 实例(同 key 去重会吞掉
   // 本组件的 refetchInterval)。voiceMediaId 变化即视为完成;失败走铃铛通知。
@@ -155,14 +163,19 @@ export function VoiceField({
       <div className="flex items-center gap-1.5">
         <select
           value={seedVoice}
-          onChange={(e) => setSeedVoice(e.target.value)}
+          onChange={(e) => {
+            setSeedTouched(true);
+            setSeedVoice(e.target.value);
+          }}
           disabled={generating}
           className="h-7 min-w-0 flex-1 rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-1.5 text-[11px]"
           title="种子声线(本地模型内置 18 条;克隆=以当前参考音频为声线再生成)"
         >
           {(voiceSeeds?.seeds ?? []).map((s) => (
             <option key={s.name} value={`builtin:${s.name}`}>
-              {s.lang === 'zh' ? '中' : s.lang === 'en' ? '英' : '日'} · {s.name}
+              {s.lang === 'zh' ? '中' : s.lang === 'en' ? '英' : '日'}
+              {s.gender === 'F' ? '♀' : '♂'} {s.name} · {s.desc}
+              {s.name === recommendedSeed ? '(按设定推荐)' : ''}
             </option>
           ))}
           {voiceMediaId && <option value="current">克隆现有参考音频</option>}
@@ -187,6 +200,12 @@ export function VoiceField({
           {generating ? '生成中…' : '按设定生成'}
         </Button>
       </div>
+      {/* 六八:推荐理由(声音描述关键词命中 / 性别年龄启发) */}
+      {voiceSeeds?.recommended && (
+        <p className="text-[10px] leading-snug text-[hsl(var(--color-muted-foreground))]/80">
+          按设定推荐:{voiceSeeds.recommended.seed} — {voiceSeeds.recommended.reason}
+        </p>
+      )}
       <input ref={fileRef} type="file" accept="audio/*" className="hidden" onChange={handleFile} />
       {voiceMediaId ? (
         <div className="flex items-center gap-2">

@@ -534,3 +534,53 @@ describe('compileShotGroupVideoPrompt — token 解析', () => {
     expect(result.warnings.unknownTokens).toEqual([]);
   });
 });
+
+describe('compileShotGroupVideoPrompt — 【声线】段(六八)', () => {
+  const baseInput = {
+    text: '陆乘@图片1 在天台独白。',
+    durationS: 5,
+    references: [
+      {
+        refSlotIdx: 1,
+        kind: 'IMAGE' as const,
+        assetId: 'a_lucheng',
+        name: '陆乘',
+        mediaUrl: 'https://cdn/lucheng.png',
+      },
+    ],
+  };
+
+  it('voiceDescriptions 传入 → positive 含【声线】段,位置在正文后、参数前', () => {
+    const result = compileShotGroupVideoPrompt({
+      ...baseInput,
+      voiceDescriptions: [
+        { name: '陆乘', desc: '低沉沙哑的中年男声' },
+        { name: '林小满', desc: '清脆少女音' },
+      ],
+    });
+    expect(result.positive).toContain('【声线】陆乘:低沉沙哑的中年男声 · 林小满:清脆少女音');
+    expect(result.parts.voicePart).toBe('【声线】陆乘:低沉沙哑的中年男声 · 林小满:清脆少女音');
+    const voiceIdx = result.positive.indexOf('【声线】');
+    expect(voiceIdx).toBeGreaterThan(result.positive.indexOf('在天台独白'));
+    expect(voiceIdx).toBeLessThan(result.positive.indexOf('【参数】'));
+  });
+
+  it('不传 / 空数组 / 全空描述 → 无【声线】段(向后兼容)', () => {
+    for (const voiceDescriptions of [undefined, [], [{ name: '甲', desc: '  ' }]]) {
+      const result = compileShotGroupVideoPrompt({ ...baseInput, voiceDescriptions });
+      expect(result.positive).not.toContain('【声线】');
+      expect(result.parts.voicePart).toBe('');
+    }
+  });
+
+  it('空名/空描述项被过滤,合法项保留', () => {
+    const result = compileShotGroupVideoPrompt({
+      ...baseInput,
+      voiceDescriptions: [
+        { name: '', desc: '有描述没名字' },
+        { name: '陆乘', desc: '低沉' },
+      ],
+    });
+    expect(result.parts.voicePart).toBe('【声线】陆乘:低沉');
+  });
+});

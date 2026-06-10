@@ -65,7 +65,11 @@ export function VideoPreviewSection({
         const hasInflight = data?.some(
           (t) => t.status === 'RUNNING' || t.status === 'QUEUED',
         );
-        return hasInflight ? 5_000 : false;
+        // 六八:有"缓存中"的成功 take(直链已可播但还没落本地)也轮询,等缓存完毕翻绿
+        const hasCaching = data?.some(
+          (t) => t.status === 'SUCCESS' && !!t.videoUrl && !t.cached,
+        );
+        return hasInflight || hasCaching ? 5_000 : false;
       },
     },
   );
@@ -93,27 +97,8 @@ export function VideoPreviewSection({
   // W5.5 D6:group.durationS 作为智能默认(按分镜复杂度,1 个 shot 6s / 3 个 shots 15s 等)
   const { data: groupDetail } = trpc.aigc.getGroupDetail.useQuery({ groupId });
 
-  // 2026-05-27 audit r15 用户反馈:下载文件名规则化
-  //   {项目名}-Ep{集号}-{分镜组号}-第{N}次-{时间}.mp4
-  // takes 数组 server desc 排序,seq = takes.length - index(老的小 seq,新的大 seq)
-  const buildDownloadFilename = React.useCallback(
-    (takeId: string, createdAt: Date | string): string => {
-      const sanitize = (s: string) =>
-        s.replace(/[\\/:*?"<>|]/g, '_').trim() || 'untitled';
-      const time = new Date(createdAt);
-      const pad = (n: number) => String(n).padStart(2, '0');
-      const ts = `${time.getFullYear()}${pad(time.getMonth() + 1)}${pad(time.getDate())}-${pad(time.getHours())}${pad(time.getMinutes())}`;
-      const projectName = sanitize(groupDetail?.project?.name ?? '项目');
-      const epNum = groupDetail?.episode?.number ?? '';
-      const epPart = epNum ? `Ep${epNum}` : 'Ep';
-      const grpNum = sanitize(groupDetail?.group?.number ?? groupId.slice(0, 6));
-      const idx = takes?.findIndex((t) => t.id === takeId) ?? -1;
-      const total = takes?.length ?? 0;
-      const seq = idx >= 0 ? total - idx : 1; // 老的 seq 小,新的 seq 大
-      return `${projectName}-${epPart}-${grpNum}-第${seq}次-${ts}.mp4`;
-    },
-    [groupDetail, takes, groupId],
-  );
+  // 六八:下载改走 /api/media/[id]/download 同源路由 — 文件名由服务端按媒体命名规范
+  // (项目_第E集_分镜G_第K次.mp4)带出,原前端 buildDownloadFilename 退役。
   const utils = trpc.useUtils();
 
   // 2026-05-27 用户反馈:rejected take 视为"已删除",列表 + 主预览候选都 filter 掉
@@ -504,7 +489,20 @@ export function VideoPreviewSection({
           <div className="min-w-0 flex-1">
             {selectedTake ? (
               <>
-                <div className="truncate">{selectedTake.providerId}</div>
+                <div className="flex items-center gap-1.5 truncate">
+                  <span className="truncate">{selectedTake.providerId}</span>
+                  {/* 六八:缓存状态 — 完毕(绿,本地播放顺滑)/缓存中(琥珀,暂走直链可能卡) */}
+                  {selectedTake.videoUrl &&
+                    (selectedTake.cached ? (
+                      <span className="shrink-0 rounded bg-emerald-500/15 px-1 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                        ✓ 缓存完毕
+                      </span>
+                    ) : (
+                      <span className="shrink-0 rounded bg-amber-500/15 px-1 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                        ● 缓存中…
+                      </span>
+                    ))}
+                </div>
                 <div className="truncate text-[length:0.7em]">
                   {new Date(selectedTake.createdAt).toLocaleString()}
                   {selectedTake.durationMs &&
@@ -522,11 +520,12 @@ export function VideoPreviewSection({
             )}
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            {selectedTake?.videoUrl && (
+            {selectedTake?.videoUrl && selectedTake.mediaId && (
+              // 六八:走同源下载路由(attachment 弹另存为)— 原跨域 <a download> 会让浏览器
+              // 整页导航到 mp4(桌面壳无返回键即死路)。文件名由服务端按媒体命名规范带出。
               <a
-                href={selectedTake.videoUrl}
-                download={buildDownloadFilename(selectedTake.id, selectedTake.createdAt)}
-                title="下载视频"
+                href={`/api/media/${selectedTake.mediaId}/download`}
+                title="下载视频到本地(弹出保存对话框)"
                 aria-label="下载视频"
                 className="inline-flex h-7 items-center justify-center rounded-md border border-[hsl(var(--color-border))] px-2 hover:bg-[hsl(var(--color-muted))]"
               >
@@ -624,11 +623,10 @@ export function VideoPreviewSection({
                     )}
                   </div>
                 </button>
-                {t.videoUrl && (
+                {t.videoUrl && t.mediaId && (
                   <a
-                    href={t.videoUrl}
-                    download={buildDownloadFilename(t.id, t.createdAt)}
-                    title="下载此条视频"
+                    href={`/api/media/${t.mediaId}/download`}
+                    title="下载此条视频(弹出保存对话框)"
                     aria-label="下载视频"
                     onClick={(e) => e.stopPropagation()}
                     className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-[hsl(var(--color-border))] hover:bg-[hsl(var(--color-muted))]"

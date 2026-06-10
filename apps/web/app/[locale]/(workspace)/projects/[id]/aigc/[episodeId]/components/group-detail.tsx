@@ -1,5 +1,6 @@
 'use client';
 import * as React from 'react';
+import { toast } from 'sonner';
 
 import { trpc } from '@/lib/trpc/client';
 import { normalizePrompt } from '@ss/shared';
@@ -125,7 +126,8 @@ export function GroupDetail({
        *   xl 屏:资产 14rem / 提示词 1fr(吃剩余)/ 视频 28rem(扩了 6rem)
        *   小屏 fallback:单列上下堆 */}
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-[14rem_1fr_28rem] xl:items-start">
-      {/* Section 1: 资产关联 */}
+      {/* Section 1: 资产关联 + 关键帧(M3a) */}
+      <div className="flex flex-col gap-3">
       <section className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-[length:0.95em] font-semibold">资产关联</h3>
@@ -162,6 +164,10 @@ export function GroupDetail({
           </div>
         )}
       </section>
+
+      {/* Section 1.5: 关键帧先行(M3a 六八)— 出首帧候选 → 确认 → 视频生成作首帧约束 */}
+      <KeyframeSection groupId={groupId} />
+      </div>
 
       {/* 2026-05-27 用户反馈:删原始剧本 section,提示词区一目了然 + 节省横向空间给视频预览 */}
 
@@ -247,6 +253,44 @@ export function GroupDetail({
               )}
             </div>
           )}
+        {/* 六八(关联即全喂):人物 形象/三视图/声线 自动附带提示(身份级,不依赖 @token) */}
+        {compiled &&
+          (compiled.voiceRefs.length > 0 ||
+            compiled.voiceMissing.length > 0 ||
+            compiled.characterImageRefs.length > 0) && (
+            <div className="mt-2 space-y-1 text-xs">
+              {compiled.characterImageRefs.length > 0 && (
+                <p className="text-emerald-600 dark:text-emerald-400">
+                  🖼 生成时自动附带人物图参考:
+                  {Object.entries(
+                    compiled.characterImageRefs.reduce<Record<string, string[]>>(
+                      (acc, r) => {
+                        (acc[r.name] ??= []).push(
+                          r.kind === 'portrait' ? '形象' : '三视图',
+                        );
+                        return acc;
+                      },
+                      {},
+                    ),
+                  )
+                    .map(([name, kinds]) => `${name}(${kinds.join('+')})`)
+                    .join('、')}
+                </p>
+              )}
+              {compiled.voiceRefs.length > 0 && (
+                <p className="text-emerald-600 dark:text-emerald-400">
+                  🔊 生成时自动附带参考声线:
+                  {compiled.voiceRefs.map((v) => v.name).join('、')}
+                </p>
+              )}
+              {compiled.voiceMissing.length > 0 && (
+                <p className="text-amber-600 dark:text-amber-400">
+                  ⚠️ 人物缺参考声线(去美术工坊生成,否则视频不带其声音参考):
+                  {compiled.voiceMissing.map((v) => v.name).join('、')}
+                </p>
+              )}
+            </div>
+          )}
       </section>
 
       {/* Section 4: 视频预览(W5.4)*/}
@@ -278,6 +322,8 @@ interface BindingCardProps {
     kind: 'IMAGE' | 'AUDIO';
     mediaUrl: string | null;
     asset: { id: string; type: string; name: string; maturity: string };
+    // 六八下:人物可投喂文件清单(有才显示;生成时全部自动作为参考送出)
+    files?: { portrait: boolean; threeView: boolean; voice: boolean } | null;
   };
   onUnbind: () => void;
   unbindPending: boolean;
@@ -337,7 +383,166 @@ function BindingCard({
           <span>{binding.asset.type}</span>
           <span>{binding.asset.maturity?.replace(/_.*/, '')}</span>
         </div>
+        {/* 六八下(关联即全喂):人物可投喂文件 chips — 有的文件全部自动作为参考送给视频模型 */}
+        {binding.files && (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {binding.files.portrait && (
+              <span
+                title="形象图将自动作为图参考投喂"
+                className="rounded bg-emerald-500/15 px-1 py-0.5 text-[9px] font-medium text-emerald-600 dark:text-emerald-400"
+              >
+                🖼 形象
+              </span>
+            )}
+            {binding.files.threeView && (
+              <span
+                title="三视图将自动作为图参考投喂"
+                className="rounded bg-emerald-500/15 px-1 py-0.5 text-[9px] font-medium text-emerald-600 dark:text-emerald-400"
+              >
+                🖼 三视图
+              </span>
+            )}
+            {binding.files.voice && (
+              <span
+                title="参考声音将自动作为音频参考投喂"
+                className="rounded bg-emerald-500/15 px-1 py-0.5 text-[9px] font-medium text-emerald-600 dark:text-emerald-400"
+              >
+                🔊 声音
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 关键帧先行(M3a 六八)— 候选生成 / 确认首帧 / 尾帧链到下一组
+// 自包含组件(模式同 VideoPreviewSection):自己拉数据,不经 workspace 回调。
+// ---------------------------------------------------------------------------
+
+function KeyframeSection({ groupId }: { groupId: string }): React.ReactElement {
+  const utils = trpc.useUtils();
+  const { data } = trpc.aigc.listKeyframes.useQuery({ groupId });
+  const invalidate = (): void => {
+    void utils.aigc.listKeyframes.invalidate({ groupId });
+  };
+
+  const genMut = trpc.aigc.generateKeyframe.useMutation({
+    onSuccess: (r) => {
+      toast.success(
+        `关键帧生成完成 · ${r.mediaIds.length} 张候选 · ¥${r.cost.toFixed(4)}${r.refCount > 0 ? ` · 带 ${r.refCount} 张一致性参考` : ''}`,
+      );
+      invalidate();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const confirmMut = trpc.aigc.confirmKeyframe.useMutation({
+    onSuccess: (r) => {
+      toast.success(r.mediaId ? '已设为本组首帧(生成视频将作首帧约束)' : '已清除首帧');
+      invalidate();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const chainMut = trpc.aigc.chainTailFrame.useMutation({
+    onSuccess: (r) =>
+      toast.success(`已抽本组尾帧 → 设为下一组 ${r.nextGroupNumber} 的首帧(场内链)`),
+    onError: (e) => toast.error(e.message),
+  });
+
+  const confirmedId = data?.confirmedMediaId ?? null;
+  const candidateIds = React.useMemo(() => {
+    const ids: string[] = [];
+    for (const a of data?.attempts ?? []) {
+      for (const id of a.mediaIds) if (!ids.includes(id)) ids.push(id);
+    }
+    return ids.slice(0, 8);
+  }, [data?.attempts]);
+
+  return (
+    <section className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] p-3">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-[length:0.95em] font-semibold">关键帧</h3>
+        <div className="flex flex-wrap gap-1">
+          <button
+            onClick={() => genMut.mutate({ groupId })}
+            disabled={genMut.isPending}
+            title="用本组提示词出一张首帧候选(图片模型,~¥0.1 量级);自动带上一组已确认关键帧 + 绑定资产形象作一致性参考"
+            className="rounded border border-[hsl(var(--color-border))] px-2 py-1 text-[length:0.78em] hover:bg-[hsl(var(--color-muted))] disabled:opacity-50"
+          >
+            {genMut.isPending ? '生成中...' : '生成关键帧'}
+          </button>
+          <button
+            onClick={() => chainMut.mutate({ groupId })}
+            disabled={chainMut.isPending}
+            title="抽本组最新成功 take 的尾帧 → 设为下一组首帧(同场景才允许,切场自动拒绝)"
+            className="rounded border border-[hsl(var(--color-border))] px-2 py-1 text-[length:0.78em] hover:bg-[hsl(var(--color-muted))] disabled:opacity-50"
+          >
+            {chainMut.isPending ? '链接中...' : '尾帧链下一组'}
+          </button>
+        </div>
+      </div>
+
+      {confirmedId && data?.urlMap[confirmedId] ? (
+        <div className="mb-2">
+          <div className="relative overflow-hidden rounded-md border-2 border-[hsl(var(--color-accent))]">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={data.urlMap[confirmedId]}
+              alt="已确认首帧"
+              className="max-h-40 w-full object-cover"
+            />
+            <span className="absolute left-1 top-1 rounded bg-[hsl(var(--color-accent))] px-1.5 py-0.5 text-[10px] font-medium text-white">
+              ✓ 首帧约束
+            </span>
+            <button
+              onClick={() => confirmMut.mutate({ groupId, mediaId: null })}
+              disabled={confirmMut.isPending}
+              title="清除首帧约束"
+              className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/40 text-xs text-white hover:bg-red-600"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      ) : (
+        <p className="mb-2 text-[length:0.74em] leading-snug text-[hsl(var(--color-muted-foreground))]">
+          还没有首帧。先出关键帧候选并确认,生成视频时会作为首帧约束(一致性先在图层收敛,再烧视频钱)。
+        </p>
+      )}
+
+      {candidateIds.length > 0 && (
+        <div className="grid grid-cols-3 gap-1.5">
+          {candidateIds.map((id) => {
+            const url = data?.urlMap[id];
+            const isConfirmed = id === confirmedId;
+            return (
+              <button
+                key={id}
+                onClick={() => !isConfirmed && confirmMut.mutate({ groupId, mediaId: id })}
+                disabled={confirmMut.isPending || isConfirmed}
+                title={isConfirmed ? '当前首帧' : '设为本组首帧'}
+                className={
+                  'relative aspect-[9/16] overflow-hidden rounded border ' +
+                  (isConfirmed
+                    ? 'border-[hsl(var(--color-accent))] opacity-60'
+                    : 'border-[hsl(var(--color-border))] hover:border-[hsl(var(--color-accent))]')
+                }
+              >
+                {url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={url} alt="关键帧候选" className="h-full w-full object-cover" />
+                ) : (
+                  <span className="flex h-full items-center justify-center text-[10px] text-[hsl(var(--color-muted-foreground))]">
+                    加载中
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }

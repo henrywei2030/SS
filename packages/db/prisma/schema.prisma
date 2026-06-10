@@ -415,6 +415,8 @@ model Shot {
   // 跟 admin.preset.list 同源(PRESET_KINDS),UI 下拉框 + LLM 生成分镜时填值
   movement       String? // 运镜（与 admin.preset movement 联动）
   lighting       String? // 光线（与 admin.preset lighting 联动）
+  // 六八:四维电影级分镜 — 音效设计(环境底/动效/强调三层,自由文本;LLM 生成 + 可手编,无预设)
+  sound          String?
   // ADR-23(2026-05-24):预留 first/last frame 字段
   // Seedance 2.0 / Veo 3.1 / Wan 2.6 / Pika 2.0 已全部支持 FLF2V(first-last-frame to video)
   // Phase 1 不用,Phase 2 升级 I2V/FLF2V 时启用 — 零成本预留

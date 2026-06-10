@@ -85,8 +85,11 @@
 - next.config 需 externals `onnxruntime-node`/`sentencepiece-js`(.node 原生绑定 webpack 嚼不动,与 pg 同款)。**留**:桌面打包带权重策略(首跑下载 vs CI 预置)/ win-laptop onnxruntime-node 预编译验证 / 「从有声视频抽音轨反向采纳声线」补充功能。
 
 ### M3 · F2 关键帧先行 + 链式 + F6 质检(~3 sessions)
-- **3a 关键帧**(钩子全在:`Shot.startFrameMediaId` ADR-23 ✓、`VideoRequest.firstFrameUrl` ✓):`aigc.generateKeyframe`(用已编译组提示词走 seedream → 候选)+ `confirmKeyframe`(写组首 shot startFrameMediaId,**0 migration**);**生成 N+1 关键帧时把 N 关键帧作 img2img 参考**(图层收敛一致性)。
-- **3b 链式**(scene-aware):按 `Shot.sceneId` 分段,**同场景内**可选尾帧链(ffmpeg 抽 N 采纳 take 尾帧 → N+1 首帧);**切场自动断链**;happyhorse-r2v 9 图参考作多参考备选。
+
+> **状态(2026-06-10 六八 mac-studio)**:3a/3b ✅ 落地并真打通;3c 待做。两个实施备注:① `VideoRequest.firstFrameUrl` 当时仅 adapter 层 ✓,queue payload + worker 透传是六八补的;② **moyu /images/edits img2img ~300s 服务端硬限**(六八四次实证,gpt-image-2/seedream 均被掐,文生图正常)— 带参考图的关键帧重抽暂受影响,详见 TODO 真打债。
+
+- **3a 关键帧** ✅(钩子全在:`Shot.startFrameMediaId` ADR-23 ✓、`VideoRequest.firstFrameUrl` ✓):`aigc.generateKeyframe`(用已编译组提示词走 seedream → 候选)+ `confirmKeyframe`(写组首 shot startFrameMediaId,**0 migration**);**生成 N+1 关键帧时把 N 关键帧作 img2img 参考**(图层收敛一致性)。
+- **3b 链式** ✅(scene-aware):按 `Shot.sceneId` 分段,**同场景内**可选尾帧链(ffmpeg 抽 N 采纳 take 尾帧 → N+1 首帧);**切场自动断链**;happyhorse-r2v 9 图参考作多参考备选。
 - **3c 质检**:`GenerationAttempt + qcScore/qcJson` → migration;**TextRequest 扩 `imageUrls?`**(多模态判官);`core/qc/`(ffmpeg 抽首/中/尾帧 → VLM 评分 + 人脸一致性对比 portrait);新 kind `qc`,process-job 成功末尾入队(`take.qc.enabled` 默认关);web takes 画廊 QC 徽章 + 按分排序 + 漂移标记。
 - 验收:带/不带首帧对照一致性肉眼可辨;QC 给黑帧/跑题低分。
 

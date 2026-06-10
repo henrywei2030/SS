@@ -273,6 +273,16 @@ export const overviewProcedures = {
           ...b,
           mediaUrl: media?.cdnUrl ?? null,
           kind: kindFromUsage(b.usageType),
+          // 六八下(关联即全喂):人物可投喂文件清单(形象/三视图/声音)— UI 文件 chips,
+          // 有才显示;生成时这三类全部自动作为参考资源送出(compile characterImageRefs/voiceRefs)
+          files:
+            a.type === 'CHARACTER'
+              ? {
+                  portrait: !!a.portraitMediaId,
+                  threeView: !!a.threeViewMediaId,
+                  voice: !!a.voiceMediaId,
+                }
+              : null,
         };
       });
 

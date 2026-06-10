@@ -9,6 +9,7 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
 import { getVideoProvider } from '@ss/adapters/provider';
+import { getStorageAdapter } from '@ss/adapters/storage';
 // 三十五收工 R2 Phase A + 三十六收工 R2 完整推进:共享 video generation helper
 import {
   acquireAigcVideoLock,
@@ -22,6 +23,7 @@ import {
 
 // 三十一收工 S3:SystemSetting 单 key 读 helper
 // 三十二收工 S3 followup:加 batch 版
+import { resolveMediaFetchUrl } from '@ss/core/media';
 import { loadSystemSetting, loadSystemSettings } from '../utils/system-bindings.js';
 // r11 audit:错误消息脱敏(防 Provider URL/token/stack 泄漏到前端)
 import { sanitizeErrorMsg } from '@ss/shared';
@@ -283,7 +285,7 @@ export const videoProcedures = {
 
       // 三十六收工 R2:compile 整段(project + dbBindings + media + refs + compileShotGroupVideoPrompt)
       // 抽到 compileVideoPromptForGroup helper(132 行 → 1 调用),compliance check 保留 router 内(需要 failPlaceholder)
-      const { compiled, characterBindingsForCompliance, projectType } = await compileVideoPromptForGroup(
+      const { compiled, voiceRefs, voiceMissing, characterImageRefs, characterBindingsForCompliance, projectType } = await compileVideoPromptForGroup(
         ctx.prisma,
         {
           group: {
@@ -297,6 +299,8 @@ export const videoProcedures = {
           aspectRatio,
           extraInstruction: input.extraInstruction,
           extraNegative: input.extraNegative,
+          // 六八:有声生成时把人物声音设定描述编进 prompt【声线】段
+          includeVoiceDescriptions: wantAudio,
         },
       );
 
@@ -383,6 +387,12 @@ export const videoProcedures = {
             aspectRatio,
             durationS,
             references: sanitizeReferencesForLedger(compiled.references),
+            // 六八:人到声必到 — 自动附带的人物参考声线(只记 assetId,脱敏口径同 references)
+            voiceRefAssetIds: voiceRefs.map((r) => r.assetId),
+            // 六八下:身份级图参考(形象/三视图)条数(审计:这次喂了几张人物图)
+            characterImageRefCount: characterImageRefs.length,
+            // 缺声线人物记名(审计:该次生成没带谁的声音参考)
+            voiceMissing: voiceMissing.map((m) => m.name),
           },
           status: 'RUNNING',
           startedAt,
@@ -396,16 +406,27 @@ export const videoProcedures = {
       //      - 写 MediaItem + 升 attempt SUCCESS|FAILED + costLedgerEntry
       //      - publish EVENTS.GENERATION_COMPLETED + Redis 'success'/'failed' 推 SSE
       //    失败分类(白名单):timeout/429/5xx → retry;censored/compliance → UnrecoverableError
-      const refImageUrls = compiled.references
-        .filter((r) => r.kind === 'IMAGE')
-        .map((r) => r.mediaUrl)
-        .filter((u): u is string => !!u);
+      // 六八下(关联即全喂):token 引用图 + 人物身份级图参考(形象/三视图全送)合并去重
+      const refImageUrls = Array.from(
+        new Set([
+          ...compiled.references
+            .filter((r) => r.kind === 'IMAGE')
+            .map((r) => r.mediaUrl)
+            .filter((u): u is string => !!u),
+          ...characterImageRefs.map((r) => r.mediaUrl),
+        ]),
+      );
       // 2026-05-27 audit r13:binding 含 AUDIO 类资产(角色配音 voiceMediaId)时收集
       // capsParams.supportsRefAudio !== true 时静默丢弃(Provider 不支持就别传,避 422)
-      const rawRefAudioUrls = compiled.references
-        .filter((r) => r.kind === 'AUDIO')
-        .map((r) => r.mediaUrl)
-        .filter((u): u is string => !!u);
+      // 六八(人到声必到):voiceRefs(人物绑定的参考声线)无条件并入 — 不依赖 @音频N token /
+      //   「自动 @」点击;显式 SOUND_VOICE binding 与之重复时靠下方 Set 去重
+      const rawRefAudioUrls = [
+        ...compiled.references
+          .filter((r) => r.kind === 'AUDIO')
+          .map((r) => r.mediaUrl)
+          .filter((u): u is string => !!u),
+        ...voiceRefs.map((r) => r.mediaUrl),
+      ];
       // 2026-05-27 audit r14 P1:audio 处理统一(input.refAudioUrl + binding 来的 audio 都 silent drop)
       // 之前 input.refAudioUrl 不支持时直接 failPlaceholder 拒,但 binding 来的 audio silent drop —
       // 用户体感不一致(同样不支持,一种拒一种丢)。统一改 silent drop + 日志,不阻断生成
@@ -426,6 +447,41 @@ export const videoProcedures = {
       }
       // 五七-3:去重(角色形象绑定自动带的 voiceMediaId 可能与显式 SOUND_VOICE 绑定重复)
       const refAudioUrls = Array.from(new Set(allAudioUrls));
+      // 六八:缺声线人物记警(不阻断 — 没有声线也允许生成,但日志可查"为什么这条没带某人声音")
+      if (voiceMissing.length > 0) {
+        console.warn(
+          `[generateVideo] group ${grp.number} 人物缺参考声线,本次生成不带其声音参考:${voiceMissing.map((m) => m.name).join('、')}`,
+        );
+      }
+
+      // M3a(六八)关键帧先行:组首 shot.startFrameMediaId 已确认 → 解析 URL 作首帧约束。
+      // caps 门:supportsFirstFrame !== true 时静默丢弃 + 日志(口径同 refAudio;
+      // seedance-2.0-fast 首尾帧支持待真打,kling/happyhorse 各家能力在 admin/providers 配)。
+      let firstFrameUrl: string | undefined;
+      const firstShot = await ctx.prisma.shot.findFirst({
+        where: { groupId: grp.id, deletedAt: null },
+        orderBy: { positionIdx: 'asc' },
+        select: { startFrameMediaId: true },
+      });
+      if (firstShot?.startFrameMediaId) {
+        if (capsParams.supportsFirstFrame === true) {
+          const m = await ctx.prisma.mediaItem.findFirst({
+            where: { id: firstShot.startFrameMediaId, deletedAt: null },
+            select: { cdnUrl: true, storageKey: true },
+          });
+          const u = m ? await resolveMediaFetchUrl(m, { expiresInSeconds: 12 * 3600 }) : null;
+          if (u) firstFrameUrl = u;
+          else {
+            console.warn(
+              `[generateVideo] group ${grp.number} 首帧媒体 URL 解析失败,本次不带首帧约束`,
+            );
+          }
+        } else {
+          console.warn(
+            `[generateVideo] provider ${providerId} 未声明 supportsFirstFrame,丢弃组 ${grp.number} 的首帧约束(去 admin/providers 配 supportsFirstFrame:true)`,
+          );
+        }
+      }
 
       // 三十六收工 R2:入队 + 失败时回滚 attempt + REFUND 抽到 enqueueVideoJobOrRefund helper
       // (同 failPlaceholder/refundPrepayForAttempt 单一真相源,enqueue 失败统一走 helper)
@@ -450,6 +506,8 @@ export const videoProcedures = {
             aspectRatio,
             refImageUrls: refImageUrls.length > 0 ? refImageUrls : undefined,
             refAudioUrls: refAudioUrls.length > 0 ? refAudioUrls : undefined,
+            // M3a:关键帧首帧约束(已过 caps 门;adapter 收 VideoRequest.firstFrameUrl)
+            firstFrameUrl,
             // W5.5.1 扩展参数透传(Provider 自己消费 extra)
             resolution: input.resolution,
             generateAudio: wantAudio,
@@ -712,6 +770,7 @@ export const videoProcedures = {
               select: {
                 id: true,
                 cdnUrl: true,
+                storageKey: true,
                 aspectRatio: true,
                 meta: true,
               },
@@ -719,9 +778,24 @@ export const videoProcedures = {
           : [];
       const mediaMap = new Map(medias.map((m) => [m.id, m]));
 
-      return attempts.map((a) => {
+      // 六八:已缓存的播放走本地签名 URL(MinIO,顺滑),未缓存暂用 provider 直链(可能卡/会过期)
+      const storage = getStorageAdapter();
+      const results = [];
+      for (const a of attempts) {
         const media = a.outputMediaId ? mediaMap.get(a.outputMediaId) ?? null : null;
-        return {
+        const cached =
+          !!media &&
+          !media.storageKey.startsWith('external://') &&
+          !media.storageKey.startsWith('placeholder://');
+        let videoUrl: string | null = media?.cdnUrl ?? null;
+        if (media && cached) {
+          try {
+            videoUrl = await storage.getSignedUrl(media.storageKey, 6 * 3600);
+          } catch {
+            /* 签名失败回退直链 */
+          }
+        }
+        results.push({
           id: a.id,
           status: a.status,
           providerId: a.providerId,
@@ -729,12 +803,15 @@ export const videoProcedures = {
           durationMs: a.durationMs,
           costCny: a.costCny,
           errorMsg: a.errorMsg,
-          videoUrl: media?.cdnUrl ?? null,
+          videoUrl,
+          // 六八:缓存状态(UI 缓存完毕/缓存中标识 + 轮询依据)
+          cached,
           aspectRatio: media?.aspectRatio ?? null,
           mediaId: media?.id ?? null,
           rejected: a.rejected,
-        };
-      });
+        });
+      }
+      return results;
     }),
 
   /**

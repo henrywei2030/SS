@@ -493,6 +493,8 @@ export const generateProcedures = {
             angle: s.angle,
             movement: s.movement,
             lighting: s.lighting,
+            // 六八:四维电影级 — 音效设计落库
+            sound: s.sound,
             content: s.content,
             prompt: s.prompt,
             durationS: s.durationS,

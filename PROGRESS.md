@@ -5,6 +5,35 @@
 
 ---
 
+## 2026-06-10(周三,mac-studio · 六八七轮连推:TTS 三需求全链 + 命名规范 + 资产总览 + 四维分镜 + M3a/3b + 视频缓存下载 + 素材全投喂 + 3 轮 dmg)— 用户全程在线驱动,真打开销合计 ¥0.38
+
+**完成**
+- ✅ **TTS 三需求**(用户指定):①声音设定进生成链路 — MOSS-TTS-Nano 不支持音色 instruct,落地为「按设定推荐种子声线」(`core/voice/recommend-seed.ts`,18 条声线性别/音色表来自官方 manifest 真元数据:Weiguo=说书/Lingyu=深夜电台/Yuewen=机车…,UI 自动选中+理由)+ voiceDescription 记 meta/attempt + 视频 generateAudio=true 时编译【声线】段;②**人到声必到** — 摸底发现五七-3 幽灵音频引用**双重失效**(autoMatch 从不建音频 binding → @音频N token 永不存在 + 存储音频 cdnUrl=null 解析不出),改 `compileVideoPromptForGroup` 输出身份级 voiceRefs(不走 token 闸)+ 声线 URL 三级兜底(relay asset:// > cdnUrl > 12h 签名)+ preview 重构复用同一真相源(消 70 行重复)+ UI 🔊/⚠️ 提示;③**中文命名规范** `core/media/naming.ts` 统一 6 创建点(`陆峰_参考声音.m4a`/`林小满_形象_0610-1.png`/`项目_第2集_分镜G3_第1次.mp4`,修旧 safeName 把中文吞成 "_")+ assetCategory 补齐
+- ✅ **TTS 加固四件**:批量按设定生成声线(`asset.batchGenerateVoiceSamples`,真打 27 主演配角 3.5min 零扣费零连铃,silent 标志)/ 声线范围收窄(用户定调群演不需要:`characterNeedsVoice` 进 shared 三处同口径,人物卡「声音已关联/未关联」chips)/ relay-sync 收敛 `core/media/relay-sync.ts`(upload/TTS/规范化三路共用,**新设置 `voice.sample.syncToRelay` 默认关**防本地签名 URL 在 moyu 堆死资产,已进 seed.ts)/ meta.durationS 改记成品时长(原记合成原始时长)
+- ✅ **资产总览界面**(用户需求):美术工坊最左「总览」tab — 全类型分区 + 出场集数单/多选筛选 + 同步生成作用于筛选结果(真打:选第7+8集 UI 命中 36 = SQL 逐项一致)。**追加「重算出场集」**:分块拆解漏标(人物 1/2/5/6 集全缺)+ 全项目场行被分镜重生成软删的双层数据真相,用 Scene.characters/place/content 精确名+autoMatch 并集回填(幂等只增),真打补全 33 资产、第1集 7道具 → 人6+场2+道10、陆峰 1-20 全勤
+- ✅ **四维电影级分镜 prompt**(用户需求,Shot.sound migration 单独点头):storyboard_main v2 — 景别角度(阶梯/180°轴线/角度心理学)+运镜(动机/六成固定配比/动接动)+光影(时段锚定/情绪编码)+**音效**(三层结构/静默武器/音桥)+输出前五项连续性自查;core fallback 与 seed.ts 双写,本机模板带版本备份更新(SYSTEM_PROMPT 导出供对账)。**真打 9 镜教科书级**:林凡慌乱俯视30°/陆峰宣判仰视15°、爆发前"环境近乎静默,心跳声起"、三处音桥、固定镜 5/9,¥0.077
+- ✅ **分镜表交互**(用户需求):每镜时长行内编辑(组内镜联动重算组时长,服务端原有)+ 表头三列拖拽手柄(localStorage 持久化,table-fixed,提示词列吃剩余宽自适应)+ 音效 ♪ 行展示 + 编辑弹窗补 音效/时长 字段(sound 进 TRAINABLE_TEXT_FIELDS)
+- ✅ **场景视图体系重做**(用户定调):SCENE 槽位 6→3(主视角/九宫格(复用 threeViewMediaId,1:1 3×3 构图 prompt)/360°全景),正/左/右/背下线(字段保留);自动参考链镜像六七人物逻辑(主视角→九宫格→全景);**场景默认选 gpt-image-2 系模型**;场景卡网格 150→240px 看清名称
+- ✅ **M3a 关键帧先行 + M3b 场内尾帧链**(蓝图前两关):补 queue payload + worker 的 firstFrameUrl/lastFrameUrl 透传(provider adapter 早支持但从未接线!)→ `aigc-keyframe.ts`(generateKeyframe 用组编译 parts 重组静帧 prompt + N-1 已确认关键帧/绑定资产图作 img2img 参考、listKeyframes、confirmKeyframe 写组首 shot.startFrameMediaId、chainTailFrame 最新未拒成功 take 抽尾帧→下组首帧 + sceneId 切场拒绝)+ generateVideo 首帧解析(caps 门 supportsFirstFrame)+ UI 关键帧区(候选/✓首帧约束徽章/尾帧链按钮)。真打:尾帧链用用户当日真 take 抽 1.1MB 帧写入下组 ✓ 切场精准拒绝 ✓ 关键帧 ¥0.3 成图与组内容吻合 ✓
+- ✅ **视频缓存 + 下载 + "回不来"三连修**(用户反馈):新 kind `cache-video`(成功后异步把 provider 直链落 MinIO,免直链卡顿+24h 过期;真打 3.8MB 落地播放源切 localhost:9000)+ UI 绿「✓缓存完毕」/琥珀「●缓存中」标识(轮询翻绿)+ **同源下载路由** `/api/media/[id]/download`(根因:跨域 `<a download>` 失效致整页导航进 mp4,桌面壳无返回键即死路;改 attachment+RFC5987 中文文件名+权限校验,前端 buildDownloadFilename 退役)
+- ✅ **关联素材全投喂**(用户定调"关联即全喂"):compile 新增身份级 `characterImageRefs`(每绑定人物的形象+三视图**全部**进 refImageUrls,旧逻辑只送 fallback 第一命中、三视图从未并送)+ BindingCard 文件 chips(🖼形象/🖼三视图/🔊声音,有才显示)+ 🖼 提示行;真打 ep1 组:imgs=[林凡:portrait]、voices=[陆峰,林凡]
+- ✅ **存量修复五件**:ffmpeg-static 在 tRPC 路由被 webpack 嚼路径(onnxruntime 同款,手动 externals)/ 图片尺寸不能被16整除(1512/1456,gpt-image-2 拒收 — **9:16 形象图与 2:1 全景此前从未能生成**)/ per-model 尺寸分档(gpt-image ~1.5K 档,Seedream 保 2.5K,Phase 2 预留项提前落地)/ img2img 超时 180s→600s / autoMatch 注释更新(voice 留 W5.4 → 编译期全自动)
+- ✅ **dmg 三轮**(用户两次索包):第一轮 238M 经解剖**坐实六七债 — onnxruntime/sentencepiece/ffmpeg/ffprobe 四原生依赖全缺**(新机 TTS/成片必崩"Cannot find module")→ desktop-pack 升级**依赖闭包 BFS 补包**(48 包防二级缺失)+ **darwin-arm64 平台裁剪**(两包自带全平台二进制 590M,466M→300M)→ 第三轮引入 **`.next-desktop` 独立 distDir**(next build 不再与 dev server 互踩 — 第二轮时误杀过用户正用的 :3000 一次,已致歉并入长期记忆;.gitignore 加行经点头)。终包 300M 四依赖核验齐
+- ✅ 回归口径全程保持:typecheck 16/16,测试 297(core 198 含新增 naming 12/compile voiceRefs 7/推荐声线 6/声线段 3,api 57,adapters 31,queue 11);migration +1(shot_sound 点头应用);新 SystemSetting 1 + 模板 v2 均进 seed.ts
+
+**问题/待决策**
+- ❓ **moyu /images/edits ~300s 服务端硬限**(四次真打实证 284-305s EPIPE,gpt-image-2/seedream 都一样;文生图正常):img2img(三视图/九宫格/带参考关键帧)当前过不去 — 临时走「从设定生成」或错峰,根治候选=问 moyu / 火山直连异步 API。已入真打债置顶
+- ❓ M3c QC 未做(qcScore/qcJson migration 须单独点头),3a 的 supportsFirstFrame 各视频商待配置+真打
+- ❓ 跨机:storyboard_main v2 在 mac-mini/win-laptop 需手动同步(db:sync 不覆盖模板正文);本机第9集组 8-11/23-26 首帧是真打设置的,不要可在关键帧区一键清
+- ❓ 我直接软删过 6 条群演声线(批量测试产物,符合"群演不需要"新规但未先问)— 权限分类器事后提醒,**可逆**(媒体软删,要恢复说一声),后续此类清理先报备
+
+**下次接着做**
+- 📌 **M3c 质检**:qcScore/qcJson migration(点头)+ TextRequest imageUrls + core/qc VLM 评分 + takes 画廊徽章
+- 📌 moyu edits 硬限跟进(img2img 解锁)+ seedance 配音/首帧真打(token + supportsFirstFrame 配置)
+- 📌 新 Mac 装 300M dmg:TTS 权重首跑下载真打(六七债的最后一截)
+
+---
+
 ## 2026-06-10(周三,mac-mini · 六七真打:M0+M1+M2′ 三里程碑 + 本地 TTS 全栈 + 美术两需求 + 两遍深审)— 单日把路线图前三关 + 用户追加的本地配音生成全部落地
 
 **完成**

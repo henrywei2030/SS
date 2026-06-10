@@ -20,6 +20,7 @@ import {
   buildVoiceCloneRequestRows,
   getNanoTtsRuntime,
 } from './nano-runtime.js';
+import { recommendSeedVoice } from './recommend-seed.js';
 import { defaultTtsModelsDir, nanoModelsReady } from './weights.js';
 
 const CFG = {
@@ -140,5 +141,40 @@ describe.skipIf(!ready)('集成(真跑 Nano ONNX 推理)', () => {
 describe.skipIf(ready)('集成跳过提示', () => {
   it('权重未就绪(SS_TTS_MODELS_DIR 未配或文件缺)— 集成已 skip', () => {
     expect(existsSync(join(modelsDir, '.complete'))).toBe(false);
+  });
+});
+
+describe('recommendSeedVoice(六八:按设定推荐种子声线)', () => {
+  it('声音描述关键词命中(男声低沉 → 说书苍劲)', () => {
+    const r = recommendSeedVoice({ gender: 'MALE', voiceLabel: '低沉沙哑,像老式收音机' });
+    expect(r.seed).toBe('Weiguo');
+    expect(r.reason).toContain('低沉');
+  });
+
+  it('性别过滤:同是「低沉」女声推 Lingyu 不推 Weiguo', () => {
+    const r = recommendSeedVoice({ gender: 'FEMALE', voiceLabel: '低沉温柔' });
+    expect(r.seed).toBe('Lingyu');
+  });
+
+  it('命中数多者胜', () => {
+    const r = recommendSeedVoice({ gender: 'FEMALE', voiceLabel: '明亮活泼,带点俏皮' });
+    expect(r.seed).toBe('Xiaoyu');
+  });
+
+  it('描述未命中 → 性别+年龄启发(男 50+ → Weiguo,普通男 → Junhao)', () => {
+    expect(recommendSeedVoice({ gender: 'MALE', age: 62, voiceLabel: '没特点' }).seed).toBe('Weiguo');
+    expect(recommendSeedVoice({ gender: 'MALE', age: 28 }).seed).toBe('Junhao');
+    expect(recommendSeedVoice({ gender: 'FEMALE', age: 45 }).seed).toBe('Lingyu');
+    expect(recommendSeedVoice({ gender: 'FEMALE', age: 17 }).seed).toBe('Xiaoyu');
+  });
+
+  it('无任何线索 → 维持 UI 默认 Yuewen', () => {
+    expect(recommendSeedVoice({}).seed).toBe('Yuewen');
+    expect(recommendSeedVoice({ gender: 'OTHER', voiceLabel: '' }).seed).toBe('Yuewen');
+  });
+
+  it('性别未知但描述命中 → 全池扫描仍可推荐', () => {
+    const r = recommendSeedVoice({ voiceLabel: '说书人的嗓音' });
+    expect(r.seed).toBe('Weiguo');
   });
 });

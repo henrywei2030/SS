@@ -24,6 +24,7 @@ import { sanitizeErrorMsg } from '@ss/shared/errors';
 import { z } from 'zod';
 
 import { concatVideos, mixBgm, probeMedia, runFfmpeg } from '../media/ffmpeg.js';
+import { episodeRenderBasename } from '../media/naming.js';
 import { notify } from '../notify/index.js';
 import { extractDialogueLines } from '../script/parse.js';
 import { buildSrtCues, formatSrt, sliceLinesByDuration, type SrtSegment } from './srt.js';
@@ -292,9 +293,8 @@ export async function processComposeRender(data: unknown): Promise<void> {
       (await prisma.episodeRender.count({
         where: { episodeId: episode.id, status: 'SUCCESS' },
       })) + 1;
-    const sanitizeName = (s: string): string => s.replace(/[/\\:*?"<>|]+/g, '_').trim();
-    const projPart = sanitizeName(episode.project.name) || '项目';
-    const baseName = `${projPart}-第${episode.number}集-成片-第${seq}次`;
+    // 六八命名规范:统一走 naming.ts(`项目_第E集_成片_第K次`)
+    const baseName = episodeRenderBasename(episode.project.name, episode.number, seq);
 
     const videoKey = buildStorageKey({
       scope: 'project',

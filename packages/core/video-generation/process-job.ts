@@ -27,6 +27,9 @@ import {
   type VideoGenProgressEvent,
 } from '@ss/queue/types';
 import { EVENTS } from '@ss/shared/events';
+import { enqueueJob } from '@ss/queue/job-queue';
+import { CACHE_VIDEO_JOB_KIND } from '../media/cache-video.js';
+import { shotTakeFilename } from '../media/naming.js';
 // 第 18 轮 audit P1:errorMsg 入库 + SSE + OperationLog 前脱敏,防真接 Provider 后 URL/token 泄漏
 import { sanitizeErrorMsg, billingCycle } from '@ss/shared';
 
@@ -98,6 +101,9 @@ export async function processVideoGenJob(
     aspectRatio,
     refImageUrls,
     refAudioUrls,
+    // M3a:首/尾帧约束(关键帧先行 / 尾帧链)
+    firstFrameUrl,
+    lastFrameUrl,
     groupNumber,
     // W5.5.1 扩展参数(透传给 provider.generate 的 extra)
     resolution,
@@ -162,6 +168,9 @@ export async function processVideoGenJob(
         aspectRatio,
         refImageUrls,
         refAudioUrls,
+        // M3a:VideoRequest 顶层字段(adapter 已消费:seedance first_frame_image 等)
+        firstFrameUrl,
+        lastFrameUrl,
         ...(Object.keys(extraParams).length > 0 ? { extra: extraParams } : {}),
       },
       {
@@ -282,17 +291,13 @@ export async function processVideoGenJob(
     //   文件名「第N次」会跳号。改数已成功的 + 1(当前这次此刻仍 RUNNING、未计入)。
     const takeSeq =
       (await tx.generationAttempt.count({ where: { shotGroupId, status: 'SUCCESS' } })) + 1;
-    // 文件名片段:去文件系统非法字符(中文保留),空兜底
-    const sanitizeName = (s: string): string => s.replace(/[/\\:*?"<>|]+/g, '_').trim();
-    const projPart = sanitizeName(proj?.name ?? '') || '项目';
-    const epPart = ep?.number ? `第${sanitizeName(String(ep.number))}集` : '本集';
-    const safeGroup = String(groupNumber ?? '').replace(/[^a-zA-Z0-9_-]+/g, '_') || '组';
     const media = await tx.mediaItem.create({
       data: {
         projectId,
         scope: 'PROJECT',
         kind: 'VIDEO',
-        filename: `${projPart}-${epPart}-分镜${safeGroup}-第${takeSeq}次.mp4`,
+        // 六八命名规范:统一走 naming.ts(`项目_第E集_分镜G_第K次`,中文保留)
+        filename: shotTakeFilename(proj?.name, ep?.number, groupNumber, takeSeq),
         assetCategory: 'VIDEO',
         mimeType: 'video/mp4',
         sizeBytes: 0, // Phase 1 不真实下载
@@ -378,6 +383,14 @@ export async function processVideoGenJob(
     }
     return { mediaId: media.id, updatedAttemptId: a.id };
   });
+
+  // 六八:视频落本地缓存(异步 cache-video job)— 播放/成片/抽帧走本地不卡顿,
+  // provider 直链 24h 过期前留底。入队失败不影响主流程(直链仍可播)。
+  try {
+    await enqueueJob(CACHE_VIDEO_JOB_KIND, { mediaId });
+  } catch (e) {
+    console.warn(`[${workerId}]${reqTag} cache-video 入队失败(直链仍可播):`, e);
+  }
 
   await writeOperationLog({
     actorId: userId,

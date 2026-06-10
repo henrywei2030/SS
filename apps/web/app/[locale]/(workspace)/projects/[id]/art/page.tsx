@@ -9,7 +9,7 @@ export default async function ArtPage({
 }): Promise<React.ReactElement> {
   const { id, locale } = await params;
   const sp = await searchParams;
-  const validTypes = ['CHARACTER', 'SCENE', 'PROP', 'STYLE_REFERENCE'] as const;
+  const validTypes = ['OVERVIEW', 'CHARACTER', 'SCENE', 'PROP', 'STYLE_REFERENCE'] as const;
   const initialType = (validTypes as readonly string[]).includes(sp.type ?? '')
     ? (sp.type as (typeof validTypes)[number])
     : 'CHARACTER';

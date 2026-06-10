@@ -76,6 +76,8 @@ export const shotProcedures = {
         // W1-W5 audit P1 followup:W7 4 预设全收
         movement: z.string().max(50).optional(),
         lighting: z.string().max(50).optional(),
+        // 六八:音效设计(自由文本)
+        sound: z.string().max(120).optional(),
         content: z.string(),
         prompt: z.string().default(''),
         durationS: z.number().positive().default(3),
@@ -101,6 +103,7 @@ export const shotProcedures = {
           angle: input.angle,
           movement: input.movement,
           lighting: input.lighting,
+          sound: input.sound,
           content: input.content,
           prompt: input.prompt,
           durationS: input.durationS,
@@ -130,6 +133,8 @@ export const shotProcedures = {
             // W1-W5 audit P1 followup:W7 4 预设全收
             movement: z.string().max(50).nullable().optional(),
             lighting: z.string().max(50).nullable().optional(),
+            // 六八:四维电影级 — 音效设计(自由文本)
+            sound: z.string().max(120).nullable().optional(),
             content: z.string().optional(),
             prompt: z.string().optional(),
             durationS: z.number().positive().optional(),

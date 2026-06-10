@@ -5,20 +5,19 @@
 import { z } from 'zod';
 
 import { autoMatchAssets, type MatchableAsset } from '@ss/core/generation';
-import { pickAssetMediaId } from '@ss/core/asset';
 import {
   autoTagPromptWithReferences,
-  compileShotGroupVideoPrompt,
   kindFromUsage,
   type AutoTagBinding,
-  type VideoReference,
 } from '@ss/core/storyboard';
+import { compileVideoPromptForGroup } from '@ss/core/video-generation';
 import { normalizePrompt } from '@ss/shared';
 import { aspectRatioSchema } from '@ss/shared/schemas';
 
 import { protectedProcedure } from '../trpc.js';
 import { logOperation } from '../middleware/audit.js';
 import { acquireTxAdvisoryLock } from '../utils/advisory-lock.js';
+import { loadSystemSettings } from '../utils/system-bindings.js';
 
 import { loadGroupOrThrow } from './aigc-shared.js';
 
@@ -30,7 +29,9 @@ export const promptProcedures = {
    * 规则:
    *   - 已有 binding(同 assetId+shotGroupId+usageType)→ 跳过,不覆盖
    *   - 新建 binding 时 refSlotIdx 续号(图片类 / 音频类各自一个计数器,基于本 group 现有最大值续接)
-   *   - 暂只对 IMAGE 类(scene/character/prop)做自动 — voice 留 W5.4
+   *   - 只建 IMAGE 类 binding(scene/character/prop)— 人物参考声线**不需要**建 SOUND_VOICE
+   *     binding:六八起编译期 voiceRefs 按「人在声在」规则自动附带(compile.ts),
+   *     人物绑定即声音绑定,显式 SOUND_VOICE 仅留给手动绑非人物音频(BGM/主题曲)场景
    */
   autoMatchAssets: protectedProcedure
     .input(z.object({ groupId: z.string().cuid() }))
@@ -269,95 +270,36 @@ export const promptProcedures = {
     .query(async ({ ctx, input }) => {
       const grp = await loadGroupOrThrow(ctx, input.groupId, { skipLockCheck: true });
 
-      // 取 group 风格(project 默认 style)
-      const project = await ctx.prisma.project.findUnique({
-        where: { id: grp.episode.projectId },
-        include: { style: true },
-      });
+      // 六八重构:复用 compileVideoPromptForGroup(与 generateVideo 同一真相源)—
+      // 原先此处手工重复 70 行 binding→references 组装,且拿不到「人到声必到」的 voiceRefs。
+      // providerId 用真实绑定值 → relay 商时 URL 解析(asset:// 优先)与正式生成同口径。
+      // 【声线】段跟随系统默认有声开关;抽卡面板临时改开关时预览不重算,正式口径以 generateVideo 为准。
+      const settings = await loadSystemSettings(ctx.prisma, [
+        'shot.video.generateAudio.default',
+        'binding.shot.video.providerId',
+      ]);
+      const wantAudio =
+        (settings['shot.video.generateAudio.default'] ?? 'true') === 'true';
 
-      // 取 bindings + media 给 references
-      // W1-W5 audit P1 followup(P1-6):查全 7 槽位 mediaId,fallback 链覆盖三视图/侧面/全景
-      const bindings = await ctx.prisma.assetUsageBinding.findMany({
-        where: { shotGroupId: grp.id, deletedAt: null, refSlotIdx: { not: null } },
-        orderBy: { refSlotIdx: 'asc' },
-        include: {
-          asset: {
-            select: {
-              id: true,
-              name: true,
-              type: true,
-              portraitMediaId: true,
-              threeViewMediaId: true,
-              sceneMainMediaId: true,
-              sceneFrontMediaId: true,
-              sceneLeftMediaId: true,
-              sceneRightMediaId: true,
-              sceneBackMediaId: true,
-              panoramaMediaId: true,
-              mainMediaId: true,
-              voiceMediaId: true,
-            },
+      const { compiled, voiceRefs, voiceMissing, characterImageRefs } = await compileVideoPromptForGroup(
+        ctx.prisma,
+        {
+          group: {
+            id: grp.id,
+            prompt: grp.prompt,
+            durationS: grp.durationS,
+            episode: { projectId: grp.episode.projectId },
           },
+          providerId: settings['binding.shot.video.providerId'] ?? '',
+          durationS: input.durationS ?? grp.durationS,
+          aspectRatio: input.aspectRatio ?? '',
+          extraInstruction: input.extraInstruction,
+          extraNegative: input.extraNegative,
+          includeVoiceDescriptions: wantAudio,
         },
-      });
+      );
 
-      const mediaIds = new Set<string>();
-      for (const b of bindings) {
-        for (const id of [
-          b.asset.portraitMediaId,
-          b.asset.threeViewMediaId,
-          b.asset.sceneMainMediaId,
-          b.asset.sceneFrontMediaId,
-          b.asset.sceneLeftMediaId,
-          b.asset.sceneRightMediaId,
-          b.asset.sceneBackMediaId,
-          b.asset.panoramaMediaId,
-          b.asset.mainMediaId,
-          b.asset.voiceMediaId,
-        ]) {
-          if (id) mediaIds.add(id);
-        }
-      }
-      const medias =
-        mediaIds.size > 0
-          ? await ctx.prisma.mediaItem.findMany({
-              where: { id: { in: Array.from(mediaIds) } },
-              select: { id: true, cdnUrl: true },
-            })
-          : [];
-      const mediaMap = new Map(medias.map((m) => [m.id, m.cdnUrl]));
-
-      // W5 audit W1:缺图也保留 reference(mediaUrl=null),由 compile 报 missingMedia
-      const references: VideoReference[] = bindings.map((b) => {
-        const kind = kindFromUsage(b.usageType);
-        const chosen = pickAssetMediaId(b.asset, kind);
-        const url = chosen ? (mediaMap.get(chosen) ?? null) : null;
-        return {
-          refSlotIdx: b.refSlotIdx!,
-          kind,
-          assetId: b.asset.id,
-          name: b.asset.name,
-          mediaUrl: url,
-        };
-      });
-
-      const compiled = compileShotGroupVideoPrompt({
-        text: grp.prompt,
-        durationS: input.durationS ?? grp.durationS,
-        references,
-        style: project?.style
-          ? {
-              characterPrompt: project.style.characterPrompt,
-              scenePrompt: project.style.scenePrompt,
-              propPrompt: project.style.propPrompt,
-              forbiddenWords: project.style.forbiddenWords,
-            }
-          : null,
-        aspectRatio: input.aspectRatio,
-        extraInstruction: input.extraInstruction,
-        extraNegative: input.extraNegative,
-      });
-
-      return compiled;
+      // voiceRefs/voiceMissing/characterImageRefs 给 UI:「将自动附带参考声线/人物图」提示
+      return { ...compiled, voiceRefs, voiceMissing, characterImageRefs };
     }),
 };

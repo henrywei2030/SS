@@ -23,7 +23,13 @@ export { acquireAigcVideoLock } from './lock.js';
 export { refundPrepayForAttempt } from './refund.js';
 export { checkDailyVideoBudget } from './budget-check.js';
 export { createPlaceholderAttemptWithPrepay } from './prepay.js';
-export { compileVideoPromptForGroup } from './compile.js';
+export {
+  compileVideoPromptForGroup,
+  collectCharacterVoiceInfo,
+  type CharacterVoiceRef,
+  type CharacterVoiceMissing,
+  type CharacterImageRef,
+} from './compile.js';
 export { enqueueVideoJobOrRefund } from './enqueue.js';
 // 桌面化 Phase 1:processor 搬进 core(解耦 BullMQ),BullMQ worker 与进程内驱动共用
 export {

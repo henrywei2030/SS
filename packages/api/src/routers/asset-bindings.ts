@@ -6,6 +6,7 @@
  */
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { autoMatchAssets, type MatchableAsset } from "@ss/core/generation";
 import { protectedProcedure } from "../trpc.js";
 import { logOperation } from "../middleware/audit.js";
 import { assertProjectAccess, loadEpisodeOrThrow } from "../middleware/access.js";
@@ -326,6 +327,116 @@ export const bindingsProcedures = {
       };
     }),
 
+
+  /**
+   * 六八:重算出场集 — 用剧本场次真相(Scene.characters/place/content)回填 Asset.episodes。
+   *
+   * 背景:分块拆解的某些块没产出人物/场景条目 → episodes 缺集(实测人物 1/2/5/6 集全缺),
+   * 总览按集筛选漏人。算法 = 场头精确名(characters/place,parser 结构化真相)
+   * ∪ 每集场文本 autoMatchAssets(name/alias 长名优先,补 OS 提及/道具)。
+   * **并集写回**(只增不删,不覆盖拆解/手动标注),幂等可重跑。
+   */
+  recomputeEpisodes: protectedProcedure
+    .input(z.object({ projectId: z.string().cuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId);
+      const [scenes, assets] = await Promise.all([
+        ctx.prisma.scene.findMany({
+          // ⚠️ 不过滤 scene.deletedAt:分镜重生成会把场行软删但 shots 仍引用(实测全项目
+          // 场行全是软删态)— 软删≠失效,这里以"该集存在过的场文本"为出场依据,宁多勿漏。
+          where: { episode: { projectId: input.projectId, deletedAt: null } },
+          select: {
+            characters: true,
+            place: true,
+            content: true,
+            episode: { select: { number: true } },
+          },
+        }),
+        ctx.prisma.asset.findMany({
+          where: {
+            projectId: input.projectId,
+            deletedAt: null,
+            type: { in: ['CHARACTER', 'SCENE', 'PROP'] },
+          },
+          select: {
+            id: true,
+            name: true,
+            alias: true,
+            archetypeKey: true,
+            type: true,
+            episodes: true,
+          },
+        }),
+      ]);
+
+      // 精确名索引(name/alias/archetypeKey → assetIds)
+      const nameMap = new Map<string, string[]>();
+      const indexName = (raw: string | null | undefined, id: string): void => {
+        const t = raw?.trim();
+        if (!t) return;
+        const list = nameMap.get(t) ?? [];
+        list.push(id);
+        nameMap.set(t, list);
+      };
+      for (const a of assets) {
+        indexName(a.name, a.id);
+        indexName(a.archetypeKey, a.id);
+        for (const al of a.alias) indexName(al, a.id);
+      }
+      const matchable: MatchableAsset[] = assets.map((a) => ({
+        id: a.id,
+        type: a.type as 'CHARACTER' | 'SCENE' | 'PROP',
+        name: a.name,
+        alias: a.alias,
+      }));
+
+      const found = new Map<string, Set<number>>();
+      const mark = (assetId: string, ep: number): void => {
+        const s = found.get(assetId) ?? new Set<number>();
+        s.add(ep);
+        found.set(assetId, s);
+      };
+
+      // 按集聚合场文本(一次 autoMatch / 集);场头结构化名直接精确标
+      const textsByEp = new Map<number, string[]>();
+      for (const sc of scenes) {
+        const ep = sc.episode.number;
+        const list = textsByEp.get(ep) ?? [];
+        list.push([sc.place ?? '', sc.characters.join('、'), sc.content].join('\n'));
+        textsByEp.set(ep, list);
+        for (const c of sc.characters) {
+          for (const id of nameMap.get(c.trim()) ?? []) mark(id, ep);
+        }
+        for (const id of nameMap.get((sc.place ?? '').trim()) ?? []) mark(id, ep);
+      }
+      for (const [ep, texts] of textsByEp) {
+        for (const m of autoMatchAssets(texts.join('\n'), matchable)) {
+          mark(m.assetId, ep);
+        }
+      }
+
+      // 并集写回(并集只增 → 长度变化即有新集)
+      let updated = 0;
+      for (const a of assets) {
+        const merged = Array.from(
+          new Set([...(a.episodes ?? []), ...(found.get(a.id) ?? [])]),
+        ).sort((x, y) => x - y);
+        if (merged.length !== (a.episodes?.length ?? 0)) {
+          await ctx.prisma.asset.update({
+            where: { id: a.id },
+            data: { episodes: merged },
+          });
+          updated += 1;
+        }
+      }
+      await logOperation(ctx, 'asset.recomputeEpisodes', 'project', input.projectId, null, {
+        projectId: input.projectId,
+        scannedAssets: assets.length,
+        scannedScenes: scenes.length,
+        updated,
+      });
+      return { scanned: assets.length, updated };
+    }),
 
   // -------- 资产-剧集 二次匹配审计(W4-MM.9) --------
 

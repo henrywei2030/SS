@@ -6,3 +6,4 @@ export * from './audio-io.js';
 export * from './nano-runtime.js';
 export * from './weights.js';
 export * from './generate-sample.js';
+export * from './recommend-seed.js';

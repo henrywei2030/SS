@@ -555,9 +555,12 @@ flowchart LR
 ### 10.1 三步构建
 
 ```bash
-# ① web 构建(关键开关:把 @ss/db 移出 Next 编译,避免 Prisma 查询构建器被 SWC 搞坏)
+# ① web 构建(关键开关:把 @ss/db 移出 Next 编译,避免 Prisma 查询构建器被 SWC 搞坏;
+#    六八起产物在独立 .next-desktop/,与 dev server 的 .next 互不干扰 — 可边用边打包)
 SS_DESKTOP_BUILD=1 pnpm --filter @ss/web build
-# ② 总装资源(DB seed bundle + Next standalone 自包含 + esbuild 预编译 @ss/db + 内嵌 node/pg + 图标)
+# ② 总装资源(DB seed bundle + Next standalone 自包含 + esbuild 预编译 @ss/db + 内嵌 node/pg + 图标
+#    + 六八:externals 依赖闭包补包(prisma/onnxruntime/sentencepiece/ffmpeg/ffprobe 系,BFS 防二级缺失)
+#    + ffprobe/onnxruntime 平台二进制裁剪至当前平台(全平台 590M → darwin-arm64 单平台))
 node scripts/desktop-pack.mjs
 # ③ Tauri 出包(.dmg / .app / .msi / .exe)
 pnpm --filter @ss/desktop tauri:build

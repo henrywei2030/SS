@@ -44,8 +44,9 @@ async function main() {
     // standalone / 打包态:用同一 node(打包态 = bundled node,process.execPath)跑 Next standalone。
     //   SS_DESKTOP_STANDALONE_DIR 指向 standalone 根(打包后 = 资源里的 web/);默认仓库内产物(dev 测)。
     //   cwd 设为 server.js 所在目录(standalone 按 __dirname 找 .next/static、public)。
+    // 六八:桌面构建独立 distDir(.next-desktop) → 仓库内默认产物路径同步
     const standaloneDir =
-      process.env.SS_DESKTOP_STANDALONE_DIR || join(rootDir, 'apps/web/.next/standalone');
+      process.env.SS_DESKTOP_STANDALONE_DIR || join(rootDir, 'apps/web/.next-desktop/standalone');
     const serverDir = join(standaloneDir, 'apps/web');
     // HOSTNAME 与「webview/代理使用的主机名」必须一致,否则 next-intl 的 rewrite 被 Next 判为
     //   跨源 → 自代理到 localhost:PORT,若 server 绑在别的回环地址(127.0.0.1 vs ::1)→ ECONNREFUSED。

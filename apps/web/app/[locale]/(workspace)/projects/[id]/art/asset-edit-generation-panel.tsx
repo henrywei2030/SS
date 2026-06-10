@@ -145,23 +145,31 @@ export function GenerationPanel({
         : selectedSlot === 'panorama'
           ? '2:1'
           : selectedSlot === 'three_view'
-            ? '16:9'
+            ? type === 'SCENE'
+              ? '1:1' // 六八:场景九宫格 3×3,方图最稳
+              : '16:9'
             : '16:9',
     );
-  }, [selectedSlot]);
+  }, [selectedSlot, type]);
 
-  // 已确认人物形象的预览 URL(三视图图生图参考用)
-  const portraitUrl = React.useMemo(() => {
-    if (!asset.portraitMediaId) return null;
-    const m = (
-      asset as { mediaMap?: Record<string, { cdnUrl?: string | null; storageKey: string }> }
-    ).mediaMap?.[asset.portraitMediaId];
-    return m?.cdnUrl ?? m?.storageKey ?? null;
-  }, [asset]);
+  // 槽位媒体 → 预览 URL(自动参考链用)
+  const slotMediaUrl = React.useCallback(
+    (mediaId: string | null): string | null => {
+      if (!mediaId) return null;
+      const m = (
+        asset as { mediaMap?: Record<string, { cdnUrl?: string | null; storageKey: string }> }
+      ).mediaMap?.[mediaId];
+      return m?.cdnUrl ?? m?.storageKey ?? null;
+    },
+    [asset],
+  );
+  const portraitUrl = slotMediaUrl(asset.portraitMediaId);
+  const sceneMainUrl = slotMediaUrl(asset.sceneMainMediaId);
+  const sceneGridUrl = slotMediaUrl(asset.threeViewMediaId);
 
-  // 三视图核心逻辑(2026-06-10 六七):切到三视图槽位且人物形象已确认 → 自动以形象图为参考(图生图),
-  //   主「开始生成」默认在形象基础上生成三视图,而非从零按设定生成。切换槽位时重置用户手动加的参考图,
-  //   防 portrait 槽位加的参考图泄漏到三视图(反之亦然)。用户仍可手动移除自动参考 → 回退从设定生成。
+  // 自动参考链(六七人物 + 六八场景,同一逻辑):切槽位时重置参考区防泄漏,
+  //   上游槽位已确认 → 自动以它为参考(图生图);用户可手动移除 → 回退从设定生成。
+  //   人物:形象 → 三视图;场景:主视角 → 九宫格,九宫格 → 360° 全景。
   React.useEffect(() => {
     setRefPreviews((prev) => {
       for (const u of Object.values(prev)) {
@@ -169,28 +177,66 @@ export function GenerationPanel({
       }
       return {};
     });
-    if (selectedSlot === 'three_view' && asset.portraitMediaId && portraitUrl) {
-      setRefImageIds([asset.portraitMediaId]);
-      setRefPreviews({ [asset.portraitMediaId]: portraitUrl });
-    } else {
-      setRefImageIds([]);
-    }
+    const autoRef = (mediaId: string | null, url: string | null): boolean => {
+      if (!mediaId || !url) return false;
+      setRefImageIds([mediaId]);
+      setRefPreviews({ [mediaId]: url });
+      return true;
+    };
+    const applied =
+      selectedSlot === 'three_view' && type === 'CHARACTER'
+        ? autoRef(asset.portraitMediaId, portraitUrl)
+        : selectedSlot === 'three_view' && type === 'SCENE'
+          ? autoRef(asset.sceneMainMediaId, sceneMainUrl)
+          : selectedSlot === 'panorama' && type === 'SCENE'
+            ? autoRef(asset.threeViewMediaId, sceneGridUrl)
+            : false;
+    if (!applied) setRefImageIds([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSlot, asset.portraitMediaId, portraitUrl]);
+  }, [
+    selectedSlot,
+    type,
+    asset.portraitMediaId,
+    portraitUrl,
+    asset.sceneMainMediaId,
+    sceneMainUrl,
+    asset.threeViewMediaId,
+    sceneGridUrl,
+  ]);
 
-  // 当前是否处于「三视图以形象图为参考」状态(主生成按钮文案 + 提示用)
+  // 当前自动参考状态(状态条 + 提示用)
   const threeViewFromPortrait =
-    selectedSlot === 'three_view' && refImageIds.includes(asset.portraitMediaId ?? '');
+    selectedSlot === 'three_view' &&
+    type === 'CHARACTER' &&
+    refImageIds.includes(asset.portraitMediaId ?? '');
+  const gridFromSceneMain =
+    selectedSlot === 'three_view' &&
+    type === 'SCENE' &&
+    refImageIds.includes(asset.sceneMainMediaId ?? '');
+  const panoramaFromGrid =
+    selectedSlot === 'panorama' &&
+    type === 'SCENE' &&
+    refImageIds.includes(asset.threeViewMediaId ?? '');
 
   // 需求(2026-06):图像模型默认显式选中 binding 配的默认 provider(当前 = Seedream 5.0 lite),
   //   而非停留在抽象的「默认模型(绑定)」。只初始化一次,之后用户可自由切换(含切回 "" 跟随绑定)。
+  // 六八(用户定调):场景资产优先 gpt-image-2 系模型 — 有配置时默认选中,没有再回 binding 默认。
   const didInitModel = React.useRef(false);
   React.useEffect(() => {
-    if (!didInitModel.current && imageProviders?.defaultProviderId) {
-      setModelId(imageProviders.defaultProviderId);
+    if (didInitModel.current || !imageProviders) return;
+    const gptImage =
+      type === 'SCENE'
+        ? imageProviders.providers.find(
+            (p) =>
+              /gpt-image/i.test(p.providerId) || /gpt-image/i.test(p.displayName ?? ''),
+          )?.providerId
+        : undefined;
+    const next = gptImage ?? imageProviders.defaultProviderId;
+    if (next) {
+      setModelId(next);
       didInitModel.current = true;
     }
-  }, [imageProviders?.defaultProviderId]);
+  }, [imageProviders, type]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -221,25 +267,46 @@ export function GenerationPanel({
           ))}
         </div>
 
-        {/* 三视图状态条(2026-06-10 六七):说明当前生成走「形象图为参考」还是「从设定生成」 */}
-        {selectedSlot === 'three_view' && (
+        {/* 自动参考状态条(六七人物三视图 + 六八场景九宫格/全景):走「参考图生图」还是「从设定生成」 */}
+        {((selectedSlot === 'three_view' && type === 'CHARACTER') ||
+          (type === 'SCENE' && (selectedSlot === 'three_view' || selectedSlot === 'panorama'))) && (
           <div
             className={cn(
               'mt-2 flex items-start gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] leading-snug',
-              threeViewFromPortrait
+              threeViewFromPortrait || gridFromSceneMain || panoramaFromGrid
                 ? 'border-[hsl(var(--color-accent)/0.4)] bg-[hsl(var(--color-accent)/0.08)] text-[hsl(var(--color-foreground))]'
                 : 'border-[hsl(var(--color-border))] text-[hsl(var(--color-muted-foreground))]',
             )}
           >
             <Info className="mt-px size-3 shrink-0" />
-            {threeViewFromPortrait ? (
+            {selectedSlot === 'three_view' && type === 'CHARACTER' ? (
+              threeViewFromPortrait ? (
+                <span>
+                  将以下方<b>人物形象图</b>为参考(图生图)生成三视图,保持脸型/服装一致;移除参考图可改为从设定从零生成。gpt-image 图生图约 2-6 分钟,请耐心等待。
+                </span>
+              ) : asset.portraitMediaId ? (
+                <span>当前为从设定生成(未用形象图参考)。建议先把人物形象图加回参考区,生成更一致的三视图。</span>
+              ) : (
+                <span>人物形象尚未确认。先在「人物形象」槽位生成并确认一张形象图,三视图即可自动以它为参考生成。</span>
+              )
+            ) : selectedSlot === 'three_view' ? (
+              gridFromSceneMain ? (
+                <span>
+                  将以<b>场景主视角</b>为参考(图生图)生成九宫格(9 个角度合一张),保持空间结构/陈设一致;移除参考图可改为从设定生成。图生图约 2-6 分钟。
+                </span>
+              ) : asset.sceneMainMediaId ? (
+                <span>当前为从设定生成(未用主视角参考)。建议把主视角加回参考区,九个角度的空间一致性更好。</span>
+              ) : (
+                <span>场景主视角尚未确认。先在「主视角」槽位生成并确认一张,九宫格即可自动以它为参考生成。</span>
+              )
+            ) : panoramaFromGrid ? (
               <span>
-                将以下方<b>人物形象图</b>为参考(图生图)生成三视图,保持脸型/服装一致;移除参考图可改为从设定从零生成。
+                将以<b>九宫格视图</b>为参考(图生图)生成 360° 全景,空间四面与九宫格对齐;移除参考图可改为从设定生成。图生图约 2-6 分钟。
               </span>
-            ) : asset.portraitMediaId ? (
-              <span>当前为从设定生成(未用形象图参考)。建议先把人物形象图加回参考区,生成更一致的三视图。</span>
+            ) : asset.threeViewMediaId ? (
+              <span>当前为从设定生成(未用九宫格参考)。建议把九宫格加回参考区,全景四面与各角度更一致。</span>
             ) : (
-              <span>人物形象尚未确认。先在「人物形象」槽位生成并确认一张形象图,三视图即可自动以它为参考生成。</span>
+              <span>九宫格尚未确认。先在「九宫格视图」槽位生成并确认一张,全景即可自动以它为参考生成。</span>
             )}
           </div>
         )}

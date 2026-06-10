@@ -12,10 +12,12 @@
  * 视频提示词写 `陆萌萌@图片2 (颤抖声音):...`,送 Seedance 时 prompt 文本带 token,
  * references = [{ idx:2, mediaUrl: 'https://.../陆萌萌-portrait.png' }, ...]
  *
- * 公式(5 段):
+ * 公式(5+1 段):
  *   positive =
  *     [项目风格]           ← StyleProfile.{character|scene|prop}Prompt 三段拼
  *   + [提示词正文]         ← input.text(由 W3 ShotGroup.prompt 而来,可能已含 @图片N 占位)
+ *   + [声线](可选)        ← 六八:绑定人物的声音设定描述(generateAudio=true 时由调用方传入,
+ *                            引导 seedance 等同出音频的模型贴角色音色)
  *   + [时长+比例]          ← "时长 {S}s · 宽高比 {AR}"
  *   + [额外指令]
  *   negative = StyleProfile.forbiddenWords ∪ extraNegative
@@ -94,6 +96,12 @@ export interface CompileShotGroupVideoPromptInput {
   extraInstruction?: string;
   /** 额外负面提示词 */
   extraNegative?: string[];
+  /**
+   * 六八:绑定人物的声音设定描述(name + profileJson.voiceLabel)。
+   * 仅 generateAudio=true 时由调用方传入(无声生成塞声线描述是浪费 token);
+   * 空数组/undefined 时 positive 不出现【声线】段,完全向后兼容。
+   */
+  voiceDescriptions?: Array<{ name: string; desc: string }>;
 }
 
 export interface CompiledShotGroupVideoPrompt {
@@ -116,6 +124,7 @@ export interface CompiledShotGroupVideoPrompt {
   parts: {
     stylePart: string;
     textPart: string;
+    voicePart: string;
     durationPart: string;
     extraPart: string;
   };
@@ -220,10 +229,11 @@ export function compileShotGroupVideoPrompt(
   const durationS = clampDuration(input.durationS);
   const stylePart = compileStylePart(input.style);
   const textPart = input.text.trim();
+  const voicePart = compileVoicePart(input.voiceDescriptions);
   const durationPart = `【参数】时长 ${durationS}s · 宽高比 ${aspectRatio}`;
   const extraPart = (input.extraInstruction ?? '').trim();
 
-  const positive = [stylePart, textPart, durationPart, extraPart]
+  const positive = [stylePart, textPart, voicePart, durationPart, extraPart]
     .filter((s): s is string => Boolean(s && s.length > 0))
     .join('\n');
 
@@ -307,7 +317,7 @@ export function compileShotGroupVideoPrompt(
     references: outRefs,
     aspectRatio,
     durationS,
-    parts: { stylePart, textPart, durationPart, extraPart },
+    parts: { stylePart, textPart, voicePart, durationPart, extraPart },
     warnings: { unusedReferences, unknownTokens, missingMedia },
   };
 }
@@ -315,6 +325,19 @@ export function compileShotGroupVideoPrompt(
 // ---------------------------------------------------------------------------
 // 内部 helper
 // ---------------------------------------------------------------------------
+
+/** 六八:【声线】段 — `林小满:低沉沙哑 · 阿野:清脆少年音`(空描述项过滤) */
+function compileVoicePart(
+  voiceDescriptions: CompileShotGroupVideoPromptInput['voiceDescriptions'],
+): string {
+  if (!voiceDescriptions || voiceDescriptions.length === 0) return '';
+  const items = voiceDescriptions
+    .map((v) => ({ name: v.name.trim(), desc: v.desc.trim() }))
+    .filter((v) => v.name.length > 0 && v.desc.length > 0)
+    .map((v) => `${v.name}:${v.desc}`);
+  if (items.length === 0) return '';
+  return `【声线】${items.join(' · ')}`;
+}
 
 function compileStylePart(
   style: CompileShotGroupVideoPromptInput['style'],

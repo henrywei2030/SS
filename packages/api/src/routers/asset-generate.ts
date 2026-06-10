@@ -7,6 +7,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { compileAssetPrompt } from "@ss/core/asset";
+import { assetCategoryFromType, assetImageFilename } from "@ss/core/media";
 import { getImageProvider, getTextProvider } from "@ss/adapters/provider";
 import { getStorageAdapter } from "@ss/adapters/storage";
 import { getEventBus } from "@ss/adapters/eventbus";
@@ -532,9 +533,6 @@ export const generateProcedures = {
 
       // 三类写入(MediaItem×N + GenerationAttempt + CostLedgerEntry)用同一事务
       // 任一失败回滚全部 — 防出现"图片入库但没账单"或"账单但找不到图"
-      const safeName = asset.name
-        .replace(/[^a-zA-Z0-9_-]+/g, '_')
-        .slice(0, 40);
       const { mediaIds, attempt } = await ctx.prisma.$transaction(async (tx) => {
         const createdMedias = await Promise.all(
           imageResult.imageUrls.map((url, i) =>
@@ -543,7 +541,16 @@ export const generateProcedures = {
                 projectId: asset.projectId,
                 scope: 'PROJECT',
                 kind: 'IMAGE',
-                filename: `${safeName}-${input.slot}-${startedAt.getTime()}-${i}.png`,
+                // 六八命名规范:主体中文名_用途_MMDD-序(修旧 safeName 把中文整个吞成 "_" 的问题)
+                // three_view 双语义:场景叫九宫格,人物叫三视图
+                filename: assetImageFilename(
+                  asset.name,
+                  input.slot,
+                  startedAt,
+                  i,
+                  input.slot === 'three_view' && asset.type === 'SCENE' ? '九宫格' : undefined,
+                ),
+                assetCategory: assetCategoryFromType(asset.type),
                 mimeType: 'image/png',
                 sizeBytes:
                   imageResult.width && imageResult.height

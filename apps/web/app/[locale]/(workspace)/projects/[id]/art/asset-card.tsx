@@ -3,6 +3,7 @@ import * as React from 'react';
 import { Image as ImageIcon, Shield, ShieldAlert, Lock } from 'lucide-react';
 import type { inferRouterOutputs } from '@trpc/server';
 
+import { characterNeedsVoice } from '@ss/shared';
 import type { AppRouter } from '@ss/api';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
@@ -35,6 +36,8 @@ type AssetBrief = {
   sceneBackMediaId: string | null;
   panoramaMediaId: string | null;
   mainMediaId: string | null;
+  // 六八:人物声音关联状态(卡片 chip 用)
+  voiceMediaId: string | null;
 };
 
 interface Props {
@@ -230,28 +233,35 @@ function MaturityChips({ asset }: { asset: AssetBrief }): React.ReactElement {
     } else {
       chips.push({ label: '三视图未完成', tone: 'warn' });
     }
+    // 六八:声音关联状态 — 只对需要声线的角色(主演/配角)显示;群演不需要不标
+    if (characterNeedsVoice(asset.characterRole)) {
+      chips.push(
+        asset.voiceMediaId
+          ? { label: '声音已关联', tone: 'success' }
+          : { label: '未关联声音', tone: 'warn' },
+      );
+    } else if (asset.voiceMediaId) {
+      // 群演/未分类被手动配了声线 → 仍如实显示(生成时会附带)
+      chips.push({ label: '声音已关联', tone: 'success' });
+    }
   } else if (asset.type === 'SCENE') {
+    // 六八:场景视图体系收敛为 主视角 / 九宫格(threeViewMediaId 复用) / 360° 全景
     const hasMain = !!asset.sceneMainMediaId || !!asset.mainMediaId;
     chips.push(
       hasMain
-        ? { label: '主图已完成', tone: 'success' }
-        : { label: '主图未完成', tone: 'warn' },
+        ? { label: '主视角已完成', tone: 'success' }
+        : { label: '主视角未完成', tone: 'warn' },
     );
-    const angleCount = [
-      asset.sceneFrontMediaId,
-      asset.sceneLeftMediaId,
-      asset.sceneRightMediaId,
-      asset.sceneBackMediaId,
-      asset.panoramaMediaId,
-    ].filter(Boolean).length;
-    if (angleCount > 0) {
-      chips.push({
-        label: `${angleCount}/4 多角度`,
-        tone: angleCount >= 4 ? 'success' : 'warn',
-      });
-    } else {
-      chips.push({ label: '多角度未完成', tone: 'warn' });
-    }
+    chips.push(
+      asset.threeViewMediaId
+        ? { label: '九宫格已完成', tone: 'success' }
+        : { label: '九宫格未完成', tone: 'warn' },
+    );
+    chips.push(
+      asset.panoramaMediaId
+        ? { label: '全景已完成', tone: 'success' }
+        : { label: '全景未完成', tone: 'warn' },
+    );
   } else {
     chips.push(
       asset.mainMediaId

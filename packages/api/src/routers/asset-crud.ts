@@ -16,8 +16,9 @@ import { z } from "zod";
 import { Prisma } from "@ss/db";
 import { asRecord } from "@ss/shared";
 import { getStorageAdapter, buildStorageKey } from "@ss/adapters/storage";
-import { normalizeAudio, probeMedia } from "@ss/core/media";
-import { NANO_BUILTIN_VOICES, VOICE_SAMPLE_JOB_KIND, nanoModelsReady } from "@ss/core/voice";
+import { extractVoiceLabel } from "@ss/core/asset";
+import { normalizeAudio, normalizedVoiceFilename, probeMedia, syncMediaToRelay } from "@ss/core/media";
+import { NANO_BUILTIN_VOICES, VOICE_SAMPLE_JOB_KIND, nanoModelsReady, recommendSeedVoice } from "@ss/core/voice";
 import { enqueueJob } from "@ss/queue/job-queue";
 import { protectedProcedure } from "../trpc.js";
 import { logOperation } from "../middleware/audit.js";
@@ -618,13 +619,24 @@ export const crudProcedures = {
           ext: 'm4a',
         });
         await storage.putObject(key, outBuf, { contentType: 'audio/mp4' });
-        const baseName = (media.filename ?? 'voice').replace(/\.[a-zA-Z0-9]+$/, '');
+        const normalizedName = normalizedVoiceFilename(media.filename ?? 'voice');
+        // 六八:按开关 best-effort 同步中转站素材库(规范化产物是实际投喂 provider 的版本)
+        const syncSetting = await ctx.prisma.systemSetting.findUnique({
+          where: { key: 'voice.sample.syncToRelay' },
+          select: { value: true },
+        });
+        const relayMeta =
+          syncSetting?.value === 'true'
+            ? await syncMediaToRelay({ storageKey: key, kind: 'AUDIO', filename: normalizedName })
+            : null;
         const newMedia = await ctx.prisma.mediaItem.create({
           data: {
             projectId: asset.projectId,
             scope: 'PROJECT',
             kind: 'AUDIO',
-            filename: `${baseName}-规范化.m4a`,
+            // 六八命名规范:原名_规范化(版本链可读)+ 归人物类便于素材库筛选
+            filename: normalizedName,
+            assetCategory: 'CHARACTER',
             mimeType: 'audio/mp4',
             sizeBytes: outBuf.length,
             storageKey: key,
@@ -634,6 +646,7 @@ export const crudProcedures = {
               normalized: true,
               targetLufs: -16,
               sourceMediaId: media.id,
+              ...(relayMeta ?? {}),
             },
             source: 'UPLOAD',
             sourceRef: `voice-normalize:${asset.id}`,
@@ -663,11 +676,28 @@ export const crudProcedures = {
       }
     }),
 
-  /** 声线种子清单(TTS-B)— 18 条内置 + 本地模型就绪状态(未就绪=首次生成会自动下载 ~850MB) */
-  listVoiceSeeds: protectedProcedure.query(() => ({
-    ready: nanoModelsReady(),
-    seeds: NANO_BUILTIN_VOICES,
-  })),
+  /**
+   * 声线种子清单(TTS-B)— 18 条内置 + 本地模型就绪状态(未就绪=首次生成会自动下载 ~850MB)。
+   * 六八:传 assetId 时按角色设定(声音描述/性别/年龄)推荐种子声线,UI 默认选中。
+   */
+  listVoiceSeeds: protectedProcedure
+    .input(z.object({ assetId: z.string().cuid().optional() }).optional())
+    .query(async ({ ctx, input }) => {
+      let recommended: ReturnType<typeof recommendSeedVoice> | null = null;
+      if (input?.assetId) {
+        const asset = await loadAssetWithAccess(ctx, input.assetId);
+        recommended = recommendSeedVoice({
+          gender: asset.gender,
+          age: asset.age,
+          voiceLabel: extractVoiceLabel(asset.profileJson),
+        });
+      }
+      return {
+        ready: nanoModelsReady(),
+        seeds: NANO_BUILTIN_VOICES,
+        recommended,
+      };
+    }),
 
   /**
    * 按角色设定生成参考声音样本(TTS-B · 2026-06-10):
@@ -706,6 +736,59 @@ export const crudProcedures = {
         jobId,
       });
       return { queued: true, jobId, modelsReady: nanoModelsReady() };
+    }),
+
+  /**
+   * 批量按设定生成声线(六八):项目内所有缺 voiceMediaId 的**主演/配角**,逐个用
+   * recommendSeedVoice 推荐种子声线入队(本地 TTS 零扣费)。
+   * 范围(用户定调):群演/未分类不需要声线 → 跳过(编辑面板手动生成不受限)。
+   * silent=true 静默成功铃铛(防 N 连铃),失败仍逐条通知;完成后人物卡/编辑面板自动出现声线。
+   */
+  batchGenerateVoiceSamples: protectedProcedure
+    .input(z.object({ projectId: z.string().cuid() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertProjectAccess(ctx, input.projectId);
+      const chars = await ctx.prisma.asset.findMany({
+        where: {
+          projectId: input.projectId,
+          type: 'CHARACTER',
+          deletedAt: null,
+          voiceMediaId: null,
+          // 六八:只有主演/配角需要参考声音(shared characterNeedsVoice 同口径)
+          OR: [
+            { characterRole: { startsWith: '主演' } },
+            { characterRole: { startsWith: '配角' } },
+          ],
+        },
+        select: { id: true, name: true, gender: true, age: true, profileJson: true },
+        orderBy: { name: 'asc' },
+        take: 100, // 单次上限,防极端项目把队列灌爆(够当前规模;超出再点一次)
+      });
+      const queued: Array<{ assetId: string; name: string; seed: string }> = [];
+      for (const c of chars) {
+        const rec = recommendSeedVoice({
+          gender: c.gender,
+          age: c.age,
+          voiceLabel: extractVoiceLabel(c.profileJson),
+        });
+        await enqueueJob(
+          VOICE_SAMPLE_JOB_KIND,
+          {
+            assetId: c.id,
+            userId: ctx.user.id,
+            seedVoice: `builtin:${rec.seed}`,
+            silent: true,
+          },
+          { jobId: `voice-sample:${c.id}:${Date.now().toString(36)}` },
+        );
+        queued.push({ assetId: c.id, name: c.name, seed: rec.seed });
+      }
+      await logOperation(ctx, 'asset.voice.batchGenerate', 'project', input.projectId, null, {
+        projectId: input.projectId,
+        queuedCount: queued.length,
+        seeds: queued.map((q) => `${q.name}:${q.seed}`),
+      });
+      return { queued: queued.length, items: queued, modelsReady: nanoModelsReady() };
     }),
 
 };

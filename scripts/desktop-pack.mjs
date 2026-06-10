@@ -106,15 +106,17 @@ sh(process.execPath, [join(root, 'scripts/build-desktop-resources.mjs')]);
 
 // ---- 2. Web standalone 自包含(standalone + static + public)----
 log('② Web standalone 自包含');
-const standalone = join(root, 'apps/web/.next/standalone');
+// 六八:桌面构建走独立 distDir(.next-desktop),与 dev server 的 .next 互不干扰
+const standalone = join(root, 'apps/web/.next-desktop/standalone');
 if (!existsSync(join(standalone, 'apps/web/server.js'))) {
-  throw new Error('[pack] 缺 .next/standalone,请先 `pnpm --filter @ss/web build`');
+  throw new Error('[pack] 缺 .next-desktop/standalone,请先 `SS_DESKTOP_BUILD=1 pnpm --filter @ss/web build`');
 }
 const webOut = join(resDir, 'web');
 rmSync(webOut, { recursive: true, force: true });
 cpSync(standalone, webOut, { recursive: true });
 // Next standalone 不自动拷 static / public —— 必须补,否则页面无 CSS/JS
-cpSync(join(root, 'apps/web/.next/static'), join(webOut, 'apps/web/.next/static'), { recursive: true });
+// (standalone server 按构建时 distDir 寻路 → 目标也是 .next-desktop/static)
+cpSync(join(root, 'apps/web/.next-desktop/static'), join(webOut, 'apps/web/.next-desktop/static'), { recursive: true });
 const pub = join(root, 'apps/web/public');
 if (existsSync(pub)) cpSync(pub, join(webOut, 'apps/web/public'), { recursive: true });
 
@@ -134,15 +136,77 @@ const findRepoPkg = (scopePkg) => {
   const entry = readdirSync(repoPnpm).find((d) => d.startsWith(prefix));
   return entry ? join(repoPnpm, entry, 'node_modules', scopePkg) : null;
 };
-for (const pkg of ['@prisma/client', '@prisma/adapter-pg']) {
-  const dest = join(webOut, 'node_modules', pkg);
-  if (existsSync(dest)) continue;
-  const src = findRepoPkg(pkg);
-  if (src && existsSync(src)) {
-    cpSync(src, dest, { recursive: true, dereference: true });
-    log(`  ✓ 补 ${pkg} → standalone(修 Next serverExternalPackages 漏 trace)`);
-  } else {
-    log(`  ⚠ 仓库 .pnpm 未找到 ${pkg}`);
+// 六八:补包升级为**依赖闭包 BFS** — serverExternalPackages/webpack externals 的包
+//   (prisma 系 + TTS 的 onnxruntime-node/sentencepiece-js + ffmpeg 系)全都不被 Next trace,
+//   且 onnxruntime-node 还有 adm-zip/global-agent 等二级依赖,只补顶层包运行时照样崩。
+//   实测六八第一版 dmg 四包全缺 → 新机 TTS/成片合成直接 "Cannot find module"。
+const EXTERNAL_PKGS = [
+  '@prisma/client',
+  '@prisma/adapter-pg',
+  // TTS-B 本地声线(onnxruntime 原生 .node + sentencepiece wasm)
+  'onnxruntime-node',
+  'sentencepiece-js',
+  // M0 ffmpeg 封装(平台二进制,M1 成片/M3 抽帧/声线规范化都依赖)
+  'ffmpeg-static',
+  'ffprobe-static',
+];
+{
+  const queue = [...EXTERNAL_PKGS];
+  const seen = new Set();
+  let copied = 0;
+  while (queue.length > 0) {
+    const pkg = queue.shift();
+    if (seen.has(pkg)) continue;
+    seen.add(pkg);
+    const dest = join(webOut, 'node_modules', pkg);
+    const src = findRepoPkg(pkg);
+    if (!src || !existsSync(src)) {
+      if (EXTERNAL_PKGS.includes(pkg)) log(`  ⚠ 仓库 .pnpm 未找到 ${pkg}`);
+      continue;
+    }
+    if (!existsSync(dest)) {
+      cpSync(src, dest, { recursive: true, dereference: true });
+      copied += 1;
+    }
+    // BFS 传递依赖(只看 dependencies,dev/peer 不进运行时)
+    try {
+      const pj = JSON.parse(readFileSync(join(src, 'package.json'), 'utf8'));
+      for (const dep of Object.keys(pj.dependencies ?? {})) queue.push(dep);
+    } catch {
+      /* 无 package.json/解析失败跳过 */
+    }
+  }
+  log(`  ✓ 补 externals 依赖闭包 → standalone(${copied} 个包,含 prisma/onnxruntime/ffmpeg 系)`);
+}
+
+// 六八:平台裁剪 — ffprobe-static(335M)/onnxruntime-node(254M)自带全平台二进制,
+//   .app 是单平台产物,只留当前平台(裁掉 ~550M raw,dmg 瘦回 ~280M)。
+//   两包结构同为 <binRoot>/<platform>/<arch>/...(onnx 多一层 napi-vX)。
+{
+  const keepPlat = process.platform; // darwin
+  const keepArch = process.arch; // arm64
+  const prunePlatArch = (binRoot, label) => {
+    if (!existsSync(binRoot)) return;
+    for (const plat of readdirSync(binRoot)) {
+      const platDir = join(binRoot, plat);
+      if (plat !== keepPlat) {
+        rmSync(platDir, { recursive: true, force: true });
+        continue;
+      }
+      for (const arch of readdirSync(platDir)) {
+        if (arch !== keepArch) {
+          rmSync(join(platDir, arch), { recursive: true, force: true });
+        }
+      }
+    }
+    log(`  ✓ 裁剪 ${label} 至 ${keepPlat}/${keepArch}`);
+  };
+  prunePlatArch(join(webOut, 'node_modules/ffprobe-static/bin'), 'ffprobe-static');
+  const ortBin = join(webOut, 'node_modules/onnxruntime-node/bin');
+  if (existsSync(ortBin)) {
+    for (const napi of readdirSync(ortBin)) {
+      prunePlatArch(join(ortBin, napi), `onnxruntime-node/${napi}`);
+    }
   }
 }
 

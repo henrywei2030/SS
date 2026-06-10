@@ -1,11 +1,73 @@
 import type { PrismaClient } from '@ss/db';
 import type { Prisma } from '@ss/db';
+import { getStorageAdapter } from '@ss/adapters/storage';
+import { characterNeedsVoice } from '@ss/shared';
 import {
   compileShotGroupVideoPrompt,
   kindFromUsage,
   type VideoReference,
 } from '../storyboard/index.js';
-import { pickAssetMediaId } from '../asset/index.js';
+import { extractVoiceLabel, pickAssetMediaId } from '../asset/index.js';
+
+/** 六八:人物参考声线(不走 @音频N token 闸门,人在声在) */
+export interface CharacterVoiceRef {
+  assetId: string;
+  name: string;
+  mediaUrl: string;
+}
+
+/** 六八:绑定了人物但拿不到参考声线(没配 voiceMediaId / 媒体 URL 解析不出)— UI 提示补声线 */
+export interface CharacterVoiceMissing {
+  assetId: string;
+  name: string;
+}
+
+/** 六八下:人物身份级图参考(形象 + 三视图,人在图在,不依赖 @token;按 assetId 聚合) */
+export interface CharacterImageRef {
+  assetId: string;
+  name: string;
+  kind: 'portrait' | 'three_view';
+  mediaUrl: string;
+}
+
+/**
+ * 六八(人到声必到):从 group 绑定里收集人物参考声线 — 纯函数,单测覆盖。
+ *
+ * 规则:**只要人物绑定在该生成段(不论 usageType / 是否被 @token 引用),其 voiceMediaId
+ * 必然进参考声线**。这是身份级关联(人物形象和声音的一致性),区别于位置级的 @图片N token。
+ * 同一人物多条 binding(APPEAR + SOUND_VOICE 等)按 assetId 去重。
+ *
+ * 范围(六八下,用户定调):只有主演/配角需要声线 —
+ *   - voiceRefs:有声线就带(群演被手动配了声线 = 明确意图,照常附带)
+ *   - voiceMissing:只对「需要声线」的角色提示缺失(群演/未分类没声线不唠叨)
+ */
+export function collectCharacterVoiceInfo(
+  bindings: Array<{
+    asset: {
+      id: string;
+      name: string;
+      type: string;
+      voiceMediaId: string | null;
+      characterRole?: string | null;
+    };
+  }>,
+  mediaUrlOf: (mediaId: string) => string | null,
+): { voiceRefs: CharacterVoiceRef[]; voiceMissing: CharacterVoiceMissing[] } {
+  const voiceRefs: CharacterVoiceRef[] = [];
+  const voiceMissing: CharacterVoiceMissing[] = [];
+  const seen = new Set<string>();
+  for (const b of bindings) {
+    if (b.asset.type !== 'CHARACTER' || seen.has(b.asset.id)) continue;
+    seen.add(b.asset.id);
+    const url = b.asset.voiceMediaId ? mediaUrlOf(b.asset.voiceMediaId) : null;
+    if (url) {
+      voiceRefs.push({ assetId: b.asset.id, name: b.asset.name, mediaUrl: url });
+    } else if (characterNeedsVoice(b.asset.characterRole)) {
+      voiceMissing.push({ assetId: b.asset.id, name: b.asset.name });
+    }
+  }
+  return { voiceRefs, voiceMissing };
+}
 
 /**
  * 编译视频提示词 — 读 project style + bindings + media + 构造 refs + 调 compileShotGroupVideoPrompt
@@ -17,8 +79,11 @@ import { pickAssetMediaId } from '../asset/index.js';
  *   - Relay provider 用 asset:// URL 免文件重传(Phase 1.5 P0-5)
  *   - 合规守卫(若 requireComplianceForVideo)前置 CHARACTER 资产 APPROVED check —
  *     **抽出后由 router 调 helper 后再做 compliance check**(因为 helper return 含 dbBindings)
+ *   - 六八(人到声必到):绑定 CHARACTER 的 voiceMediaId 一律进 voiceRefs(替代五七-3 的
+ *     幽灵 AUDIO 引用 — 旧实现共用图片 refSlotIdx,被 @音频N token 闸门挡死从未实际生效,
+ *     且与真音频 binding 的 slot 编号可能撞号)。SOUND_VOICE 等显式音频 binding 仍走 token。
  *
- * @returns compiled result + isRelayProvider(供后续 refImageUrls 决策)+ blockedChars
+ * @returns compiled result + voiceRefs/voiceMissing + isRelayProvider + blockedChars
  */
 export async function compileVideoPromptForGroup(
   tx: Prisma.TransactionClient | PrismaClient,
@@ -34,9 +99,20 @@ export async function compileVideoPromptForGroup(
     aspectRatio: string;
     extraInstruction?: string;
     extraNegative?: string[];
+    /**
+     * 六八:声音设定描述(profileJson.voiceLabel)编进 prompt【声线】段。
+     * 仅 generateAudio=true 时传 true(无声生成塞声线描述浪费 token)。
+     */
+    includeVoiceDescriptions?: boolean;
   },
 ): Promise<{
   compiled: ReturnType<typeof compileShotGroupVideoPrompt>;
+  /** 六八:人物参考声线(router 并进 refAudioUrls;preview 给 UI 展示「将自动附带」) */
+  voiceRefs: CharacterVoiceRef[];
+  /** 六八:绑定了人物但缺参考声线(UI 提示去美术工坊生成) */
+  voiceMissing: CharacterVoiceMissing[];
+  /** 六八下:人物身份级图参考(形象+三视图全送,router 并进 refImageUrls 去重) */
+  characterImageRefs: CharacterImageRef[];
   isRelayProvider: boolean;
   characterBindingsForCompliance: {
     assetName: string;
@@ -71,7 +147,9 @@ export async function compileVideoPromptForGroup(
           panoramaMediaId: true,
           mainMediaId: true,
           voiceMediaId: true,
+          characterRole: true,
           complianceStatus: true,
+          profileJson: true,
         },
       },
     },
@@ -109,7 +187,8 @@ export async function compileVideoPromptForGroup(
       ? await tx.mediaItem.findMany({
           where: { id: { in: Array.from(mediaIds) } },
           // Phase 1.5 P0-5:meta 含 relayAssetUrl 时 provider=relay-* 优先用 asset://(免重传)
-          select: { id: true, cdnUrl: true, meta: true },
+          // 六八:storageKey 供声线媒体签名 URL 兜底(TTS 本地生成的音频无 cdnUrl)
+          select: { id: true, cdnUrl: true, meta: true, storageKey: true },
         })
       : [];
   // Phase 1.5 P0-5:provider 是 relay-* (OpenAI 兼容中转站)时优先用 meta.relayAssetUrl
@@ -133,35 +212,81 @@ export async function compileVideoPromptForGroup(
   );
 
   // W1-W5 audit P1 followup(P1-6):全 7 槽位 fallback 链
-  const refs: VideoReference[] = dbBindings.flatMap((b) => {
+  // (六八:五七-3 的幽灵 AUDIO 追加已移除 — 见下方 voiceRefs,不再依赖 token 闸门)
+  const refs: VideoReference[] = dbBindings.map((b) => {
     const kind = kindFromUsage(b.usageType);
     const chosen = pickAssetMediaId(b.asset, kind);
-    const base: VideoReference = {
+    return {
       refSlotIdx: b.refSlotIdx!,
       kind,
       assetId: b.asset.id,
       name: b.asset.name,
       mediaUrl: chosen ? (mediaMap.get(chosen) ?? null) : null,
     };
-    // 五七-3:绑定 CHARACTER 形象时,若该角色配了参考音频(voiceMediaId),自动追加一条 AUDIO 引用
-    //   → 视频生成同步带上角色配音参考(关联图也关联声)。SOUND_VOICE 绑定本身已是 AUDIO,不重复追加。
-    if (kind !== 'AUDIO' && b.asset.type === 'CHARACTER' && b.asset.voiceMediaId) {
-      const voiceUrl = mediaMap.get(b.asset.voiceMediaId) ?? null;
-      if (voiceUrl) {
-        return [
-          base,
-          {
-            refSlotIdx: b.refSlotIdx!,
-            kind: 'AUDIO' as const,
-            assetId: b.asset.id,
-            name: b.asset.name,
-            mediaUrl: voiceUrl,
-          },
-        ];
+  });
+
+  // 六八:声线媒体 URL 三级兜底 — relayAssetUrl(relay 商)> cdnUrl > 12h 签名 URL。
+  //   TTS 本地生成 / 上传的音频常只有 MinIO storageKey(cdnUrl=null),没有兜底则声线
+  //   永远解析不出(旧五七-3 链同样死在这里)。签名口径与 media.upload 喂中转站一致;
+  //   远端 provider 能否真拉到取决于存储是否公网可达 — 本地 dev + 远端商的投喂
+  //   由「seedance 配音真打债」跟进 relay 素材同步。仅人物声线做签名兜底,图片引用语义不变。
+  const voiceSignedMap = new Map<string, string>();
+  for (const b of dbBindings) {
+    const vid = b.asset.type === 'CHARACTER' ? b.asset.voiceMediaId : null;
+    if (!vid || mediaMap.get(vid) || voiceSignedMap.has(vid)) continue;
+    const m = medias.find((x) => x.id === vid);
+    if (!m?.storageKey || m.storageKey.startsWith('placeholder://')) continue;
+    if (m.storageKey.startsWith('external://')) {
+      voiceSignedMap.set(vid, m.storageKey.slice('external://'.length));
+      continue;
+    }
+    try {
+      voiceSignedMap.set(vid, await getStorageAdapter().getSignedUrl(m.storageKey, 12 * 3600));
+    } catch {
+      // 签名失败(存储不可用等)→ 该人物进 voiceMissing,UI 提示
+    }
+  }
+
+  // 六八(人到声必到):人物绑定 → 参考声线必然收集(身份级,不走 @token)
+  const { voiceRefs, voiceMissing } = collectCharacterVoiceInfo(
+    dbBindings,
+    (mediaId) => mediaMap.get(mediaId) ?? voiceSignedMap.get(mediaId) ?? null,
+  );
+
+  // 六八下(关联即全喂):人物绑定 → 形象图 + 三视图全部进图参考(身份级,同 voiceRefs 模式)。
+  // 旧行为只送 pickAssetMediaId 的第一命中(portrait),三视图沦为 fallback 从不并送 —
+  // 用户定调:关联人物 = 形象/三视图/声音全部作为参考资源投喂(seedance ≤16 图,router 端去重)。
+  const characterImageRefs: CharacterImageRef[] = [];
+  {
+    const seenChar = new Set<string>();
+    for (const b of dbBindings) {
+      if (b.asset.type !== 'CHARACTER' || seenChar.has(b.asset.id)) continue;
+      seenChar.add(b.asset.id);
+      const pairs: Array<['portrait' | 'three_view', string | null]> = [
+        ['portrait', b.asset.portraitMediaId],
+        ['three_view', b.asset.threeViewMediaId],
+      ];
+      for (const [kind, mediaId] of pairs) {
+        const url = mediaId ? (mediaMap.get(mediaId) ?? null) : null;
+        if (url) {
+          characterImageRefs.push({ assetId: b.asset.id, name: b.asset.name, kind, mediaUrl: url });
+        }
       }
     }
-    return [base];
-  });
+  }
+
+  // 六八:声音设定描述进 prompt【声线】段(generateAudio=true 时;按 assetId 去重)
+  let voiceDescriptions: Array<{ name: string; desc: string }> | undefined;
+  if (args.includeVoiceDescriptions) {
+    const seenDesc = new Set<string>();
+    voiceDescriptions = [];
+    for (const b of dbBindings) {
+      if (b.asset.type !== 'CHARACTER' || seenDesc.has(b.asset.id)) continue;
+      seenDesc.add(b.asset.id);
+      const desc = extractVoiceLabel(b.asset.profileJson);
+      if (desc) voiceDescriptions.push({ name: b.asset.name, desc });
+    }
+  }
 
   const compiled = compileShotGroupVideoPrompt({
     text: args.group.prompt,
@@ -178,7 +303,16 @@ export async function compileVideoPromptForGroup(
     aspectRatio: args.aspectRatio,
     extraInstruction: args.extraInstruction,
     extraNegative: args.extraNegative,
+    voiceDescriptions,
   });
 
-  return { compiled, isRelayProvider, characterBindingsForCompliance, projectType: project?.type };
+  return {
+    compiled,
+    voiceRefs,
+    voiceMissing,
+    characterImageRefs,
+    isRelayProvider,
+    characterBindingsForCompliance,
+    projectType: project?.type,
+  };
 }

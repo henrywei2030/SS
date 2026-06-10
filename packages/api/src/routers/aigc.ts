@@ -19,6 +19,7 @@ import { promptProcedures } from './aigc-prompt.js';
 import { bindingsProcedures } from './aigc-bindings.js';
 import { videoProcedures } from './aigc-video.js';
 import { groupsProcedures } from './aigc-groups.js';
+import { keyframeProcedures } from './aigc-keyframe.js';
 
 // ---------------------------------------------------------------------------
 // Router(各 procedure 见同目录 aigc-<组>.ts;共用 helper 见 aigc-shared.ts)
@@ -30,4 +31,6 @@ export const aigcRouter = router({
   ...bindingsProcedures,
   ...videoProcedures,
   ...groupsProcedures,
+  // M3a/3b(六八):关键帧先行 + 场内尾帧链
+  ...keyframeProcedures,
 });

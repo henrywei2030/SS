@@ -36,6 +36,8 @@ type Shot = {
   // W7 followup:movement / lighting 4 大预设字段补全
   movement: string | null;
   lighting: string | null;
+  // 六八:四维电影级 — 音效设计
+  sound: string | null;
   content: string;
   prompt: string;
   durationS: number;
@@ -56,12 +58,78 @@ type Group = {
   shots: Shot[];
 };
 
+// ---------------------------------------------------------------------------
+// 六八:可拖拽列宽 — 镜号 / 拍摄角度景别 / 剧本内容 三列可拖,提示词列吃剩余宽度。
+// localStorage 持久化;表格 table-fixed 让宽度生效,窄屏靠外层 overflow-auto 横滚。
+// ---------------------------------------------------------------------------
+
+const COL_WIDTH_KEY = 'ss.storyboard.colWidths';
+const COL_WIDTH_DEFAULTS = { num: 72, dims: 240, content: 288 };
+type ColWidths = typeof COL_WIDTH_DEFAULTS;
+
+function loadColWidths(): ColWidths {
+  if (typeof window === 'undefined') return COL_WIDTH_DEFAULTS;
+  try {
+    const j = JSON.parse(localStorage.getItem(COL_WIDTH_KEY) ?? '{}') as Partial<ColWidths>;
+    return { ...COL_WIDTH_DEFAULTS, ...j };
+  } catch {
+    return COL_WIDTH_DEFAULTS;
+  }
+}
+
+function ColResizer({
+  onDrag,
+  onDone,
+}: {
+  onDrag: (dx: number) => void;
+  onDone: () => void;
+}): React.ReactElement {
+  const startX = React.useRef(0);
+  const handleDown = (e: React.PointerEvent): void => {
+    e.preventDefault();
+    startX.current = e.clientX;
+    const move = (ev: PointerEvent): void => {
+      onDrag(ev.clientX - startX.current);
+      startX.current = ev.clientX;
+    };
+    const up = (): void => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      onDone();
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+  return (
+    <span
+      onPointerDown={handleDown}
+      title="拖动调整列宽"
+      className="absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize select-none hover:bg-[hsl(var(--color-accent)/0.35)]"
+    />
+  );
+}
+
 export function ShotsPane({ episodeId }: Props): React.ReactElement {
   const utils = trpc.useUtils();
   const { data, isLoading } = trpc.storyboard.listShots.useQuery({
     episodeId,
     grouped: true,
   });
+
+  // 六八:列宽状态(拖拽实时更新,松手持久化)
+  const [colW, setColW] = React.useState<ColWidths>(loadColWidths);
+  const dragCol = (key: keyof ColWidths) => (dx: number) =>
+    setColW((w) => ({ ...w, [key]: Math.max(56, Math.min(640, w[key] + dx)) }));
+  const persistColW = (): void => {
+    setColW((w) => {
+      try {
+        localStorage.setItem(COL_WIDTH_KEY, JSON.stringify(w));
+      } catch {
+        /* 隐私模式等存不了就算了,会话内仍生效 */
+      }
+      return w;
+    });
+  };
 
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [editingShot, setEditingShot] = React.useState<Shot | null>(null);
@@ -348,18 +416,36 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
       {/* 分镜表 — 字号由 storyboard-workspace 注入的 --storyboard-fs 控制
        *  主体 td 不写 fontSize 类直接继承 table;辅助元素用 em 相对联动 */}
       <div className="flex-1 overflow-auto">
+        {/* 六八:table-fixed + 可拖列宽(镜号/拍摄角度景别/剧本内容),提示词列吃剩余宽度;
+         *  min-w 兜底窄屏 — 容器 overflow-auto 横滚,宽屏自适应铺满 */}
         <table
-          className="w-full"
+          className="w-full min-w-[720px] table-fixed"
           style={{ fontSize: 'var(--storyboard-fs, 15px)' }}
         >
           <thead className="sticky top-0 border-b border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] text-[length:0.85em] text-[hsl(var(--color-muted-foreground))]">
             <tr>
               <th className="w-8 px-2 py-2"></th>
-              <th className="w-16 border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 text-left font-medium">镜号</th>
-              {/* 拍摄景别:足够单行显示 "特写 平视 0° · 运镜:固定 · 光线:低调" */}
-              <th className="w-[15rem] border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 text-left font-medium">拍摄角度景别</th>
-              {/* 剧本内容:用户要求紧凑,固定较窄宽度 */}
-              <th className="w-[18rem] border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 text-left font-medium">剧本内容</th>
+              <th
+                style={{ width: colW.num }}
+                className="relative border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 text-left font-medium"
+              >
+                镜号
+                <ColResizer onDrag={dragCol('num')} onDone={persistColW} />
+              </th>
+              <th
+                style={{ width: colW.dims }}
+                className="relative border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 text-left font-medium"
+              >
+                拍摄角度景别 · 音效
+                <ColResizer onDrag={dragCol('dims')} onDone={persistColW} />
+              </th>
+              <th
+                style={{ width: colW.content }}
+                className="relative border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 text-left font-medium"
+              >
+                剧本内容
+                <ColResizer onDrag={dragCol('content')} onDone={persistColW} />
+              </th>
               {/* 提示词:不设宽度,吃所有剩余空间 — 用户要求最宽 */}
               <th className="border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 text-left font-medium">提示词(含台词/OS)</th>
               <th className="w-20 border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 text-right font-medium">操作</th>
@@ -394,6 +480,7 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
                       deleteShot.mutate({ shotId: row.data.id });
                     }
                   }}
+                  onSaved={invalidate}
                   disabled={mutating}
                   indent={false}
                 />
@@ -448,12 +535,27 @@ function GroupRow({
       <td className="border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 align-top">
         <div className="flex flex-col gap-1 text-[hsl(var(--color-muted-foreground))]">
           {group.shots.map((s, i) => (
-            <div key={s.id} className="whitespace-nowrap leading-relaxed">
+            <div key={s.id} className="leading-relaxed">
               <span className="mr-1 font-mono text-[length:0.7em]">[{i + 1}]</span>
               <span>{s.framing ?? ''}</span>
               {s.angle && <span className="ml-1">{s.angle}</span>}
               {s.movement && <span className="ml-1">· 运镜:{s.movement}</span>}
               {s.lighting && <span className="ml-1">· 光线:{s.lighting}</span>}
+              {/* 六八:组内镜时长也可改(服务端自动重算组总时长) */}
+              <span className="ml-1">
+                ·{' '}
+                <DurationEditor
+                  shotId={s.id}
+                  value={s.durationS}
+                  disabled={disabled}
+                  onSaved={onSaved}
+                />
+              </span>
+              {s.sound && (
+                <div className="text-[length:0.82em] text-[hsl(var(--color-muted-foreground))]/75">
+                  ♪ {s.sound}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -614,6 +716,75 @@ function GroupPromptEditor({
 // 单镜行
 // ---------------------------------------------------------------------------
 
+// 六八:时长行内编辑 — 点击数字 → 数字输入,Enter/失焦保存(updateShot 服务端联动重算组时长)
+function DurationEditor({
+  shotId,
+  value,
+  disabled,
+  onSaved,
+}: {
+  shotId: string;
+  value: number;
+  disabled: boolean;
+  onSaved: () => void;
+}): React.ReactElement {
+  const [editing, setEditing] = React.useState(false);
+  const [val, setVal] = React.useState(String(value));
+  const update = trpc.storyboard.updateShot.useMutation({
+    onSuccess: () => {
+      setEditing(false);
+      onSaved();
+    },
+    onError: (e) => toast.error(`时长保存失败:${e.message}`),
+  });
+  const commit = (): void => {
+    const n = Number(val);
+    if (!Number.isFinite(n) || n <= 0 || n > 60) {
+      toast.error('时长需为 0-60 秒之间的数字');
+      return;
+    }
+    const rounded = Math.round(n * 10) / 10;
+    if (Math.abs(rounded - value) < 1e-9) {
+      setEditing(false);
+      return;
+    }
+    update.mutate({ shotId, patch: { durationS: rounded } });
+  };
+  if (!editing) {
+    return (
+      <button
+        onClick={() => {
+          setVal(String(value));
+          setEditing(true);
+        }}
+        disabled={disabled}
+        title="点击修改时长(组内镜修改后组总时长自动重算)"
+        className="w-fit cursor-pointer rounded text-left text-[length:0.7em] text-[hsl(var(--color-muted-foreground))] underline decoration-dotted underline-offset-2 hover:text-[hsl(var(--color-accent))] disabled:cursor-default disabled:no-underline"
+      >
+        {value.toFixed(1)} s
+      </button>
+    );
+  }
+  return (
+    <input
+      type="number"
+      step={0.5}
+      min={0.5}
+      max={60}
+      autoFocus
+      value={val}
+      disabled={update.isPending}
+      onChange={(e) => setVal(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') commit();
+        if (e.key === 'Escape') setEditing(false);
+      }}
+      className="w-16 rounded border border-[hsl(var(--color-accent))] bg-[hsl(var(--color-background))] px-1 py-0.5 text-[length:0.75em] outline-none"
+    />
+  );
+}
+
 function ShotRow({
   shot,
   selected,
@@ -624,6 +795,7 @@ function ShotRow({
   canMergeUp,
   canMergeDown,
   onDelete,
+  onSaved,
   disabled,
   indent,
 }: {
@@ -636,6 +808,7 @@ function ShotRow({
   canMergeUp?: boolean;
   canMergeDown?: boolean;
   onDelete?: () => void;
+  onSaved: () => void;
   disabled: boolean;
   indent: boolean;
 }): React.ReactElement {
@@ -658,9 +831,12 @@ function ShotRow({
       <td className={cn('border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 font-mono', indent && 'pl-4')}>
         <div className="flex flex-col gap-0.5">
           <span>{shot.number}</span>
-          <span className="text-[length:0.7em] text-[hsl(var(--color-muted-foreground))]">
-            {shot.durationS.toFixed(1)} s
-          </span>
+          <DurationEditor
+            shotId={shot.id}
+            value={shot.durationS}
+            disabled={disabled}
+            onSaved={onSaved}
+          />
           {shot.priority && (
             <Badge
               variant={shot.priority === 'S' ? 'destructive' : 'secondary'}
@@ -672,13 +848,18 @@ function ShotRow({
         </div>
       </td>
       <td className="border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2">
-        {/* 用户反馈:拍摄景别在一行显示完毕(framing+angle+movement+lighting 同行,无加粗) */}
-        <div className="whitespace-nowrap leading-relaxed text-[hsl(var(--color-muted-foreground))]">
+        {/* 四维同行展示(列宽可拖后允许换行);音效单起一行,与画面参数区分 */}
+        <div className="leading-relaxed text-[hsl(var(--color-muted-foreground))]">
           <span>{shot.framing}</span>
           {shot.angle && <span className="ml-1">{shot.angle}</span>}
           {shot.movement && <span className="ml-1">· 运镜:{shot.movement}</span>}
           {shot.lighting && <span className="ml-1">· 光线:{shot.lighting}</span>}
         </div>
+        {shot.sound && (
+          <div className="mt-0.5 text-[length:0.82em] leading-relaxed text-[hsl(var(--color-muted-foreground))]/75">
+            ♪ {shot.sound}
+          </div>
+        )}
       </td>
       <td className="border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 leading-relaxed">{shot.content}</td>
       <td className="max-w-[400px] border-l border-[hsl(var(--color-border)/0.4)] px-2 py-2 leading-relaxed">

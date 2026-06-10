@@ -7,6 +7,7 @@
 import { COMPOSE_JOB_KIND, processComposeRender } from '@ss/core/compose';
 import { processVideoGenJob, recoverStaleVideoAttempts } from '@ss/core/video-generation';
 import { VOICE_SAMPLE_JOB_KIND, processVoiceSampleJob } from '@ss/core/voice';
+import { CACHE_VIDEO_JOB_KIND, processCacheVideoJob } from '@ss/core/media';
 import { registerJobHandler } from '@ss/queue/job-queue';
 import { registerInProcessVideoHandler } from '@ss/queue/video-gen';
 
@@ -28,6 +29,7 @@ export async function startInProcessVideoWorker(): Promise<void> {
   // M1/TTS-B:通用 ss-jobs 队列的 in-process handler 注册(enqueueJob → 这里)
   registerJobHandler(COMPOSE_JOB_KIND, (data) => processComposeRender(data));
   registerJobHandler(VOICE_SAMPLE_JOB_KIND, (data) => processVoiceSampleJob(data));
+  registerJobHandler(CACHE_VIDEO_JOB_KIND, (data) => processCacheVideoJob(data)); // 六八 视频本地缓存
 
   // 回收孤儿(上次 app 退出时未完成的视频 job)
   await recoverStaleVideoAttempts(workerId);

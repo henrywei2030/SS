@@ -29,3 +29,13 @@ export const TRAINABLE_TEXT_FIELDS = [
   'name',
   'description',
 ] as const;
+
+/**
+ * 六八:声线适用范围 — 只有主演/配角需要参考声音(用户定调:群演不需要)。
+ * 群演/未分类返回 false:批量生成跳过、AIGC 缺声线提示不唠叨、人物卡不显示声音状态;
+ * 单个角色编辑面板的手动生成不受此限(手动 = 明确意图)。
+ */
+export function characterNeedsVoice(role: string | null | undefined): boolean {
+  if (!role) return false;
+  return role.startsWith('主演') || role.startsWith('配角');
+}

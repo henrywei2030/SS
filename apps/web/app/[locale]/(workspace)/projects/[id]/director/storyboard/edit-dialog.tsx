@@ -28,6 +28,8 @@ interface ShotEditInput {
   angle: string | null;
   movement: string | null;
   lighting: string | null;
+  // 六八:四维电影级 — 音效设计(自由文本)
+  sound: string | null;
   content: string;
   prompt: string;
   durationS: number;
@@ -47,6 +49,9 @@ export function ShotEditDialog({
   const [angle, setAngle] = React.useState(shot.angle ?? '');
   const [movement, setMovement] = React.useState(shot.movement ?? '');
   const [lighting, setLighting] = React.useState(shot.lighting ?? '');
+  // 六八:音效(自由文本) + 时长可改
+  const [sound, setSound] = React.useState(shot.sound ?? '');
+  const [durationS, setDurationS] = React.useState(String(shot.durationS));
   const [content, setContent] = React.useState(shot.content);
   const [prompt, setPrompt] = React.useState(shot.prompt);
   const [diffNote, setDiffNote] = React.useState('');
@@ -59,17 +64,29 @@ export function ShotEditDialog({
     onError: (e) => toast.error(e.message),
   });
 
+  const parsedDuration = Number(durationS);
+  const durationValid =
+    Number.isFinite(parsedDuration) && parsedDuration > 0 && parsedDuration <= 60;
+  const durationChanged =
+    durationValid && Math.abs(Math.round(parsedDuration * 10) / 10 - shot.durationS) > 1e-9;
+
   const hasChanges =
     framing !== (shot.framing ?? '') ||
     angle !== (shot.angle ?? '') ||
     movement !== (shot.movement ?? '') ||
     lighting !== (shot.lighting ?? '') ||
+    sound !== (shot.sound ?? '') ||
+    durationChanged ||
     content !== shot.content ||
     prompt !== shot.prompt;
 
   const handleSave = (): void => {
     if (!hasChanges) {
       toast.info('没有改动');
+      return;
+    }
+    if (!durationValid) {
+      toast.error('时长需为 0-60 秒之间的数字');
       return;
     }
     // movement/lighting:空串映射成 null(明确清除字段),非空写入
@@ -86,6 +103,8 @@ export function ShotEditDialog({
         angle: angle !== (shot.angle ?? '') ? angle : undefined,
         movement: cleanOrNull(movement, shot.movement),
         lighting: cleanOrNull(lighting, shot.lighting),
+        sound: cleanOrNull(sound, shot.sound),
+        durationS: durationChanged ? Math.round(parsedDuration * 10) / 10 : undefined,
         content: content !== shot.content ? content : undefined,
         prompt: prompt !== shot.prompt ? prompt : undefined,
       },
@@ -139,6 +158,33 @@ export function ShotEditDialog({
               onChange={setLighting}
               placeholder="自然光 / 硬光 / 逆光"
             />
+          </div>
+
+          {/* 六八:四维第 4 维音效(自由文本) + 时长可改 */}
+          <div className="grid grid-cols-[1fr_8rem] gap-3">
+            <div className="grid gap-1.5">
+              <Label htmlFor="sound">音效设计</Label>
+              <input
+                id="sound"
+                value={sound}
+                onChange={(e) => setSound(e.target.value.slice(0, 120))}
+                placeholder="环境底 + 动效 + 强调,如:雨声延续上镜,摔杯脆响,骤然静默"
+                className="h-9 rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 text-sm outline-none focus:border-[hsl(var(--color-accent))]"
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="durationS">时长(秒)</Label>
+              <input
+                id="durationS"
+                type="number"
+                step={0.5}
+                min={0.5}
+                max={60}
+                value={durationS}
+                onChange={(e) => setDurationS(e.target.value)}
+                className="h-9 rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 text-sm outline-none focus:border-[hsl(var(--color-accent))]"
+              />
+            </div>
           </div>
 
           <div className="grid gap-1.5">
