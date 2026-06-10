@@ -5,6 +5,30 @@
 
 ---
 
+## 2026-06-10(周三,mac-mini · 六七真打:M0+M1+M2′ 三里程碑 + 本地 TTS 全栈 + 美术两需求 + 两遍深审)— 单日把路线图前三关 + 用户追加的本地配音生成全部落地
+
+**完成**
+- ✅ **开工**:强同步 behind 3 → `dc91e64`,Docker 拉起 + REFUND 唯一索引 migration apply(六六遗留清掉,36→37)+ db:sync。**任务全景核对 + TODO 重整**:待办区与代码对齐(十余项已完成未勾归档、M0–M6 立主线、真未做散项收拢「工程卫生」),31k→13k tokens;kling-v3 实查确认不在 moyu → 旗舰档改 kling-v2-6/wan2.6 二选一(docs/06 + TODO 五处同步)
+- ✅ **M0 基建**:通用任务队列 `packages/queue/src/job-queue.ts`(单队列 ss-jobs + kind 注册表 globalThis,bullmq/in-process 双驱动,video-gen 不动)+ worker 加第二个 Worker 消费 ss-jobs;`packages/core/media/ffmpeg.ts`(ffmpeg-static/ffprobe-static,concat/抽帧/混音 ducking/ffprobe,纯函数 arg builder + 真跑集成测试);通知服务 `core/notify`(落库+webhook 飞书/Bark 自适配)+ tRPC notification.* + 顶栏铃铛(30s 轮询)。真打:铃铛红点→下拉→已读全通
+- ✅ **M1 成片合成 F1**:`EpisodeRender` 表 migration(单独点头 apply)+ `core/compose`(时间线取最新未拒成功 take/缺口 gaps + SRT 台词正则提取+实测时长累加 + concat 1080p + 字幕烧录回退 + BGM ducking)+ queue kind compose + api compose.{renderEpisode,listRenders,timeline}(advisory lock episode_render 防重入 + stale 清扫)+ web 成片 tab。真打:合成夹具 3 take(含 1 无声验静音垫)→ 6s MP4 可播、中文字幕真烧进画面、SRT 段边界实测对轴。**修正蓝图错误假设**:台词不在 shot.content(512 镜头全是画面描述),改从 Scene.content 场原文提 + 场头元数据黑名单 + 场内按组时长比例切分
+- ✅ **M2′ 配音链路补强**:voiceMediaId 写入校验(原可悬空/指向图片致配音静默丢失)+ generateAudio 产品化(默认值进 setting + 生成前费用预估 UI ≈¥2.80@4s)+ 声线规范提示 + `normalizeAudio`(掐静音+响度归一 -16 LUFS,新版本 parentId 链)+ ✨ 一键规范化按钮。⚠️ seedance 配音真打卡 moyu token 401(退款链验净 ¥0,token 更新后续打)
+- ✅ **本地 TTS 声线生成(用户追加需求,零依赖系统内闭环)**:选型 **MOSS-TTS-Nano**(Apache-2.0,onnxruntime 全跑零 Python)。PoC 实测 mac-mini RTF≈0.66、权重 845MB(ModelScope 直拉)。**B 档全移植**:`packages/core/voice/`(nano-runtime 移植官方 Python 推理→onnxruntime-node+sentencepiece-js 分词逐 id 对照一致 / audio-io ffmpeg PCM↔WAV / weights ModelScope 首跑下载单例 / generate-sample queue kind voice-sample)。**闭环**:UI「按设定生成」(种子声线+独白文案)→ 本地推理 → normalizeAudio → MediaItem → 自动写 voiceMediaId+voiceModelId → 铃铛。真打:9.8s 样本、attempt SUCCESS 3.66s、**零扣费零 Python**、试听条自动出现。next.config externals onnxruntime-node/sentencepiece-js(.node 原生 webpack 嚼不动,pg 同款)
+- ✅ **美术工坊两需求**:①人物编辑左栏 360→440px + 弹窗 1360→1480px(字段不挤);②**三视图核心逻辑梳理**:切三视图 tab 且人物形象已确认 → 自动以形象图为参考(图生图)预填 refImageIds + 状态条提示 + 「形象」角标,主生成默认图生图、移除参考回退从设定生成(替代五八割裂的独立按钮)。真打验过自动预填+移除回退
+- ✅ **全盘代码漏洞两遍深审**:第一遍 6 维度 6 agent 并行 → 对抗复核排除一批误报(Node 单线程/ORT 并发模型误判:getNanoTtsRuntime check-set 原子、session.run 并发安全、compose 回标 add 失败=未入队、in-process 双注册进程互斥)→ **修 9 真问题**:🔴有声差价进 PREPAY 被退款冲销(破坏 PREPAY=provider 估算不变量)→ 移除仅 UI 预估 / TTS 权重并发下载单例化 / 轮询 MAX_POLLS 上限 / webhook SSRF 内网黑名单 / audioSurcharge clamp / int32Tensor 复制防 buffer 别名 / extractLastHidden Math.max 防御 / notify 失败改 console.error / generate-sample throw 脱敏。第二遍对抗复查 → **抓到第一遍修复自身引入的 bug**(isBlockedWebhookHost 的 IPv6 fc/fd 前缀误伤 fc-api.example.com 域名 + [::1] 方括号漏判)→ 修 + 加回归单测
+- ✅ typecheck 16/16 + test 12 task 全过(core 14 文件 168+2skip,含 voice 真推理集成 / api 57 / queue 11 / adapters 31);全程真打验收清夹具,无脏数据残留
+
+**问题/待决策**
+- ❓ **seedance 配音真打未完成**:moyu token 401 过期。token 更新后续打 reference_audio/generate_audio 透传;不支持则配音主力切 kling-v2-6
+- ❓ **本地 TTS 桌面打包策略**:onnxruntime-node 的 .node 二进制 + 845MB 权重(不入包,首跑 ModelScope 下载)在 .dmg/CI 出包时验证 / win-laptop onnxruntime-node 预编译真跑
+- ❓ kling-v2-6 vs wan2.6 旗舰档二选一仍待 M5 真接实测
+
+**下次接着做**
+- 📌 **M3 关键帧先行 + 链式 + QC**(蓝图下一关):generateKeyframe/confirmKeyframe(0 migration)+ scene-aware 尾帧链 + qcScore migration + VLM 质检
+- 📌 seedance 配音真打(更新 moyu token 后)
+- 📌 本地 TTS:「从有声视频抽音轨反向采纳声线」补充功能 + 桌面打包带权重验证
+
+---
+
 ## 2026-06-10(周三,mac-studio · 七功能 AIGC 增强路线图 M0–M6 定稿)— 承六六深审后规划讨论,锁定模型 + 动态 prompt 架构
 
 **完成**

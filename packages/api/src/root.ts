@@ -14,8 +14,10 @@ import { assetRouter } from './routers/asset.js';
 import { aigcRouter } from './routers/aigc.js';
 import { insightsRouter } from './routers/insights.js';
 import { adminRouter } from './routers/admin.js';
+import { composeRouter } from './routers/compose.js';
 import { i18nRouter } from './routers/i18n.js';
 import { mediaRouter } from './routers/media.js';
+import { notificationRouter } from './routers/notification.js';
 
 export const appRouter = router({
   auth: authRouter,
@@ -28,8 +30,10 @@ export const appRouter = router({
   aigc: aigcRouter,
   insights: insightsRouter,
   admin: adminRouter,
+  compose: composeRouter,
   i18n: i18nRouter,
   media: mediaRouter,
+  notification: notificationRouter,
 });
 
 export type AppRouter = typeof appRouter;

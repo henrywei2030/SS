@@ -1,6 +1,7 @@
 # 06 · 七功能 AIGC 增强路线图(2026 H2)
 
 > **状态**:规划定稿 2026-06-10(mac-studio),待开工 **M0**。
+> **修订 2026-06-10 六七(mac-mini)**:kling-v3 经 catalog 实查确认不在 moyu → 旗舰档改 **kling-v2-6 / wan2.6 二选一**(M5 真接时实测定),§1/D5/§7 已同步。
 > 本文是可直接 coding 的开工蓝图。所有"已预留钩子"均经 2026-06-10 深审 + 开发文档时核实存在。
 > 配套:`docs/DEVELOPMENT.md`(系统现状)、`docs/01-architecture.md`(分层蓝图)。
 
@@ -29,7 +30,7 @@
 | 档位 | modelId | 用途 | 备注 |
 |---|---|---|---|
 | 快速出片 | `doubao-seedance-2-0-fast-260128` | 主力批量生成 | ⚠️ 描述仅 480p/720p · 4-15s,**未提音频/首尾帧** → 配音(F3)/首尾帧链(F2)在此模型上能否生效**必须 M2′/M3 真打验证** |
-| 旗舰 | **`kling-v3`(用户指定目标)** | 高质量 / 人物一致性 | ⚠️ **moyu catalog 当前无 v3,最高 `kling-v2-6`(音画同出)**。M5 真接前若仍无 v3 → 回报 + 临时回落 `kling-v2-6` |
+| 旗舰 | **`kling-v2-6` / `wan2.6` 二选一**(六七定) | 高质量 / 人物一致性 | v3 已确认不在 moyu(2026-06-10 catalog 实查)。候选:`kling-v2-6`(1.2元/s,**音画同出**·自然语音+音效)/ `wan2.6-t2v`+`wan2.6-i2v`(各 1.1元/s)。M5 真接时逐家真打实测后定 |
 | 参考生视频 | `happyhorse-1.0-r2v`(+ i2v/t2v) | **强一致性主力**(最多 9 张参考图) | r2v 9 图参考是三家里最强的一致性手段 |
 
 辅助模型(非视频):
@@ -48,7 +49,7 @@
 | D2 | 一致性主路 | **关键帧先行(animatic)**,尾帧链做可选开关 | 图层先收敛便宜可审;链干净关键帧而非模糊尾帧防误差累积 |
 | D3 | 动态 prompt 触发 | **预生成 + 缓存**(写回 ShotGroup.prompt) | 省 LLM 钱 + 人可审可改 + PromptEdit 捕获人改喂飞轮 |
 | D4 | 优化器模型 | **claude-opus-4-6** | 用户指定质量优先;预生成+缓存每组只优化一次,贵档成本可控 |
-| D5 | 第二/三视频模型 | kling-v3(目标)/ happyhorse | 见 §1 |
+| D5 | 第二/三视频模型 | **kling-v2-6 或 wan2.6**(M5 实测定)/ happyhorse | v3 不存在已确认(六七);见 §1 |
 | D6 | QC 默认 | **关**(`take.qc.enabled=false`) | 真打核成本后再开 |
 | D7 | 批量前成本确认 | **强制弹窗** | 防一键烧钱 |
 | D8 | pgvector 替代 | **应用层 embedding 余弦**(普通 Json 列) | 桌面嵌入式 PG 装不了 pgvector;项目内候选集小,应用层够用 |
@@ -63,18 +64,25 @@
 - **通知服务**:`Notification` 表已存在零代码用 → `packages/core/notify/`(insert + 可选 webhook,URL 存 `notify.webhook.url`,飞书/Bark 通用 JSON)+ tRPC `notification.*` + top-nav 铃铛(30s 轮询)。
 - 验收:job-queue kind 路由 / notify 落库 + webhook。
 
-### M1 · F1 成片合成(~2 sessions)
-- DB:**新表 `EpisodeRender`**(episodeId/status/mediaId/srtMediaId/paramsJson/errorMsg/createdBy)→ migration。
-- core `core/compose/`:时间线(按 group.positionIdx 取已采纳 take,缺口列 `gaps`)+ SRT(台词用剧本解析同款正则从 shot.content 提,时间按 ffprobe 实测累加)+ ffmpeg concat(统一 1080p 目标比例)+ 字幕烧录 + **BGM 混音(对白 ducking)**。
-- queue 新 kind `compose`;api `compose.renderEpisode(allowGaps?)` / `listRenders`;web aigc 集工作台「成片」tab。
-- 验收:一集 ≥3 采纳 take → MP4 可播、字幕对轴、桌面态同样可用。
+### M1 · F1 成片合成(~2 sessions)— ✅ 完成(2026-06-10 六七 mac-mini,合成夹具验收)
+- DB:**新表 `EpisodeRender`**(episodeId/status/mediaId/srtMediaId/paramsJson/errorMsg/createdBy)→ migration `20260610100000_episode_render` 已 apply。
+- core `core/compose/`:时间线(按组首镜 positionIdx 排序取「最新未拒成功 take」,缺口列 `gaps`)+ SRT(**台词源实测修正:从 `Scene.content` 场原文提**(512 镜头 0 台词,shot.content/prompt 全是画面描述)同款正则 + 场头元数据黑名单 + 场内按组实测时长比例切分,时间按 ffprobe 实测累加)+ ffmpeg concat(统一 1080p 目标比例)+ 字幕烧录(失败自动回退不烧,SRT 单独落库)+ **BGM 混音(对白 ducking)**。
+- queue kind `compose`(M0 通用队列首个消费方);api `compose.renderEpisode(allowGaps?)` / `listRenders` / `timeline`;web aigc 集工作台「成片」tab(缺口拦截/防重入/5s 条件轮询/播放/下载 MP4+SRT)。
+- 验收 ✅:夹具 3 take(含 1 无声段验静音垫轨)→ MP4 可播(9:16 1080p)、中文字幕真烧进画面、SRT 段边界=实测时长精确对轴、完成通知进铃铛。**留**:桌面态 compose 真打(下次出 .dmg 时验,代码路径同 in-process 注册已通)/ Windows 字幕烧录字体待 win-laptop / 真实 BGM 端到端(mixBgm 原语已有集成测试)。
 
-### M2′ · F3 原生配音链路补强(~0.5–1 session)
+### M2′ · F3 原生配音链路补强 — ✅ 代码完成(2026-06-10 六七 mac-mini)
 > 不造新管线,只补已建链路的漏:
-- 核查 autoMatch / 手动 bind 是否同 autoFill 自动带 `voiceMediaId`,缺则补。
-- `generateAudio` 产品化:默认值进 setting,生成对话框明示有声单价差(计入预扣估算)。
-- 声线字段加规范提示 + ffmpeg「裁剪 + 响度归一」小工具。
-- ⚠️ **真打验证 seedance-2.0-fast 是否透传 reference_audio / generate_audio**;不支持则配音主力改 `kling-v2-6`(音画同出),并回报。
+- ✅ 核查链路:compile 收集 voiceMediaId 不分绑定来源(autoMatch/手动一视同仁);补真缺口 **voiceMediaId 写入校验**(原可悬空/指向图片致配音静默丢失)。
+- ✅ `generateAudio` 产品化:`shot.video.generateAudio.default`(默认开)+ `shot.video.audioSurchargeCnyPerS`(默认 0,真账单后校准)进 seed;**生成前费用预估上线**(单价×时长 + 有声差价,UI 实测 ≈¥2.80@4s)。
+- ✅ 声线规范提示 + `normalizeAudio`(掐头尾静音 + 响度归一 -16 LUFS + 截 15s,新版本 parentId 链可回退)+ UI ✨ 一键规范化按钮。
+- ⚠️ seedance-2.0-fast reference_audio/generate_audio 真打**未完成**:moyu token 401 过期(退款链已验 PREPAY→REFUND 净 ¥0);token 更新后续打,不支持则配音主力改 `kling-v2-6`。
+
+### M2′+ · 本地 TTS 声线样本(按角色设定生成参考音频)— ✅ 完成(2026-06-10 六七,用户追加需求)
+> 用户要「人物设定 → 自动生成参考声音并绑定」。**与 D1 不冲突**:这是给原生配音链路造 reference_audio 样本,非逐镜 TTS 配音管线。
+- **选型 MOSS-TTS-Nano**(Apache-2.0,OpenMOSS):0.1B,官方 browser-poc ONNX 导出版可**全 onnxruntime 推理,零 Python**。PoC 实测 mac-mini RTF≈0.66、权重 ~845MB(ModelScope 直拉,HF 被墙)。
+- **B 档全移植**(非 Python sidecar):`packages/core/voice/` — nano-runtime.ts(ort_cpu_runtime.py → onnxruntime-node + sentencepiece-js,分词逐 id 对照一致,只移植 fixed 采样路径)+ audio-io.ts(ffmpeg PCM↔WAV,零新音频依赖)+ weights.ts(ModelScope 首跑下载 + 18 内置声线清单)+ generate-sample.ts(queue kind `voice-sample`)。
+- **闭环**:UI「按设定生成」(种子声线下拉,文案取独白/小传)→ enqueueJob → 本地推理 → normalizeAudio → MediaItem → **自动写 voiceMediaId + voiceModelId** → 铃铛通知。真打验过:9.8s 样本、attempt SUCCESS 3.66s、**零扣费零 Python**、试听条自动出现。
+- next.config 需 externals `onnxruntime-node`/`sentencepiece-js`(.node 原生绑定 webpack 嚼不动,与 pg 同款)。**留**:桌面打包带权重策略(首跑下载 vs CI 预置)/ win-laptop onnxruntime-node 预编译验证 / 「从有声视频抽音轨反向采纳声线」补充功能。
 
 ### M3 · F2 关键帧先行 + 链式 + F6 质检(~3 sessions)
 - **3a 关键帧**(钩子全在:`Shot.startFrameMediaId` ADR-23 ✓、`VideoRequest.firstFrameUrl` ✓):`aigc.generateKeyframe`(用已编译组提示词走 seedream → 候选)+ `confirmKeyframe`(写组首 shot startFrameMediaId,**0 migration**);**生成 N+1 关键帧时把 N 关键帧作 img2img 参考**(图层收敛一致性)。
@@ -86,7 +94,7 @@
 - **先决重构**:`generateVideo` 主体下沉 `core/video-generation/submit.ts`(锁/sweep/占位/预算/编译/合规/入队),core 返判别、TRPCError 留 router(同 stale-sweep 分层纪律)。单点真打回归后再叠加。
 - **F4**:`batchGenerateForEpisode`(待生成 groups → **成本预估强制确认** → 按 `Shot.priority` S>A>B>C 排序,**接上 `ScriptAnalysis.productionPlan`**)+ `cancelQueuedForEpisode`(退款复用 helper)+ 失败 retryable 自动重抽 ≤ `batch.retry.max`;web 批量工具条 + 总进度 + 完成/全败**通知推手机**。
 - **F5**:seedance relay endpointStyle **泛化为通用 relay 视频适配器**(model 参数化);并抽 `providerIds?:string[]`(≤2,同事务双占位各 PREPAY,共享 `GenerationAttempt.groupId` 对决标记 ✓);failover 用 `healthScore`/`lastErrorAt`(✓ 预留)+ `shot.video.fallbackProviderIds`;web A/B 并排对比卡。
-- **第一家并抽 = happyhorse 或 kling**(待 §1 kling 版本落定);各家经 moyu 请求形状逐家真打。
+- **第一家并抽 = happyhorse 或 kling-v2-6 / wan2.6**(M5 实测定,见 §1);各家经 moyu 请求形状逐家真打。
 - 验收:整集按优先级跑完 + 推送;预估与实扣偏差 <10%;双模型并排;拔 key 自动 failover。
 
 ### M6 · F7 动态 Prompt 优化(~2.5 sessions)
@@ -160,8 +168,8 @@ interface PromptContextContributor {
 
 ## 7. 风险与真打验证清单
 - ⚠️ **seedance-2.0-fast 音频/首尾帧**:描述未提 → M2′/M3 真打;不支持则配音改 kling-v2-6、首尾帧链改 happyhorse-i2v。
-- ⚠️ **kling v3 不存在于 moyu**:M5 真接前确认;无则回落 v2-6 并回报。
-- ⚠️ **happyhorse / kling 经 moyu 的请求形状未知**:M5 逐家真打(参数/轮询/响应解析)。
+- ✅ ~~kling v3 不存在于 moyu~~ **已确认不在(2026-06-10 六七 catalog 实查)** → 旗舰档改 `kling-v2-6` / `wan2.6` 二选一,M5 真接时实测定。
+- ⚠️ **happyhorse / kling / wan 经 moyu 的请求形状未知**:M5 逐家真打(参数/轮询/响应解析)。
 - opus-4-6 优化器成本:预生成+缓存缓解;监控 ledger,必要时降便宜档。
 
 ---

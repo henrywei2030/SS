@@ -291,7 +291,7 @@ export function VideoPreviewSection({
           {capabilities?.supportsAudio && (
             <label
               className="inline-flex items-center gap-1.5 rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-2 py-1.5 text-xs"
-              title="生成同步音频(Seedance 2.0 真支持)"
+              title="生成同步音频(Seedance 2.0 真支持);绑定角色的参考音频会自动带上作配音参考"
             >
               <input
                 type="checkbox"
@@ -299,8 +299,28 @@ export function VideoPreviewSection({
                 onChange={(e) => setGenerateAudio(e.target.checked)}
                 className="size-3 cursor-pointer accent-blue-600"
               />
-              <span>音频</span>
+              <span>
+                音频
+                {(capabilities?.audioSurchargeCnyPerS ?? 0) > 0 &&
+                  `(+¥${capabilities!.audioSurchargeCnyPerS}/s)`}
+              </span>
             </label>
+          )}
+          {/* M2′:生成前费用预估(基础单价 + 有声差价,按当前时长) */}
+          {capabilities && !capabilities.isMock && (
+            <span
+              className="text-[11px] text-[hsl(var(--color-muted-foreground))]"
+              title={`单价 ¥${capabilities.estimatedCnyPerS}/s${generateAudio && (capabilities.audioSurchargeCnyPerS ?? 0) > 0 ? ` + 有声 ¥${capabilities.audioSurchargeCnyPerS}/s` : ''} × ${durationS}s(预扣口径,实扣按 provider 结算)`}
+            >
+              ≈¥
+              {(
+                ((capabilities.estimatedCnyPerS ?? 0) +
+                  (generateAudio && capabilities.supportsAudio
+                    ? (capabilities.audioSurchargeCnyPerS ?? 0)
+                    : 0)) *
+                durationS
+              ).toFixed(2)}
+            </span>
           )}
           <button
             onClick={() =>

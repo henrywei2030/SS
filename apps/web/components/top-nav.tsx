@@ -10,7 +10,6 @@ import {
   Sparkles,
   Library,
   BarChart3,
-  Bell,
   LogOut,
   Shield,
   User,
@@ -29,6 +28,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { LanguageSwitcher } from '@/components/lang-switcher';
+import { NotificationBell } from '@/components/notification-bell';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LogoMark } from '@/components/brand/logo';
 import { cn } from '@/lib/utils';
@@ -224,9 +224,7 @@ export function TopNav({
         <ThemeToggle className="h-7 w-7" />
         <LanguageSwitcher />
 
-        <Button variant="ghost" size="icon" className="h-7 w-7">
-          <Bell className="size-3.5" />
-        </Button>
+        <NotificationBell />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

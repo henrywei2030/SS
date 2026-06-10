@@ -18,6 +18,7 @@ export type LockNamespace =
   | 'asset_confirm' // 资产候选确认(asset-candidates)
   | 'episode_lock' // episode 软锁抢占(episode-lock util)
   | 'episode_publish' // 分镜发布(storyboard-generate)
+  | 'episode_render' // 整集成片发起防重入(compose · M1)
   | 'insp_draft' // 灵感草稿展开(inspiration)
   | 'script_version' // 剧本版本写入(script-upload)
   | 'storyboard_group'; // 分镜组合并/拆分(storyboard-group + aigc-groups)

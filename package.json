@@ -52,7 +52,9 @@
       "@embedded-postgres/darwin-arm64",
       "@embedded-postgres/darwin-x64",
       "@embedded-postgres/linux-x64",
-      "@embedded-postgres/win32-x64"
+      "@embedded-postgres/win32-x64",
+      "ffmpeg-static",
+      "onnxruntime-node"
     ]
   }
 }

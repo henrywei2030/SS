@@ -4,7 +4,10 @@
  *
  * 默认档(bullmq)直接 no-op —— worker 是独立进程(apps/workers/video-gen)。
  */
+import { COMPOSE_JOB_KIND, processComposeRender } from '@ss/core/compose';
 import { processVideoGenJob, recoverStaleVideoAttempts } from '@ss/core/video-generation';
+import { VOICE_SAMPLE_JOB_KIND, processVoiceSampleJob } from '@ss/core/voice';
+import { registerJobHandler } from '@ss/queue/job-queue';
 import { registerInProcessVideoHandler } from '@ss/queue/video-gen';
 
 export async function startInProcessVideoWorker(): Promise<void> {
@@ -21,6 +24,10 @@ export async function startInProcessVideoWorker(): Promise<void> {
       maxAttempts: 1,
     });
   });
+
+  // M1/TTS-B:通用 ss-jobs 队列的 in-process handler 注册(enqueueJob → 这里)
+  registerJobHandler(COMPOSE_JOB_KIND, (data) => processComposeRender(data));
+  registerJobHandler(VOICE_SAMPLE_JOB_KIND, (data) => processVoiceSampleJob(data));
 
   // 回收孤儿(上次 app 退出时未完成的视频 job)
   await recoverStaleVideoAttempts(workerId);

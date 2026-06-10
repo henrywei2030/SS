@@ -449,6 +449,29 @@ async function main() {
       description:
         '中转站素材库默认 group_id(0 = 关闭素材库同步)。若你用的中转站支持素材库 API(可上传文件拿 asset:// 引用,跨调用复用),配 token 后到该站后台创建 group,拿到 group_id 后填这里启用。同一 token 共享素材库。',
     },
+    // M0 基建(2026-06-10):通知服务 webhook 外推(@ss/core/notify)
+    {
+      key: 'notify.webhook.url',
+      value: '',
+      category: 'general',
+      description:
+        '通知 webhook URL(留空 = 通知只落库进顶栏铃铛,不外推)。支持飞书自定义机器人(open.feishu.cn/open-apis/bot/...)/ Bark(api.day.app/<key>)/ 任意通用 JSON webhook。配好后 admin 可调 notification.sendTest 联通自检。',
+    },
+    // M2′ 配音产品化(2026-06-10):有声默认开关 + 有声差价
+    {
+      key: 'shot.video.generateAudio.default',
+      value: 'true',
+      category: 'feature_flag',
+      description:
+        '视频生成「同步音频」默认开关(seedance 2.0 文档默认 true → 系统跟随)。生成对话框可逐次覆盖。',
+    },
+    {
+      key: 'shot.video.audioSurchargeCnyPerS',
+      value: '0',
+      category: 'feature_flag',
+      description:
+        '有声视频每秒差价(¥/s,计入预扣估算 + 生成对话框明示)。moyu catalog 无差价字段,默认 0;真打对账单后按实际差价校准(如有声比无声贵 ¥0.3/s 填 0.3)。',
+    },
 
     // ----- 模型用途绑定(admin 后台 /admin/bindings 显式选择,默认空)-----
     // 设计原则(二十收工后用户反馈):不 hardcode 任何 provider 作为默认值。

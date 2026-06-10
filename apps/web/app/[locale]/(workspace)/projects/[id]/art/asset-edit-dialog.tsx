@@ -76,7 +76,7 @@ function UpdateMode({
 
   return (
     <DialogShell onClose={onClose}>
-      <div className="grid h-full grid-cols-[360px_1fr_300px] divide-x divide-[hsl(var(--color-border))]">
+      <div className="grid h-full grid-cols-[440px_1fr_300px] divide-x divide-[hsl(var(--color-border))]">
         <InfoPanel asset={asset} onChanged={handleAfterChange} />
         <GenerationPanel
           asset={asset}
@@ -277,7 +277,7 @@ function DialogShell({
       onClick={onClose}
     >
       <div
-        className="relative h-[90vh] w-full max-w-[1360px] overflow-hidden rounded-lg border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] shadow-2xl"
+        className="relative h-[90vh] w-full max-w-[1480px] overflow-hidden rounded-lg border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <button

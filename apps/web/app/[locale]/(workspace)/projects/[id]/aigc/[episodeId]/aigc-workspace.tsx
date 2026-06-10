@@ -12,6 +12,8 @@ import { BindAssetDialog } from './components/bind-asset-dialog';
 import { PromptDialog } from './components/prompt-dialog';
 import { ConfirmDialog } from './components/confirm-dialog';
 import { GroupDetail } from './components/group-detail';
+// M1 成片:工作台「成片」tab(?tab=renders)
+import { RenderPanel } from './components/render-panel';
 // 三十六收工 UX 改造:全局返回按钮
 import { BackButton } from '@/components/ui/back-button';
 
@@ -34,6 +36,18 @@ export function AigcWorkspace({
 
   const utils = trpc.useUtils();
   const { data: groups } = trpc.aigc.listGroups.useQuery({ episodeId });
+
+  // M1 成片 tab:?tab=renders(默认 groups)— 对齐 storyboard 的 URL tab 约定
+  const tab = searchParams.get('tab') === 'renders' ? 'renders' : 'groups';
+  const setTab = React.useCallback(
+    (next: 'groups' | 'renders'): void => {
+      const params = new URLSearchParams(window.location.search);
+      if (next === 'groups') params.delete('tab');
+      else params.set('tab', next);
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [router, pathname],
+  );
 
   // 用户反馈 r8:不再切换"选中 group",所有 group 在主区垂直堆叠同时显示
   // ?g=xxx URL 参数仅作初始 scroll 锚点(进入页面后定位到指定 group)
@@ -63,14 +77,20 @@ export function AigcWorkspace({
 
   const scrollToGroup = React.useCallback(
     (id: string): void => {
-      document.getElementById(`group-${id}`)?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'start',
-      });
-      // 同步 URL,refresh/分享也能定位
+      // 在成片 tab 时点左栏段导航 → 先切回生成段视图再滚动(等下一帧 DOM 出来)
       const params = new URLSearchParams(window.location.search);
+      const onRendersTab = params.get('tab') === 'renders';
+      params.delete('tab');
       params.set('g', id);
       router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      const doScroll = (): void => {
+        document.getElementById(`group-${id}`)?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        });
+      };
+      if (onRendersTab) requestAnimationFrame(() => requestAnimationFrame(doScroll));
+      else doScroll();
     },
     [router, pathname],
   );
@@ -267,6 +287,31 @@ export function AigcWorkspace({
         {/* 顶栏 toolbar — 参考截图右上 A- 13 A+ 字号控制 */}
         <div className="sticky top-0 z-10 flex h-11 shrink-0 items-center justify-between gap-2 border-b border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-4">
           <div className="flex items-center gap-3 text-[length:0.85em] text-[hsl(var(--color-muted-foreground))]">
+            {/* M1:生成段 / 成片 视图切换 */}
+            <div className="flex items-center rounded border border-[hsl(var(--color-border))] p-0.5">
+              <button
+                type="button"
+                onClick={() => setTab('groups')}
+                className={
+                  tab === 'groups'
+                    ? 'rounded bg-[hsl(var(--color-secondary))] px-2 py-0.5 text-[hsl(var(--color-foreground))]'
+                    : 'rounded px-2 py-0.5 hover:text-[hsl(var(--color-foreground))]'
+                }
+              >
+                生成段
+              </button>
+              <button
+                type="button"
+                onClick={() => setTab('renders')}
+                className={
+                  tab === 'renders'
+                    ? 'rounded bg-[hsl(var(--color-secondary))] px-2 py-0.5 text-[hsl(var(--color-foreground))]'
+                    : 'rounded px-2 py-0.5 hover:text-[hsl(var(--color-foreground))]'
+                }
+              >
+                成片
+              </button>
+            </div>
             <span>共 <span className="text-[hsl(var(--color-foreground))] font-medium">{groups?.length ?? 0}</span> 段</span>
             {groups && groups.length > 0 && (
               <>
@@ -311,7 +356,9 @@ export function AigcWorkspace({
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-4">
-          {!groups ? (
+          {tab === 'renders' ? (
+            <RenderPanel projectId={projectId} episodeId={episodeId} />
+          ) : !groups ? (
             <div className="flex h-full items-center justify-center text-sm text-[hsl(var(--color-muted-foreground))]">
               加载中...
             </div>

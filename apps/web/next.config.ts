@@ -66,6 +66,14 @@ const nextConfig: NextConfig = {
     '@prisma/adapter-pg',
     'bullmq',
     'ioredis',
+    // M0 ffmpeg 封装(@ss/core/media):index.js 用 __dirname 定位平台二进制,
+    // 进 bundle 会路径漂移 → 必须外部化。桌面 .app 若 trace 不带二进制,用 SS_FFMPEG_PATH 兜底(M1 验证)
+    'ffmpeg-static',
+    'ffprobe-static',
+    // TTS-B 本地 TTS(@ss/core/voice):.node 原生二进制 webpack 嚼不动(Module parse failed),
+    // 与 pg 同款问题 → 外部化;sentencepiece-js 带 wasm 一并外置
+    'onnxruntime-node',
+    'sentencepiece-js',
     // 桌面构建:@ss/db 外置,运行时 require desktop-pack 用 esbuild 预编译的 JS(绕开 Next 编译 Prisma client)
     ...(isDesktopBuild ? ['@ss/db'] : []),
   ],
@@ -102,7 +110,7 @@ const nextConfig: NextConfig = {
    * 但 Webpack 默认按字面找 .js 文件。这里让它在解析 .js 时也尝试 .ts/.tsx，
    * 使所有 @ss/* workspace 包能在 Next.js 直接 transpile 使用。
    */
-  webpack: (config) => {
+  webpack: (config, { isServer }) => {
     config.resolve = config.resolve ?? {};
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (config.resolve as any).extensionAlias = {
@@ -110,6 +118,12 @@ const nextConfig: NextConfig = {
       '.mjs': ['.mts', '.mjs'],
       '.cjs': ['.cts', '.cjs'],
     };
+    // TTS-B:onnxruntime-node 的 .node 原生绑定经 instrumentation→in-process-worker 链
+    // 被 webpack 嚼(serverExternalPackages 在该编译图未生效,实测)→ 手动 externals 兜底
+    if (isServer) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (config.externals as any[]).push('onnxruntime-node', 'sentencepiece-js');
+    }
     return config;
   },
 

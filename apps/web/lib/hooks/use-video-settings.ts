@@ -33,6 +33,8 @@ export interface CapabilitiesInfo {
   supportedResolutions: Array<'480p' | '720p' | '1080p'> | readonly ('480p' | '720p' | '1080p')[];
   defaultResolution: '480p' | '720p' | '1080p';
   supportsAudio: boolean;
+  /** M2′:系统默认有声开关(setting shot.video.generateAudio.default,服务端下发) */
+  defaultGenerateAudio?: boolean;
 }
 
 export interface GroupDetailInfo {
@@ -101,11 +103,19 @@ export function useVideoSettings(input: {
     );
   }, [capabilities]);
 
-  // W5.5.1 audit 修 P1-4:capabilities 切 Provider 时 audio 不支持则 reset false
-  // 防前 Provider 支持音频用户开了,切到不支持的 Provider 后 UI 停在 ON 误导
+  // M2′:首次 capabilities 到达时,音频开关初始化为系统默认(setting 下发);
+  // 之后只在 Provider 不支持时强制 reset false(原 P1-4 行为保留),用户手选不被覆盖
+  const audioInitializedRef = React.useRef(false);
   React.useEffect(() => {
     if (!capabilities) return;
-    if (!capabilities.supportsAudio) setGenerateAudio(false);
+    if (!capabilities.supportsAudio) {
+      setGenerateAudio(false);
+      return;
+    }
+    if (!audioInitializedRef.current) {
+      setGenerateAudio(capabilities.defaultGenerateAudio ?? true);
+      audioInitializedRef.current = true;
+    }
   }, [capabilities]);
 
   return {

@@ -150,6 +150,38 @@ export function GenerationPanel({
     );
   }, [selectedSlot]);
 
+  // 已确认人物形象的预览 URL(三视图图生图参考用)
+  const portraitUrl = React.useMemo(() => {
+    if (!asset.portraitMediaId) return null;
+    const m = (
+      asset as { mediaMap?: Record<string, { cdnUrl?: string | null; storageKey: string }> }
+    ).mediaMap?.[asset.portraitMediaId];
+    return m?.cdnUrl ?? m?.storageKey ?? null;
+  }, [asset]);
+
+  // 三视图核心逻辑(2026-06-10 六七):切到三视图槽位且人物形象已确认 → 自动以形象图为参考(图生图),
+  //   主「开始生成」默认在形象基础上生成三视图,而非从零按设定生成。切换槽位时重置用户手动加的参考图,
+  //   防 portrait 槽位加的参考图泄漏到三视图(反之亦然)。用户仍可手动移除自动参考 → 回退从设定生成。
+  React.useEffect(() => {
+    setRefPreviews((prev) => {
+      for (const u of Object.values(prev)) {
+        if (u?.startsWith('blob:')) URL.revokeObjectURL(u);
+      }
+      return {};
+    });
+    if (selectedSlot === 'three_view' && asset.portraitMediaId && portraitUrl) {
+      setRefImageIds([asset.portraitMediaId]);
+      setRefPreviews({ [asset.portraitMediaId]: portraitUrl });
+    } else {
+      setRefImageIds([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSlot, asset.portraitMediaId, portraitUrl]);
+
+  // 当前是否处于「三视图以形象图为参考」状态(主生成按钮文案 + 提示用)
+  const threeViewFromPortrait =
+    selectedSlot === 'three_view' && refImageIds.includes(asset.portraitMediaId ?? '');
+
   // 需求(2026-06):图像模型默认显式选中 binding 配的默认 provider(当前 = Seedream 5.0 lite),
   //   而非停留在抽象的「默认模型(绑定)」。只初始化一次,之后用户可自由切换(含切回 "" 跟随绑定)。
   const didInitModel = React.useRef(false);
@@ -189,43 +221,26 @@ export function GenerationPanel({
           ))}
         </div>
 
-        {/* 五八:三视图一步到位 — 以已确认人物形象图为参考(图生图)直接生成三视图 */}
-        {selectedSlot === 'three_view' && asset.portraitMediaId && (
-          <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-[hsl(var(--color-accent)/0.4)] bg-[hsl(var(--color-accent)/0.08)] px-2.5 py-2">
-            <span className="text-[11px] text-[hsl(var(--color-foreground))]">
-              一步到位:以已确认的人物形象图为参考,直接生成三视图
-            </span>
-            <Button
-              size="sm"
-              onClick={() =>
-                generateMut.mutate({
-                  assetId: asset.id,
-                  slot: 'three_view',
-                  count: 1,
-                  aspectRatio: '16:9',
-                  sizePx,
-                  refImageIds: [asset.portraitMediaId!],
-                  strength,
-                  extraInstruction: extraInstruction || undefined,
-                  extraNegative: extraNegative.trim()
-                    ? extraNegative
-                        .split(/[,，]/)
-                        .map((x) => x.trim())
-                        .filter(Boolean)
-                        .slice(0, 20)
-                    : undefined,
-                })
-              }
-              disabled={generateMut.isPending}
-              className="shrink-0 gap-1.5"
-            >
-              {generateMut.isPending ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <Sparkles className="size-3.5" />
-              )}
-              用形象图生成三视图
-            </Button>
+        {/* 三视图状态条(2026-06-10 六七):说明当前生成走「形象图为参考」还是「从设定生成」 */}
+        {selectedSlot === 'three_view' && (
+          <div
+            className={cn(
+              'mt-2 flex items-start gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] leading-snug',
+              threeViewFromPortrait
+                ? 'border-[hsl(var(--color-accent)/0.4)] bg-[hsl(var(--color-accent)/0.08)] text-[hsl(var(--color-foreground))]'
+                : 'border-[hsl(var(--color-border))] text-[hsl(var(--color-muted-foreground))]',
+            )}
+          >
+            <Info className="mt-px size-3 shrink-0" />
+            {threeViewFromPortrait ? (
+              <span>
+                将以下方<b>人物形象图</b>为参考(图生图)生成三视图,保持脸型/服装一致;移除参考图可改为从设定从零生成。
+              </span>
+            ) : asset.portraitMediaId ? (
+              <span>当前为从设定生成(未用形象图参考)。建议先把人物形象图加回参考区,生成更一致的三视图。</span>
+            ) : (
+              <span>人物形象尚未确认。先在「人物形象」槽位生成并确认一张形象图,三视图即可自动以它为参考生成。</span>
+            )}
           </div>
         )}
 
@@ -316,26 +331,40 @@ export function GenerationPanel({
           {refImageIds.length > 0 && (
             <>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {refImageIds.map((id) => (
-                  <div
-                    key={id}
-                    className="group relative size-12 overflow-hidden rounded border border-[hsl(var(--color-border))]"
-                  >
-                    {refPreviews[id] ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={refPreviews[id]} alt="" className="size-full object-cover" />
-                    ) : (
-                      <ImageIcon className="m-auto size-4 opacity-40" />
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => removeRef(id)}
-                      className="absolute right-0 top-0 rounded-bl bg-black/60 p-0.5 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                {refImageIds.map((id) => {
+                  const isPortrait = id === asset.portraitMediaId;
+                  return (
+                    <div
+                      key={id}
+                      className={cn(
+                        'group relative size-12 overflow-hidden rounded border',
+                        isPortrait
+                          ? 'border-[hsl(var(--color-accent)/0.6)] ring-1 ring-[hsl(var(--color-accent)/0.4)]'
+                          : 'border-[hsl(var(--color-border))]',
+                      )}
+                      title={isPortrait ? '已确认的人物形象图(三视图参考)' : undefined}
                     >
-                      <X className="size-2.5" />
-                    </button>
-                  </div>
-                ))}
+                      {refPreviews[id] ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={refPreviews[id]} alt="" className="size-full object-cover" />
+                      ) : (
+                        <ImageIcon className="m-auto size-4 opacity-40" />
+                      )}
+                      {isPortrait && (
+                        <span className="absolute bottom-0 left-0 right-0 bg-[hsl(var(--color-accent)/0.85)] text-center text-[8px] leading-tight text-white">
+                          形象
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeRef(id)}
+                        className="absolute right-0 top-0 rounded-bl bg-black/60 p-0.5 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                      >
+                        <X className="size-2.5" />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
               <div className="mt-1.5 flex items-center gap-2">
                 <span className="text-[10px] text-[hsl(var(--color-muted-foreground))]">参考强度</span>
@@ -395,7 +424,7 @@ export function GenerationPanel({
             className="gap-1.5"
           >
             {generateMut.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-            开始生成
+            {threeViewFromPortrait ? '用形象图生成三视图' : '开始生成'}
           </Button>
         </div>
       </div>

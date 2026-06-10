@@ -329,6 +329,7 @@ model Episode {
   scripts     Script[]
   assignments EpisodeAssignment[]
   assetUsages AssetUsageBinding[]
+  renders     EpisodeRender[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -346,6 +347,37 @@ enum EpisodeStatus {
   GENERATING
   COMPLETED
   ARCHIVED
+}
+
+// =============================================================================
+// EpisodeRender — 整集成片(M1 · 2026-06-10,蓝图 docs/06 §3 M1)
+//
+// 一次成片 = 按 group 首镜 positionIdx 串接各组「最新未拒成功 take」→ concat 统一 1080p
+// → 字幕烧录(SRT 由台词正则 + ffprobe 实测时长生成)→ 可选 BGM ducking → 产物落 MediaItem。
+// status 复用 AttemptStatus 枚举(只用 QUEUED/RUNNING/SUCCESS/FAILED 子集,不新增枚举)。
+// paramsJson:{allowGaps, burnSubtitles, bgmMediaId?, gaps:[...], burnFallback?} 执行参数快照。
+// =============================================================================
+model EpisodeRender {
+  id        String        @id @default(cuid())
+  episodeId String
+  status    AttemptStatus @default(QUEUED)
+
+  mediaId    String? // 成片 MP4 的 MediaItem.id
+  srtMediaId String? // 字幕 SRT 的 MediaItem.id(独立产物,烧录回退时仍可外挂)
+  paramsJson Json
+  errorMsg   String?
+  createdBy  String
+
+  startedAt  DateTime?
+  finishedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  episode Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  @@index([episodeId, createdAt])
+  @@index([status])
+  @@map("episode_renders")
 }
 
 model EpisodeAssignment {

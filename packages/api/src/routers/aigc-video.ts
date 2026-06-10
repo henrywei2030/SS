@@ -50,6 +50,8 @@ async function getVideoBindings(ctx: Context): Promise<{
   defaultAspectRatio: AspectRatio;
   dailyBudgetCny: number;
   requireComplianceForVideo: boolean;
+  defaultGenerateAudio: boolean;
+  audioSurchargeCnyPerS: number;
 }> {
   // 三十二收工 S3 followup:helper batch
   const settings = await loadSystemSettings(ctx.prisma, [
@@ -58,6 +60,9 @@ async function getVideoBindings(ctx: Context): Promise<{
     'shot.video.defaultAspectRatio',
     'shot.video.dailyBudgetCny',
     'asset.compliance.requireForVideo',
+    // M2′ 配音产品化(2026-06-10):有声默认开关 + 有声差价(catalog 无差价字段,admin 按真实账单校准)
+    'shot.video.generateAudio.default',
+    'shot.video.audioSurchargeCnyPerS',
   ]);
   const rawAr = settings['shot.video.defaultAspectRatio'] ?? '9:16';
   // 2026-05-27:扩到 6 比例后用 ASPECT_RATIOS 真相源校验,白名单外的默认 9:16
@@ -66,10 +71,16 @@ async function getVideoBindings(ctx: Context): Promise<{
     : '9:16';
   // 2026-05-27 audit r12:Number() 非法值返 NaN 会污染下游 Math.min / Decimal 计算
   // SystemSetting 老值 / admin 误填 null/字符串时,fallback 到合理默认而非 NaN
-  const parseNum = (raw: string | undefined, fallback: number): number => {
+  const parseNum = (
+    raw: string | undefined,
+    fallback: number,
+    min = -Infinity,
+    max = Infinity,
+  ): number => {
     if (raw == null) return fallback;
     const n = Number(raw);
-    return Number.isFinite(n) ? n : fallback;
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(min, Math.min(n, max));
   };
   return {
     // 二十收工后用户反馈:不 hardcode 默认 provider,空时调用方判断(generateVideo 有 input.providerOverride 优先)
@@ -79,6 +90,10 @@ async function getVideoBindings(ctx: Context): Promise<{
     dailyBudgetCny: parseNum(settings['shot.video.dailyBudgetCny'], 500),
     requireComplianceForVideo:
       (settings['asset.compliance.requireForVideo'] ?? 'false') === 'true',
+    // seedance 2.0 文档默认 generate_audio=true → 系统默认跟随,admin 可改
+    defaultGenerateAudio: (settings['shot.video.generateAudio.default'] ?? 'true') === 'true',
+    // clamp [0,100]:防 admin 误填负数/超大值污染 UI 预估(六七深审 P2)
+    audioSurchargeCnyPerS: parseNum(settings['shot.video.audioSurchargeCnyPerS'], 0, 0, 100),
   };
 }
 
@@ -155,7 +170,12 @@ export const videoProcedures = {
 
       // Phase 1.5 P0-1:提前 fetch provider + 算 prepayEstimate(transaction 前算好)
       // 预扣 = max_duration × unitPriceCny(按当前 cfg 估算,真实抽卡完成时 worker 写 REFUND 退多扣)
+      const wantAudio = input.generateAudio ?? bindings.defaultGenerateAudio;
       const provider = await getVideoProvider(providerId);
+      // 预扣严格 = provider.estimateCost(按 max 时长上限);worker 完成时按 provider 实际 costCny 退差。
+      // ⚠️ 六七深审 P1:有声差价**不进 PREPAY** — provider 返回的 costCny 不含它,若进预扣会被退款
+      //   逻辑(refund = prepaid - actual)当作"多扣"退还 → 差价收不到 + 破坏「PREPAY=provider 估算」
+      //   不变量。audioSurcharge 仅用于 capabilities 返回前端做「有声更贵」预估提示,真实计费以 provider 为准。
       const prepayEstimateCny = provider.estimateCost({
         prompt: '',
         durationS,
@@ -432,7 +452,7 @@ export const videoProcedures = {
             refAudioUrls: refAudioUrls.length > 0 ? refAudioUrls : undefined,
             // W5.5.1 扩展参数透传(Provider 自己消费 extra)
             resolution: input.resolution,
-            generateAudio: input.generateAudio,
+            generateAudio: wantAudio,
             addWatermark: input.addWatermark,
             webSearchEnabled: input.webSearchEnabled,
             refVideoUrl: input.refVideoUrl,
@@ -629,6 +649,14 @@ export const videoProcedures = {
         }
       }
 
+      // M2′ 配音产品化:生成前费用预估(基础单价/s + 有声差价/s + 系统默认开关)
+      // estimateCost 线性按秒,取 1s 即每秒单价;UI 算 (base + audio?surcharge:0) × durationS
+      const estimatedCnyPerS = provider.estimateCost({
+        prompt: '',
+        durationS: 1,
+        aspectRatio: '9:16',
+      });
+
       return {
         providerId,
         displayName: config?.displayName ?? provider.info.displayName ?? providerId,
@@ -647,6 +675,10 @@ export const videoProcedures = {
         isActive: config?.isActive ?? true,
         isMock,
         fallbackReason,
+        // M2′ 费用预估 + 有声默认值
+        estimatedCnyPerS,
+        audioSurchargeCnyPerS: bindings.audioSurchargeCnyPerS,
+        defaultGenerateAudio: bindings.defaultGenerateAudio,
       };
     }),
 

@@ -267,6 +267,20 @@ function classifyLine(line: string): ParsedLine {
   };
 }
 
+/**
+ * 从任意文本块提取台词行(对白 + 旁白)— M1 成片 SRT 用(蓝图:台词用剧本解析同款正则)。
+ * 复用 classifyLine 的同一套 speaker/对白正则,杜绝两处正则漂移。
+ * 输入通常是 Shot.content(单镜原文,含 △动作 / 台词 / 注释混排)。
+ */
+export function extractDialogueLines(content: string): ParsedLine[] {
+  return content
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map(classifyLine)
+    .filter((l) => (l.kind === 'dialog' || l.kind === 'voiceover') && l.text.length > 0);
+}
+
 // ---------------------------------------------------------------------------
 // 多集切分(短剧 / 网剧格式) — Phase 1.5.3
 // ---------------------------------------------------------------------------

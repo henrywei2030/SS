@@ -4,10 +4,21 @@
  * P2(ADR-31):从 asset.ts(god 路由)按组拆出的 sibling。纯搬运,无行为变化。
  * helper / schema / 常量见 ./asset-shared.ts;在 asset.ts 里 spread 回 assetRouter。
  */
+import { createWriteStream, mkdtempSync, rmSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { Prisma } from "@ss/db";
 import { asRecord } from "@ss/shared";
+import { getStorageAdapter, buildStorageKey } from "@ss/adapters/storage";
+import { normalizeAudio, probeMedia } from "@ss/core/media";
+import { NANO_BUILTIN_VOICES, VOICE_SAMPLE_JOB_KIND, nanoModelsReady } from "@ss/core/voice";
+import { enqueueJob } from "@ss/queue/job-queue";
 import { protectedProcedure } from "../trpc.js";
 import { logOperation } from "../middleware/audit.js";
 import { assertProjectAccess } from "../middleware/access.js";
@@ -255,6 +266,21 @@ export const crudProcedures = {
     )
     .mutation(async ({ ctx, input }) => {
       const before = await loadAssetWithAccess(ctx, input.assetId);
+
+      // M2′(2026-06-10):voiceMediaId 写入校验 — 原先不校验,可悬空/指向图片,
+      // 视频生成 compile 时静默拿不到 URL,配音参考无声无息丢失
+      if (input.patch.voiceMediaId) {
+        const voiceMedia = await ctx.prisma.mediaItem.findFirst({
+          where: { id: input.patch.voiceMediaId, kind: 'AUDIO', deletedAt: null },
+          select: { id: true },
+        });
+        if (!voiceMedia) {
+          throw new TRPCError({
+            code: 'PRECONDITION_FAILED',
+            message: '参考音频无效:媒体不存在或不是音频类型',
+          });
+        }
+      }
 
       // 锁定的资产不允许直接改 prompt / name / description(改 prompt 等关键字段要走"新版本"流程)
       if (before.lockedAt) {
@@ -541,6 +567,145 @@ export const crudProcedures = {
         syncedCount: result.count,
       });
       return { syncedCount: result.count };
+    }),
+
+  /**
+   * 参考音频一键规范化(M2′ 声线小工具 · 2026-06-10):
+   * 掐头尾静音 + 响度归一(-16 LUFS)+ 截断 15s → 新 MediaItem(parentId 版本链)→ 改指 voiceMediaId。
+   * 音频只有几秒,同步跑 ffmpeg(@ss/core/media),不入队。原音频保留可回退。
+   */
+  normalizeVoice: protectedProcedure
+    .input(z.object({ assetId: z.string().cuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const asset = await loadAssetWithAccess(ctx, input.assetId);
+      if (!asset.voiceMediaId) {
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: '该角色还没有参考音频' });
+      }
+      const media = await ctx.prisma.mediaItem.findFirst({
+        where: { id: asset.voiceMediaId, deletedAt: null },
+        select: { id: true, storageKey: true, filename: true },
+      });
+      if (!media) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '参考音频媒体不存在' });
+      }
+
+      const storage = getStorageAdapter();
+      const tmp = mkdtempSync(join(tmpdir(), 'ss-voice-norm-'));
+      try {
+        const inPath = join(tmp, 'in-audio');
+        const outPath = join(tmp, 'out.m4a');
+        if (media.storageKey.startsWith('external://')) {
+          const res = await fetch(media.storageKey.slice('external://'.length), {
+            signal: AbortSignal.timeout(60_000),
+          });
+          if (!res.ok || !res.body) {
+            throw new TRPCError({ code: 'PRECONDITION_FAILED', message: '参考音频外链拉取失败(可能已过期),请重新上传' });
+          }
+          await pipeline(Readable.fromWeb(res.body as never), createWriteStream(inPath));
+        } else {
+          await pipeline(await storage.getObject(media.storageKey), createWriteStream(inPath));
+        }
+
+        const beforeProbe = await probeMedia(inPath).catch(() => null);
+        await normalizeAudio({ input: inPath, output: outPath });
+        const afterProbe = await probeMedia(outPath);
+
+        const outBuf = await readFile(outPath);
+        const key = buildStorageKey({
+          scope: 'project',
+          projectId: asset.projectId,
+          kind: 'audio',
+          ext: 'm4a',
+        });
+        await storage.putObject(key, outBuf, { contentType: 'audio/mp4' });
+        const baseName = (media.filename ?? 'voice').replace(/\.[a-zA-Z0-9]+$/, '');
+        const newMedia = await ctx.prisma.mediaItem.create({
+          data: {
+            projectId: asset.projectId,
+            scope: 'PROJECT',
+            kind: 'AUDIO',
+            filename: `${baseName}-规范化.m4a`,
+            mimeType: 'audio/mp4',
+            sizeBytes: outBuf.length,
+            storageKey: key,
+            parentId: media.id, // 版本链:原音频保留,可在素材库回溯
+            meta: {
+              durationS: afterProbe.durationS,
+              normalized: true,
+              targetLufs: -16,
+              sourceMediaId: media.id,
+            },
+            source: 'UPLOAD',
+            sourceRef: `voice-normalize:${asset.id}`,
+          },
+          select: { id: true },
+        });
+        await ctx.prisma.asset.update({
+          where: { id: asset.id },
+          data: { voiceMediaId: newMedia.id },
+        });
+
+        await logOperation(ctx, 'asset.voice.normalize', 'asset', asset.id, null, {
+          projectId: asset.projectId,
+          fromMediaId: media.id,
+          toMediaId: newMedia.id,
+          beforeDurationS: beforeProbe?.durationS ?? null,
+          afterDurationS: afterProbe.durationS,
+        });
+
+        return {
+          mediaId: newMedia.id,
+          beforeDurationS: beforeProbe?.durationS ?? null,
+          afterDurationS: afterProbe.durationS,
+        };
+      } finally {
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    }),
+
+  /** 声线种子清单(TTS-B)— 18 条内置 + 本地模型就绪状态(未就绪=首次生成会自动下载 ~850MB) */
+  listVoiceSeeds: protectedProcedure.query(() => ({
+    ready: nanoModelsReady(),
+    seeds: NANO_BUILTIN_VOICES,
+  })),
+
+  /**
+   * 按角色设定生成参考声音样本(TTS-B · 2026-06-10):
+   * 本地 MOSS-TTS-Nano(onnxruntime,零 Python 零扣费)→ queue kind `voice-sample` 异步跑
+   * → 完成自动写 voiceMediaId + 铃铛通知。文案默认取角色独白/小传。
+   */
+  generateVoiceSample: protectedProcedure
+    .input(
+      z.object({
+        assetId: z.string().cuid(),
+        seedVoice: z.string().max(60).default('builtin:Yuewen'),
+        textOverride: z.string().max(120).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const asset = await loadAssetWithAccess(ctx, input.assetId);
+      if (input.seedVoice === 'current' && !asset.voiceMediaId) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '该角色还没有参考音频,无法用「克隆现有声线」',
+        });
+      }
+      const jobId = await enqueueJob(
+        VOICE_SAMPLE_JOB_KIND,
+        {
+          assetId: asset.id,
+          userId: ctx.user.id,
+          seedVoice: input.seedVoice,
+          ...(input.textOverride ? { textOverride: input.textOverride } : {}),
+        },
+        { jobId: `voice-sample:${asset.id}:${Date.now().toString(36)}` },
+      );
+      await logOperation(ctx, 'asset.voice.generate', 'asset', asset.id, null, {
+        projectId: asset.projectId,
+        seedVoice: input.seedVoice,
+        jobId,
+      });
+      return { queued: true, jobId, modelsReady: nanoModelsReady() };
     }),
 
 };

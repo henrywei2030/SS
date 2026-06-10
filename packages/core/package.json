@@ -12,7 +12,11 @@
     "./video-generation": "./video-generation/index.ts",
     "./asset": "./asset/index.ts",
     "./script": "./script/index.ts",
-    "./shared": "./shared/load-prompt.ts"
+    "./shared": "./shared/load-prompt.ts",
+    "./media": "./media/index.ts",
+    "./notify": "./notify/index.ts",
+    "./compose": "./compose/index.ts",
+    "./voice": "./voice/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -24,6 +28,10 @@
     "@ss/db": "workspace:*",
     "@ss/queue": "workspace:*",
     "@ss/shared": "workspace:*",
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0",
+    "onnxruntime-node": "^1.23.0",
+    "sentencepiece-js": "^1.1.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
