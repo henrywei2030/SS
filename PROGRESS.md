@@ -15,6 +15,7 @@
 - ✅ **端到端实测(零真打开销)**:H0 编译段真实组出段 ✓ / H1 contributor+scene-block 真实数据对症命中 ✓ / H3 权重 1→1.05→1 精确 + 漂移候选落库 + 夹具清净 ✓
 - ✅ 回归口径:typecheck 16/16 多轮全过 · 测试 **394 过+2skip**(core 278:checkers9/judge5/planner8/retrieval14/backfill4/merge+4/video+13 等 ~60 新用例;api 57/adapters 48(embedding10)/queue 11)· migration 43/43 · db:sync 10 模板+41 设置+83 条目
 - ✅ 新增结构件全进 seed.ts 闭环:模板 prompt_judge_main + storyboard_main v3;设置 prompt.enhancer.quality/stability、binding.prompt.embedding.modelId、binding.prompt.judge.modelId、prompt.harness.abstractBlacklist、harness.planner.enabled;CSV 默认升五件套(本机 DB 行已同步,**其他机器若手动改过 CSV 需自行加 knowledge**)
+- ✅ **协作流程调整(用户指令,收工后追加)**:`/remote-control` 相关条款从 CLAUDE.md 全部移除(开工 Step 0.5 / 收工 Step 10 / 运行环境提醒 / 行为准则 9,共 4 处)— 开工收工不再提醒远程控制;六六引入的该约定就此退役。⚠️ claude.ai「SS 项目」的 Project Custom Instructions 若也写了同款规则,需手动同步删除
 
 **问题/待决策**
 - ❓ **gate 顺验清单扩成"三连+Harness 五验"**(TODO 真打债置顶 ①-⑧):✨硬门拒绝路径/✨✨判官修复/体检卡/知识检索痕迹进产物/分镜 v3 对照/±强化词 A/B/embedding 语义检索
