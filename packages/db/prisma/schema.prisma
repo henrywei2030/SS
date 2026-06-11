@@ -323,14 +323,15 @@ model Episode {
   // 区别于 generatingStartedAt 的瞬时软锁:这是用户手动设置的"永久跳过",直到手动解锁
   batchLocked Boolean @default(false)
 
-  project     Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  shots       Shot[]
-  shotGroups  ShotGroup[]
-  scenes      Scene[]
-  scripts     Script[]
-  assignments EpisodeAssignment[]
-  assetUsages AssetUsageBinding[]
-  renders     EpisodeRender[]
+  project       Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  shots         Shot[]
+  shotGroups    ShotGroup[]
+  scenes        Scene[]
+  scripts       Script[]
+  assignments   EpisodeAssignment[]
+  assetUsages   AssetUsageBinding[]
+  renders       EpisodeRender[]
+  assetVersions AssetVersion[] // 七二·跨集换装:本集各资产的造型覆盖
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -835,22 +836,32 @@ enum ComplianceStatus {
   EXPIRED
 }
 
+/// 资产「按集造型版本」(七二·跨集换装) — 同一人物在不同集数更换服装造型。
+/// 空表重定义(原"生成历史版本"语义零引用零数据):每行 = 某资产在某集的一套槽位覆盖。
+/// 取图/编译时:当前集有本表行 → 用行内非空槽位;字段为空则回退 Asset 默认槽位。
+/// 通用造型 = Asset 自身槽位(本表只存"某集与通用不同"的造型)。
 model AssetVersion {
-  id           String   @id @default(cuid())
-  assetId      String
-  version      Int
-  prompt       String   @db.Text
-  mediaItemIds String[] // 这个版本生成的所有图
-  generatedBy  String // userId
-  cost         Decimal  @db.Decimal(10, 4)
-  notes        String?
+  id        String  @id @default(cuid())
+  assetId   String
+  episodeId String // 这套造型用于哪一集(必绑;通用造型用 Asset 默认槽位,不进本表)
+  label     String? // 造型名(如"重生初期华服" / "疗伤期素衣")
 
-  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  // 按槽位的造型覆盖(换装主要换人物形象 + 三视图;空 = 该槽位回退 Asset 默认)
+  portraitMediaId  String? // 人物 9:16 形象
+  threeViewMediaId String? // 人物三视图
+  sceneMainMediaId String? // 场景主视角(场景按集换布置时用)
+
+  notes String? @db.Text
+
+  asset   Asset   @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  episode Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  @@unique([assetId, version])
+  @@unique([assetId, episodeId])
   @@index([assetId])
+  @@index([episodeId])
   @@map("asset_versions")
 }
 

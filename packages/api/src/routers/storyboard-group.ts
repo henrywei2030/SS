@@ -109,26 +109,14 @@ export const groupProcedures = {
       const totalDuration = sorted.reduce((s, x) => s + x.durationS, 0);
 
       // 默认提示词：组内 shots 的 prompt 拼接(用户后续可编辑)
-      // 用户反馈 r3:[i/N] 标题 + prompt 同一行空格分隔 + 段间用 \n 隔开
-      // H0 捡漏(docs/07 §4.2):movement/lighting/sound/durationS 此前从未进组 prompt 正文 —
-      //   改用 core 共享 buildGroupShotLine(与 autoMergeEpisode 的 merge.ts 同一真相源)
+      // 七二·提示词去重:buildGroupShotLine 只拼 [i/N] 镜号 + 正文 + 音效 —
+      //   景别/机位/运镜由正文自带 + 编译期【时间轴】段承载,不再前置同源维度标签(防字面重复);
+      //   与 autoMergeEpisode 的 merge.ts 同一真相源
       const defaultPrompt =
         input.promptOverride ??
         sorted
           .map((s, i) =>
-            buildGroupShotLine(
-              {
-                framing: s.framing ?? undefined,
-                angle: s.angle ?? undefined,
-                movement: s.movement ?? undefined,
-                lighting: s.lighting ?? undefined,
-                sound: s.sound ?? undefined,
-                durationS: s.durationS,
-                prompt: s.prompt,
-              },
-              i,
-              sorted.length,
-            ),
+            buildGroupShotLine({ sound: s.sound ?? undefined, prompt: s.prompt }, i, sorted.length),
           )
           .join('\n');
 

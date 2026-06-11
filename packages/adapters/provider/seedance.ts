@@ -346,6 +346,21 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
 
   async generate(req: VideoRequest, ctx: CallContext): Promise<VideoResult> {
     const modelId = req.model ?? this.cfg.defaultModel;
+
+    // 七二第六波(内部诊断实证):reference/image-to-video 模型(r2v/i2v)必须带参考媒体 —
+    //   缺了别白提交一个 moyu 必拒的任务。happyhorse-1.0-r2v 缺参考图实测报
+    //   InvalidParameter "Field required: input.media"(任务已建、计费,体验差)。
+    //   带参考图则正常出片(e00c96a9 真打 SUCCESS)。这里前置硬门给清晰指引。
+    const needsRefMedia = /(?:^|[-_/])(?:r2v|i2v)(?:$|[-_/])/.test(modelId.toLowerCase());
+    const hasRefMedia =
+      (req.refImageUrls?.length ?? 0) > 0 || !!req.firstFrameUrl || !!req.lastFrameUrl;
+    if (needsRefMedia && !hasRefMedia) {
+      throw new ProviderError(
+        this.info.id,
+        `模型 ${modelId} 为「${modelId.toLowerCase().includes('r2v') ? 'R2V 参考生视频' : 'I2V 图生视频'}」,必须至少提供一张参考图 — 请在生成段绑定人物/场景形象图(且确保该图可被中转站访问),或改用文生视频(t2v)模型。`,
+      );
+    }
+
     const estimated = this.estimateCost(req);
 
     // 预算护栏

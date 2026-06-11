@@ -21,6 +21,7 @@ import { generateProcedures } from './asset-generate.js';
 import { breakdownProcedures } from './asset-breakdown.js';
 import { candidatesProcedures } from './asset-candidates.js';
 import { bindingsProcedures } from './asset-bindings.js';
+import { outfitsProcedures } from './asset-outfits.js';
 
 // ---------------------------------------------------------------------------
 // Router(各 procedure 见同目录 asset-<组>.ts;helper / schema / 常量见 asset-shared.ts)
@@ -32,4 +33,5 @@ export const assetRouter = router({
   ...breakdownProcedures,
   ...candidatesProcedures,
   ...bindingsProcedures,
+  ...outfitsProcedures,
 });

@@ -139,6 +139,22 @@ export function ArtWorkspace({ projectId, locale, initialType }: Props): React.R
       .map((a) => ({ id: a.id, name: a.name, slot: PRIMARY_SLOT[a.type as AssetType] }));
   }, [visibleAssets]);
 
+  // 七二第六波(用户需求):「一键生成三视图」批量目标 — 人物 tab 下有形象图但缺三视图者,
+  //   以已确认形象图(portrait)为参考图生图生成三视图(refImageIds=[portrait], strength=0.7),
+  //   保证三视图与形象一致。复用 ArtBatchGenerate 的 3 并发池 + 进度/重试。
+  const threeViewTargets: BatchTarget[] = React.useMemo(() => {
+    if (currentType !== 'CHARACTER' || !visibleAssets) return [];
+    return visibleAssets
+      .filter((a) => a.type === 'CHARACTER' && a.portraitMediaId && !a.threeViewMediaId)
+      .map((a) => ({
+        id: a.id,
+        name: a.name,
+        slot: 'three_view' as Slot,
+        refImageIds: [a.portraitMediaId as string],
+        strength: 0.7,
+      }));
+  }, [visibleAssets, currentType]);
+
   // 六八:批量按设定生成声线 — 人物 tab 下「需要声线」(主演/配角,群演不需要)且缺的数量
   const voiceMissingCount = React.useMemo(
     () =>
@@ -344,6 +360,16 @@ export function ArtWorkspace({ projectId, locale, initialType }: Props): React.R
               )}
               生成缺失声线 ({voiceMissingCount})
             </Button>
+          )}
+          {/* 七二第六波:一键根据人物形象图批量生成三视图(图生图,以形象图为参考保证一致) */}
+          {currentType === 'CHARACTER' && threeViewTargets.length > 0 && (
+            <ArtBatchGenerate
+              type="CHARACTER"
+              targets={threeViewTargets}
+              onDone={() => void refetch()}
+              buttonText="生成三视图"
+              itemLabel="三视图"
+            />
           )}
           <ArtBatchGenerate
             type={currentType}

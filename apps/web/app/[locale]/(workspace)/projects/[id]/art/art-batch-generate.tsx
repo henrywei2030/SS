@@ -28,6 +28,9 @@ export interface BatchTarget {
   id: string;
   name: string;
   slot: Slot;
+  // 七二第六波:图生图批量(如「一键生成三视图」以人物形象图为参考)— 缺省走纯文生图
+  refImageIds?: string[];
+  strength?: number;
 }
 
 const IMAGE_LABEL: Record<string, string> = {
@@ -56,10 +59,16 @@ export function ArtBatchGenerate({
   type,
   targets,
   onDone,
+  buttonText,
+  itemLabel,
 }: {
   type: string;
   targets: BatchTarget[];
   onDone: () => void;
+  /** 七二第六波:按钮文案(默认「同步生成」)— 三视图批量等场景自定义 */
+  buttonText?: string;
+  /** 生成物名(默认按 type 取 形象图/主视角/主图)— 三视图批量传「三视图」 */
+  itemLabel?: string;
 }): React.ReactElement {
   const [open, setOpen] = React.useState(false);
   const [running, setRunning] = React.useState(false);
@@ -80,7 +89,7 @@ export function ArtBatchGenerate({
   const genImage = trpc.asset.generateImage.useMutation();
   const confirmCand = trpc.asset.confirmCandidate.useMutation();
 
-  const imageLabel = IMAGE_LABEL[type] ?? '主图';
+  const imageLabel = itemLabel ?? IMAGE_LABEL[type] ?? '主图';
   const typeLabel = TYPE_LABEL[type] ?? '资产';
 
   const setStat = (id: string, status: Stat['status'], error?: string): void =>
@@ -101,7 +110,15 @@ export function ArtBatchGenerate({
         if (!t) continue;
         setStat(t.id, 'running');
         try {
-          const res = await genImage.mutateAsync({ assetId: t.id, slot: t.slot, count: 1 });
+          const res = await genImage.mutateAsync({
+            assetId: t.id,
+            slot: t.slot,
+            count: 1,
+            // 图生图批量(三视图以形象图为参考)— 有 refImageIds 才透传 strength
+            ...(t.refImageIds && t.refImageIds.length > 0
+              ? { refImageIds: t.refImageIds, strength: t.strength ?? 0.6 }
+              : {}),
+          });
           const mediaId = res.candidates[0]?.mediaId;
           if (mediaId) {
             await confirmCand.mutateAsync({ assetId: t.id, slot: t.slot, mediaItemId: mediaId });
@@ -161,7 +178,8 @@ export function ArtBatchGenerate({
         }
       >
         {running ? <Loader2 className="size-3.5 animate-spin" /> : <Images className="size-3.5" />}
-        同步生成{targets.length > 0 ? ` (${targets.length})` : ''}
+        {buttonText ?? '同步生成'}
+        {targets.length > 0 ? ` (${targets.length})` : ''}
       </Button>
 
       <Dialog

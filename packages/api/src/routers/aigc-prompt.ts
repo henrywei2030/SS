@@ -140,6 +140,31 @@ export const promptProcedures = {
           });
         }
 
+        // 七二第六波(用户反馈:自动匹配的资产没出现在美术工坊该集总览):
+        //   美术总览按 Asset.episodes[] 过滤展示;autoMatch 原来只建 binding 不更新 episodes[] →
+        //   匹配的资产在该集总览缺席。这里并集补回本组所属集号(只增不删,与 recomputeEpisodes 同一真相源)。
+        if (created.length > 0) {
+          const epRow = await tx.episode.findUnique({
+            where: { id: grp.episodeId },
+            select: { number: true },
+          });
+          if (epRow) {
+            const matchedAssetIds = Array.from(new Set(created.map((c) => c.assetId)));
+            const assetsToTouch = await tx.asset.findMany({
+              where: { id: { in: matchedAssetIds } },
+              select: { id: true, episodes: true },
+            });
+            for (const a of assetsToTouch) {
+              if (!a.episodes.includes(epRow.number)) {
+                await tx.asset.update({
+                  where: { id: a.id },
+                  data: { episodes: { set: [...a.episodes, epRow.number].sort((x, y) => x - y) } },
+                });
+              }
+            }
+          }
+        }
+
         return { created, skipped };
       });
 

@@ -36,6 +36,11 @@ export const versionProcedures = {
         where: {
           projectId: input.projectId,
           deletedAt: null,
+          // 七二第六波(用户反馈:99集幽灵):排除指向已删集的孤儿脚本 —
+          //   archiveEpisode 历史漏删 script,留下 active script→deleted episode,在拆解列表冒出幽灵集。
+          //   ⚠️ episodeId=null 是「项目级总剧本」(schema 支持,setCurrentVersion 单独处理),必须保留;
+          //   用 OR 而非 `episode:{deletedAt:null}` — 后者在 nullable 关系上隐含「关系非空」会误杀项目级脚本。
+          OR: [{ episodeId: null }, { episode: { deletedAt: null } }],
           ...(input.onlyCurrent ? { isCurrent: true } : {}),
         },
         orderBy: [{ episode: { number: 'asc' } }, { version: 'desc' }],

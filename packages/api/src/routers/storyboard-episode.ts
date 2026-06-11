@@ -15,6 +15,7 @@ import { isEpisodeLockedNow } from '../utils/episode-lock.js';
 import { assertProjectAccess } from '../middleware/access.js';
 
 import { loadEpisodeOrThrow } from './storyboard-shared.js';
+import { pruneOrphanAssetEpisodes } from './episode-cleanup.js';
 
 export const episodeProcedures = {
   // -------- Episode --------
@@ -165,10 +166,19 @@ export const episodeProcedures = {
           where: { episodeId: before.id, deletedAt: null },
           data: { deletedAt: now },
         }),
+        // 七二第六波(根治「99集」幽灵):此前 archiveEpisode 漏删 script,留下 active script→deleted
+        //   episode 孤儿,在剧本拆解列表显示为幽灵集。补齐脚本级联软删(与 deleteAllForProject 对齐)。
+        ctx.prisma.script.updateMany({
+          where: { episodeId: before.id, deletedAt: null },
+          data: { deletedAt: now, isCurrent: false },
+        }),
       ]);
+      // 七二第六波:删集后修剪各资产 episodes[] 的孤儿集号(根治「99集」幽灵)
+      const prunedAssets = await pruneOrphanAssetEpisodes(ctx.prisma, before.projectId);
       await logOperation(ctx, 'episode.archive', 'episode', before.id, before, {
         deletedAt: now,
         projectId: before.projectId,
+        prunedAssets,
       });
       return { ok: true, alreadyArchived: false };
     }),

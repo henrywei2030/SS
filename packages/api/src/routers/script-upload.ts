@@ -24,6 +24,7 @@ import { loadSystemSetting } from '../utils/system-bindings.js';
 
 // W7+ audit R10:assertProjectAccess 抽到 middleware/access.ts
 import { assertProjectAccess, loadEpisodeOrThrow } from '../middleware/access.js';
+import { pruneOrphanAssetEpisodes } from './episode-cleanup.js';
 
 // ---------------------------------------------------------------------------
 // W1-W5 audit P0(C1):上传剧本前的软锁守卫
@@ -777,12 +778,15 @@ export const uploadProcedures = {
         ]);
         cleared++;
       }
+      // 七二第六波:级联删后修剪各资产 episodes[] 的孤儿集号(根治「99集」幽灵)
+      const prunedAssets = await pruneOrphanAssetEpisodes(ctx.prisma, input.projectId);
       await logOperation(ctx, 'script.delete.all.project', 'project', input.projectId, null, {
         cleared,
         skippedGenerating,
         skippedLocked,
         total: episodes.length,
+        prunedAssets,
       });
-      return { cleared, skippedGenerating, skippedLocked, total: episodes.length };
+      return { cleared, skippedGenerating, skippedLocked, total: episodes.length, prunedAssets };
     }),
 };

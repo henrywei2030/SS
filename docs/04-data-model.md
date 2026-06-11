@@ -58,7 +58,7 @@
 | § 4 集与镜头 | `episodes` / `episode_assignments` / `scenes` / `shots` / `shot_groups` / `shot_asset_refs(已废)` | 集 + 分配 + **场** + 分镜(含 sceneId/groupId)+ **合并组** |
 | § 4.5 训练数据 | `prompt_edits` | AI 输出 → 人改的训练样本(targetType SHOT/SHOT_GROUP/SCENE/ASSET) |
 | § 4.6 出场绑定 | `asset_usage_bindings` | **W4 新**:Asset 三层出场绑定(episode/scene/shot + 10 档 UsageType) |
-| § 5 数字资产 | `assets` / `asset_versions` | 人物/场景/道具 + 版本历史 |
+| § 5 数字资产 | `assets` / `asset_versions` | 人物/场景/道具 + 按集造型版本(七二·跨集换装:某资产在某集的槽位覆盖;空表重定义) |
 | § 6 媒体中台 | `media_items` | 统一媒体存储（图/视/音/3D） |
 | § 7 AIGC 抽卡 | `generation_attempts` | 每次生成的完整记录 |
 | § 8 成本账本 | `cost_ledger_entries` | Cost Ledger 不可篡改流水 |

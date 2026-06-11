@@ -394,7 +394,7 @@ export async function getComplianceProvider(id: string): Promise<IComplianceProv
  *
  * 完全找不到匹配 → 返 MockVideoProvider 兜底(而不是抛错),让 dev 环境永远可用。
  */
-function constructVideoProvider(cfg: ResolvedConfig): IVideoProvider {
+export function constructVideoProvider(cfg: ResolvedConfig): IVideoProvider {
   // 第 21 轮 audit:endpointStyle 由 defaultParams 显式声明
   //   - 'relay' → 中转站 /v1/video/generations(OpenAI 兼容简化结构:prompt+duration+ratio)
   //   - 'ark'  → Volcengine ARK 原生 /contents/generations/tasks(content+parameters 结构)
@@ -425,17 +425,34 @@ function constructVideoProvider(cfg: ResolvedConfig): IVideoProvider {
   // { model, prompt, duration, ratio } + 任务轮询,见 seedance.ts buildCreateBody 1.x 分支;
   // seedance-2 系按 modelId 自动切 metadata 结构)。⚠️ kling/wan/happyhorse 的真实请求
   // 形状以 M5 逐家真打为准 — 形状不合时在 buildCreateBody 按 modelId 加分支,本路由不再动。
-  const isRelayVideo = adapterHint === 'relay-video' && endpointStyle === 'relay';
+  //
+  // 七二第六波防御(用户反馈:happyhorse 掉 MOCK):provider 配置各机独立(db:sync 跳过 providers),
+  //   换机后 happyhorse/wan/kling 的 provider 常缺 defaultParams.adapter / endpointStyle 两字段,
+  //   原 `adapter==='relay-video' && endpointStyle==='relay'` 双字段全有才认 → 静默掉 MockVideoProvider
+  //   (用户以为在跑真模型,实际占位样片)。加两层稳健:
+  //   ① 显式 adapter==='relay-video' 即认(endpointStyle 缺省也强制走 relay 协议);
+  //   ② 无显式 adapter 但 defaultModel/providerId 命中已知中转站视频家族关键字 → 推断为 relay-video。
+  //   显式配置永远优先;keyword 推断只在 adapter 缺失时兜底(本函数只构造视频 provider,无误伤)。
+  const RELAY_VIDEO_KEYWORDS = ['happyhorse', 'wan', 'kling'];
+  const looksLikeRelayVideo = RELAY_VIDEO_KEYWORDS.some(
+    (k) => defaultModel.toLowerCase().includes(k) || cfg.providerId.toLowerCase().includes(k),
+  );
+  const isRelayVideo =
+    adapterHint === 'relay-video' || (adapterHint === null && looksLikeRelayVideo);
+  // relay-video 一律走 relay 协议(即便 endpointStyle 字段缺省为 ark);seedance 保留各自 endpointStyle
+  const effectiveEndpointStyle: 'ark' | 'relay' = isRelayVideo ? 'relay' : endpointStyle;
 
   if (isSeedance || isRelayVideo) {
     return new SeedanceProvider({
-      apiUrl: cfg.apiUrl || (endpointStyle === 'relay' ? '' : 'https://ark.cn-beijing.volces.com/api/v3'),
+      apiUrl:
+        cfg.apiUrl ||
+        (effectiveEndpointStyle === 'relay' ? '' : 'https://ark.cn-beijing.volces.com/api/v3'),
       apiKey: cfg.apiKey,
       defaultModel,
       fastModel: cfg.defaultParams.fastModel as string | undefined,
       maxDuration: Number(cfg.defaultParams.maxDuration ?? 15),
       unitPriceCny: cfg.unitPriceCny,
-      endpointStyle,
+      endpointStyle: effectiveEndpointStyle,
     });
   }
   // TODO Phase 2:Kling / HappyHorse 原生直连按上述注释模板接入(经 moyu 走上面 relay-video)

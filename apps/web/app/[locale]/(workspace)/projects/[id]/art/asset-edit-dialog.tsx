@@ -28,7 +28,7 @@ type Props =
 
 export function AssetEditDialog(props: Props): React.ReactElement {
   if ('assetId' in props && props.assetId) {
-    return <UpdateMode assetId={props.assetId} onClose={props.onClose} onSaved={props.onSaved} />;
+    return <UpdateMode assetId={props.assetId} onClose={props.onClose} />;
   }
   return (
     <CreateMode
@@ -47,11 +47,9 @@ export function AssetEditDialog(props: Props): React.ReactElement {
 function UpdateMode({
   assetId,
   onClose,
-  onSaved,
 }: {
   assetId: string;
   onClose: () => void;
-  onSaved: () => void;
 }): React.ReactElement {
   const utils = trpc.useUtils();
   const { data: asset, isLoading, refetch } = trpc.asset.get.useQuery({ assetId });
@@ -80,10 +78,7 @@ function UpdateMode({
         <InfoPanel asset={asset} onChanged={handleAfterChange} />
         <GenerationPanel
           asset={asset}
-          onChanged={() => {
-            handleAfterChange();
-            onSaved();
-          }}
+          onChanged={handleAfterChange}
         />
         <ConfirmedSlotsPanel
           asset={asset}

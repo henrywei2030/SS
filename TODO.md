@@ -1,6 +1,7 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-06-11(**七二 · mac-mini 全天五波**:gate 全过+三债清偿 → DMG → 四件套 → AIGC 三增强+UI 方案 → **UI-P0 三连 + F5b 并抽/failover/对比卡全落地(M0–M6 主线全清)** · 详见 [PROGRESS](PROGRESS.md))
+> 最后更新:2026-06-12(**七二第六波 · mac-studio**:用户报 5 项 + happyhorse 真打诊断全修 — 99集幽灵真根因(孤儿脚本)/ 跨集换装(AssetVersion 重定义+migration 44)/ 槽位本地上传 / 提示词去重 / 三视图批量 / 自动匹配补集 / happyhorse 防 MOCK+R2V 硬门;全盘复审 2 遍 + DMG ×3 · 详见 [PROGRESS](PROGRESS.md))
+> 上一版:2026-06-11(七二 · mac-mini 全天五波:gate 全过 → DMG → 四件套 → AIGC 三增强 → UI-P0+F5b · M0–M6 主线全清)
 > 仓库:https://github.com/henrywei2030/SS
 > **🚀 一键启动**:`pnpm start`(详见 [README.md](README.md#快速启动) / [CLAUDE.md](CLAUDE.md#设备登记))
 > **📖 主线蓝图**:[docs/06-feature-plan-2026H2.md](docs/06-feature-plan-2026H2.md)(M0–M6 可直接 coding;2026-06-10 mac-mini 逐项核对与代码一致)
@@ -10,6 +11,7 @@
 
 ## 🚧 进行中
 
+- [x] **🧩 七二第六波(2026-06-12 mac-studio)· 用户报 5 项 + happyhorse 真打诊断全修**:① **99集幽灵真根因** — archiveEpisode 漏删 script + script.list 没过滤 episode.deletedAt → 修两处+清存量孤儿(1→0)+ episode-cleanup 纵深防御 ② **跨集换装** — AssetVersion 重定义为按集造型(migration 44)+ outfit CRUD + compile 按集覆盖 + 前端造型切换器 ③ 槽位本地上传(全类型)④ 提示词去重(buildGroupShotLine 去维度标签)⑤ 一键生成三视图 ⑥ 自动匹配补 episodes[] ⑦ **happyhorse 防 MOCK**(关键字推断路由真模型)+ **R2V 缺参考图前置硬门**(内部直打实证:真到 moyu、带参考图真出片 ¥8)。生成后弹窗不退修复。全盘复审 2 遍(修 P1 项目级脚本误杀 + P2 SCENE 换装槽位)。**留**:relay 素材同步(本机图同步到 moyu 作可达参考,决定 R2V/I2V 真实流可用性)
 - [x] **🎬 七功能 AIGC 增强路线图(M0–M6)主线全清(2026-06-11 七二)**(蓝图 [docs/06](docs/06-feature-plan-2026H2.md))— ✅ M0 基建 / ✅ M1 成片 / ✅ M2′ 配音补强(均六七)/ ✅ M3 全清(六八/六九)/ ✅ M4+F4(六九)/ ✅ F5a(六九)/ ✅ M6a/b(七十)/ ✅ 真打回归 gate 全过(七二)/ ✅ L5 断点续跑(七二)/ ✅ **F5b 并抽/failover/对比卡(七二 第五波)**:同事务双占位双 PREPAY 对决(真打 seedance×wan 双路独立终态)+ provider 健康度±步进 + 备选链自动切换(真打验证切换/通知/成功回写)+ ⚔ 并排对比卡(QC/价格/采纳)。**留运营**:旗舰档对比数据积累(kling 接入照 wan 路径)
 - [ ] **🧠 Prompt Mini-Harness(八维知识库 × 装配流水线)**(蓝图 [docs/07](docs/07-prompt-harness.md))— ✅ H0-H3 全落地(七一)/ ✅ **gate 顺验全过(七二)**:✨四路径(happy/乐观锁/硬门/TOKEN_LOST)/✨✨判官八维+定向修复/知识检索对症命中+hitCount 飞轮/权重 -0.05 生产接线/v3 三纪律+音桥教科书级 / ✅ **语义检索解锁**(七二修 embedding batch≤10 真 bug,77/83 向量回填;本机已配,其他机器照 PROGRESS 七二 Gate⑧ 步骤)。**剩**:① 飞轮持续运营(权重演化/蒸馏候选审核,/admin/knowledge)② optimizer meta-prompt 补「@token 逐字保留」强化(gpt-5-4/sonnet 对混用 prompt 丢 token 率高,守卫接得住但费重试钱)
 - [ ] **🔊 本地 TTS 声线生成(MOSS-TTS-Nano)**— 六七闭环,六八三需求加固;✅ **七二:桌面包权重首跑验证通过**(打包资源+全新数据目录完整复现新 Mac:746MB 下载+推理+样本全链 ~20min 成功 — 故障实为"纯不可观测")+ **可观测安装落地**(进度落盘+后台安装 job+声音面板四态卡:安装/进度条/失败重试+清缓存/就绪)。**留**:win-laptop onnxruntime 真跑 /「从有声视频抽音轨反向采纳声线」

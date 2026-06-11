@@ -5,6 +5,41 @@
 
 ---
 
+## 2026-06-12(周五,mac-studio · 七二第六波:开工同步 → 用户报 5 项 + happyhorse 真打诊断 → 全盘复审 2 遍收工)
+
+**完成**
+- ✅ **开工**:强同步 a1a749b→56ef48c(mac-mini 七二第五波),长间隔诊断 7 项全绿(env/Prisma client/docker/容器 3/migration 43/preflight/db:sync);补 seedance-fast 计价 0.70→0.81(七二留项);**期间 Docker daemon 崩 → `open -a Docker`+`infra:up` 自愈**(web/worker prisma ECONNREFUSED 排障,login 500→401 验恢复)
+- ✅ **第一批 7 项需求(并行调研 → 实现 → 验证)**:
+  - #1 **生成图片后弹窗自动退出** = bug:asset-edit-dialog 的 GenerationPanel onChanged 多调了 onSaved()(父级关弹窗)→ 删,生成完只刷新不关
+  - #7 **提示词重复**:buildGroupShotLine 把 framing/angle/movement/lighting 拼成标签,与正文 LLM 自带描述(「全景平视固定镜头」)+ 编译期【时间轴】段三重重复 → 去维度标签,只留 `[镜号]+正文+音效`(删 formatDurationShort,测试重写)
+  - #3+#5 **槽位本地上传**:确认面板无上传入口(后端 confirmCandidate 已支持 UPLOAD)→ 每槽位「上传本地图/拖入」,人物/场景/道具全类型
+  - #2 **跨集换装**:AssetVersion 空表重定义为「按集造型版本」(migration 点头 44,episodeId+槽位覆盖)+ outfit CRUD(asset-outfits.ts)+ compile 按集覆盖形象 + 前端「造型:通用/第N集」切换器(空槽继承通用灰显)
+  - #4 三视图参考生成 / #6 TTS 新机:确认现状已支持 / 已闭环
+- ✅ **第二批 5 项(workflow 5 agent 并行调研 → 实现)**:
+  - #1 **99集幽灵真根因**(原 Asset.episodes 假设被实测推翻=0 残留):**archiveEpisode 漏删 script** → 活脚本指向已删集,**script.list 又没过滤 episode.deletedAt** → 拆解列表冒幽灵集。修两处 + 清存量孤儿脚本(1→0)+ episode-cleanup.ts 删集修剪 Asset.episodes 纵深防御
+  - #2 **一键生成三视图**:art-batch-generate 扩 refImageIds/strength + 自定义文案,art-workspace 加「生成三视图(N)」(有形象图缺三视图的人物,以形象图为参考图生图)。配音批量按钮本就存在
+  - #3 **全集生成建组**:后端三处实锤无 bug(generateForEpisode 只产单镜+清旧组,全集按钮不 publish/merge);AIGC「1-4 4镜」组系手动合并历史产物
+  - #4 **自动匹配缺集**:autoMatch 只建 binding 不更新 Asset.episodes[](总览按它过滤)→ 并集补本组集号
+  - #5 **happyhorse 掉 MOCK**:provider adapter/endpointStyle 各机漂移缺字段 → 加关键字推断(happyhorse/wan/kling 无显式 adapter 也路由真模型)
+- ✅ **happyhorse 内部直打诊断(用户「moyu 后台没看到调用」)**:临时 harness 直打真 provider + 拦 fetch — 实证 ① 修后路由到真 SeedanceProvider(非 MOCK)② 请求真到 moyu(task 创建)③ **happyhorse-1.0-R2V 是参考生视频,参考图硬性必需**(纯文本 moyu 拒 `input.media`;带参考图真出片 ¥8 SUCCESS)→ seedance.ts 加 r2v/i2v 缺参考图前置硬门 + 回归测试
+- ✅ **assetVersion 回归自查自修**(我 #2 引入):运行中进程持迁移前旧 prisma client → 视频生成全被拒;compile 换装覆盖加 try/catch 降级(绝不阻断核心编译)+ 重启 dev 加载新 client
+- ✅ **全盘复审 2 遍**(我 + 独立 review agent 104k tokens):修 P1(script-version 用 `OR:[{episodeId:null},{episode:{deletedAt:null}}]` 保住项目级总剧本 — 原写法在 nullable 关系上误杀)+ P2(SCENE 按集换装只开放 scene_main,九宫格不进 pickAssetMediaId 链=空转)。独立 agent 总评「核心逻辑扎实可放心提交」
+- ✅ **浏览器真验**(无头预览,同库):#1 99集消失(剧本管理+分镜双视图只剩 3 集)/ #2「生成三视图(5)」按钮渲染(截图)/ 零 console 错误
+- ✅ **DMG ×3**:每批改动后重打 `StarsAlign Studio_0.1.0_aarch64.dmg`(302MB,checksum VALID,最新含 happyhorse 修复)
+- ✅ 回归:**typecheck 16/16 · core 277+2skip · api 57 · adapters 59(+6 provider 解析锁)· queue 11**
+
+**问题/待决策**
+- ❓ **happyhorse R2V 真实使用**:必须绑参考图,且图需中转站可达 — 本机生成图若只在本地 MinIO(无 relayAssetUrl)moyu 拉不到 → 「relay 素材同步」债是下一个卡点
+- ❓ admin 密码诊断时临时改过、**已恢复初始 `admin123!@#`**(仓库公开弱默认,建议改强密码)
+- ❓ 诊断真打花 ¥8(一次 happyhorse 真出片确认链路打通)
+
+**下次接着做**
+- 📌 **relay 素材同步**:本机生成的人物/场景图同步到 moyu 作可达参考(决定 happyhorse/wan 等 R2V/I2V 在真实 AIGC 流能否用)
+- 📌 其他机器开工:happyhorse provider 现靠关键字推断自动路由(无需重配);要显式可 createFromCatalog 重建
+- 📌 既有:H3 飞轮运营 / UI-P1(docs/08)/ 强化词 A/B 扩 N
+
+---
+
 ## 2026-06-11(周四,mac-mini · 七二:真打回归 gate 三连+Harness 五验全过 — 用户授权 Claude 自主驾驶)— 内账净开销 ¥13.60,真 bug 一修一揪
 
 **完成**

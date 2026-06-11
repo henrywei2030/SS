@@ -174,6 +174,46 @@ export async function compileVideoPromptForGroup(
       complianceStatus: b.asset.complianceStatus ?? 'UNKNOWN',
     }));
 
+  // 七二·跨集换装:本组所属集若有造型覆盖(AssetVersion),非空槽位顶替 Asset 默认形象 —
+  //   就地改写 dbBindings[].asset 的槽位字段,下游 mediaIds 收集 / pickAssetMediaId /
+  //   characterImageRefs 自动用覆盖图(按 group.id 主键轻查 episodeId,零调用方改动)。
+  //   ⚠️ 防御:换装是增量增强,查询/覆盖任何失败都只降级为"用默认形象",绝不阻断核心视频编译。
+  //   (典型环境态:运行中进程持迁移前的旧 prisma client、表迁移未到位 — 不能因此让所有视频生成被拒)
+  try {
+    const grp = await tx.shotGroup.findUnique({
+      where: { id: args.group.id },
+      select: { episodeId: true },
+    });
+    if (grp?.episodeId) {
+      const bindingAssetIds = Array.from(new Set(dbBindings.map((b) => b.asset.id)));
+      const outfits =
+        bindingAssetIds.length > 0
+          ? await tx.assetVersion.findMany({
+              where: { episodeId: grp.episodeId, assetId: { in: bindingAssetIds } },
+              select: {
+                assetId: true,
+                portraitMediaId: true,
+                threeViewMediaId: true,
+                sceneMainMediaId: true,
+              },
+            })
+          : [];
+      const outfitMap = new Map(outfits.map((o) => [o.assetId, o]));
+      for (const b of dbBindings) {
+        const ov = outfitMap.get(b.asset.id);
+        if (!ov) continue;
+        if (ov.portraitMediaId) b.asset.portraitMediaId = ov.portraitMediaId;
+        if (ov.threeViewMediaId) b.asset.threeViewMediaId = ov.threeViewMediaId;
+        if (ov.sceneMainMediaId) b.asset.sceneMainMediaId = ov.sceneMainMediaId;
+      }
+    }
+  } catch (err) {
+    console.error(
+      '[compileVideoPromptForGroup] 按集造型覆盖查询失败,降级用默认形象(不阻断视频编译):',
+      err,
+    );
+  }
+
   const mediaIds = new Set<string>();
   for (const b of dbBindings) {
     for (const id of [
