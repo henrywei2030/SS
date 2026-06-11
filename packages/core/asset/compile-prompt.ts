@@ -110,6 +110,59 @@ export function compileAssetPrompt(input: CompilePromptInput): CompiledPrompt {
   };
 }
 
+/**
+ * 七二第九波(用户①·换衣/变装):基于已有「主体形象」图生图换装的提示词。
+ * 与 compileAssetPrompt 区别:不走 portrait turnaround slotPhrase(那会让模型重画整张设定图),
+ * 改为「身份锚定 + 仅替换服装」语义 —— 配合 img2img(以主体形象为参考 + 较高 strength)锁脸锁发锁身材。
+ *
+ * @param outfitDesc 造型描述(如「JK制服」);留空/缺省 = 随机一套契合人设的衣服。
+ */
+export function compileOutfitPrompt(input: {
+  asset: { type: AssetTypeLike; name: string; description?: string | null; prompt: string };
+  style?: CompilePromptInput['style'];
+  outfitDesc?: string;
+  extraNegative?: string[];
+}): CompiledPrompt {
+  const stylePart = pickStylePart(input.asset.type, input.style ?? null);
+  // 身份锚段:沿用人物 description/prompt(脸型/五官/发型/体型),服装以下方换装指令为准
+  const identityPart = [(input.asset.description ?? '').trim(), input.asset.prompt.trim()]
+    .filter((s) => s.length > 0)
+    .join('\n');
+  const desc = (input.outfitDesc ?? '').trim();
+  const outfitClause = desc
+    ? `仅将其服装造型更换为:${desc}`
+    : '仅将其服装造型更换为:一套契合该角色气质、年代与人设的全新服装(配色协调、风格统一、材质细节合理,可与原造型明显不同)';
+  const outfitPart =
+    `【换衣】画面中为同一角色:脸型、五官、发型与发色、身材比例与参考图完全一致(identical character, same face & hairstyle & body),` +
+    `${outfitClause};服装以本指令为准,忽略上文描述里的原服装。` +
+    `沿用主体形象设定图构图(16:9 横版,正面全身立绘 + 侧面/背面/三分之四侧前同框、等高对齐),纯白或浅中性纯色背景,统一柔和影棚平光。`;
+
+  const positive = [stylePart, identityPart, outfitPart].filter((s) => s.length > 0).join('\n');
+
+  const negativeParts: string[] = [];
+  if (input.style?.forbiddenWords && input.style.forbiddenWords.length > 0) {
+    negativeParts.push(input.style.forbiddenWords.join('、'));
+  }
+  if (input.extraNegative && input.extraNegative.length > 0) {
+    negativeParts.push(input.extraNegative.join('、'));
+  }
+  // 换衣专属负面:防换脸/换人/改身材
+  negativeParts.push('不同的人、换脸、五官改变、发型改变、身材比例改变、多人、文字水印、变形、低清');
+  const negative = negativeParts.join('、');
+
+  return {
+    positive,
+    negative,
+    parts: {
+      stylePart,
+      descriptionPart: identityPart,
+      promptPart: '',
+      slotPart: outfitPart,
+      extraPart: '',
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -132,7 +185,9 @@ function pickStylePart(
 function slotPhrase(slot: GenerationSlot, type: AssetTypeLike): string {
   switch (slot) {
     case 'portrait':
-      return '【构图】9:16 竖版正面半身像或胸像,角色面向镜头,完整面部清晰,背景简洁居中';
+      // 七二第九波(用户②):人物「主体形象」= 一张同框 turnaround(正面立绘 + 三视图),
+      //   取代原「正面半身像 + 独立三视图」两张。16:9 横版给并排视图足够横向空间。
+      return '【构图】16:9 横版人物主体形象设定图(character turnaround / model sheet):同一角色四视图横向并排、等高对齐,从左到右依次为 正面全身立绘、侧面(90° profile)、背面、四分之三侧前(3/4 view);四视图严格同一人物 —— 同一脸型、发型发色、服装款式与配色、身材比例完全一致(identical character & outfit across all views)。纯白或浅中性纯色背景,统一柔和影棚平光,光源方向与色温一致;无投影杂物、无多余人物、无文字水印,排版整洁如专业角色设定参考表';
     case 'three_view':
       // 六八:three_view 槽位双语义 — 人物=三视图,场景=九宫格(9 角度合一张)
       return type === 'SCENE'

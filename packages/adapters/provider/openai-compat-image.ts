@@ -104,6 +104,22 @@ function aspectRatioToSize(
   return map[aspect] ?? '2048x2048';
 }
 
+/**
+ * 七二第九波(用户报变装失败):按模型剔除不支持的 extra 参数。
+ * gpt-image 系(/images/edits)**不认 `strength`** → 透传会报「Unknown parameter: 'strength'」整单失败
+ * (换衣/三视图等 img2img 对 gpt-image 都受影响)。gpt-image 的 edits 本就以参考图为基底,无需 strength。
+ * seedream/wan 等支持 strength 的模型照常透传。
+ */
+function sanitizeExtraForModel(
+  extra: Record<string, unknown> | undefined,
+  modelId: string,
+): Record<string, unknown> | undefined {
+  if (!extra) return extra;
+  if (!/gpt-image/i.test(modelId)) return extra;
+  const { strength: _strength, ...rest } = extra;
+  return rest;
+}
+
 /** 解析 OpenAI 图像响应 → URL 列表(兼容 url 直链 与 b64_json,后者转 data URL)*/
 function extractImageUrls(resp: OpenAIImageResponse): string[] {
   return (resp.data ?? [])
@@ -149,7 +165,8 @@ export class OpenAICompatImageProvider extends BaseProvider implements IImagePro
       n,
       size,
     };
-    if (req.extra) Object.assign(body, req.extra);
+    const safeExtra = sanitizeExtraForModel(req.extra, modelId);
+    if (safeExtra) Object.assign(body, safeExtra);
 
     let resp: OpenAIImageResponse;
     try {
@@ -244,8 +261,9 @@ export class OpenAICompatImageProvider extends BaseProvider implements IImagePro
     form.append('prompt', req.prompt);
     form.append('n', String(n));
     form.append('size', size);
-    if (req.extra) {
-      for (const [k, v] of Object.entries(req.extra)) {
+    const safeExtra = sanitizeExtraForModel(req.extra, modelId);
+    if (safeExtra) {
+      for (const [k, v] of Object.entries(safeExtra)) {
         if (v != null) form.append(k, String(v));
       }
     }

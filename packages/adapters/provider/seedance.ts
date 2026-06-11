@@ -149,10 +149,23 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
           asString(output?.url) ??
           findFirstMp4Url(lvl1) ??
           undefined;
+        // 七二第九波:通用信封成功路径补抽真实 width/height(此前只有 1.x ARK 平铺路径抽,
+        //   happyhorse/wan 系恒 undefined → 无法回读真实尺寸自检横竖屏错配)。各家位置不一,
+        //   按 content / inner / data[0] / output 逐层尽力取;缺失仍 undefined,纯增字段不改终态。
+        const dimSrc = [content, inner, firstItem, output];
+        const pickNum = (key: string): number | undefined => {
+          for (const src of dimSrc) {
+            const v = asNumber(src?.[key]);
+            if (v !== null && v !== undefined) return v;
+          }
+          return undefined;
+        };
         return {
           kind: 'success',
           videoUrl,
           durationS: asNumber(inner.duration) ?? undefined,
+          width: pickNum('width'),
+          height: pickNum('height'),
           fps: asNumber(inner.framespersecond) ?? undefined,
           rawResponse: raw,
         };
@@ -300,11 +313,21 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
         };
       }
       // Seedance 1.x relay (旧协议,docs §14):中转站 /v1/video/generations 简化结构
+      // 七二第九波(尺寸 bug 根因):比例字段按家族双写别名 —— Seedance 系中转站惯例用顶层
+      //   `ratio`(moyu docs §3.4),但 happyhorse / wan 等走 OpenAI 兼容中转站,标准比例
+      //   字段是顶层 `aspect_ratio`(下划线;DashScope 原生则是 parameters.ratio)。此前只发
+      //   `ratio` → happyhorse R2V 端不识别 → 静默回落默认 16:9(用户设 9:16 却出横屏的根因)。
+      //   同值双写无冲突(中转站忽略不认的别名),一次覆盖 seedance / happyhorse / wan 三套命名。
+      // 七二第九波:maxDuration 有限性自卫 —— happyhorse 等 catalog 无 maxDuration 时,
+      //   构造链虽有 `?? 15` 兜底,但此处不依赖隐式跨文件契约,直接守 NaN(否则 duration:NaN
+      //   → JSON.stringify 成 null → moyu InvalidParameter)。
+      const maxDur = Number.isFinite(this.cfg.maxDuration) ? this.cfg.maxDuration : 15;
       const body: Record<string, unknown> = {
         model: modelId,
         prompt: req.prompt,
-        duration: clamp(req.durationS, 1, this.cfg.maxDuration),
+        duration: clamp(req.durationS, 1, maxDur),
         ratio: req.aspectRatio,
+        aspect_ratio: req.aspectRatio,
       };
       if (req.refImageUrls?.length) body.images = req.refImageUrls; // docs §14:images 数组
       if (req.firstFrameUrl) body.first_frame_image = req.firstFrameUrl;

@@ -44,8 +44,16 @@ export function CreateProjectDialog({
 }): React.ReactElement {
   const t = useTranslations();
   const isEdit = !!project;
+  const utils = trpc.useUtils();
   const create = trpc.project.create.useMutation({ onSuccess: () => onCreated() });
-  const update = trpc.project.update.useMutation({ onSuccess: () => onCreated() });
+  const update = trpc.project.update.useMutation({
+    onSuccess: () => {
+      // 七二第九波:改项目 aspect 后,AIGC 页 getGroupDetail 内嵌的 project.aspect 需失效,
+      //   否则预览窗口读旧缓存;与 useVideoSettings 跟随逻辑合起来闭环「改项目 → 预览自动调整」。
+      void utils.aigc.getGroupDetail.invalidate();
+      onCreated();
+    },
+  });
   const pending = isEdit ? update.isPending : create.isPending;
   const errorMsg = (isEdit ? update.error : create.error)?.message;
 

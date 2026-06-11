@@ -24,6 +24,7 @@ import { getStorageAdapter, buildStorageKey } from '@ss/adapters/storage';
 import {
   extractFrame,
   keyframeFilename,
+  probeDurationS,
   resolveMediaFetchUrl,
   syncMediaToRelay,
   tailFrameFilename,
@@ -137,7 +138,15 @@ export const keyframeProcedures = {
             '关键帧生成未配置 Image Provider — 去 /admin/bindings 选 binding.asset.image.providerId(或传 modelId)',
         });
       }
-      const aspectRatio = settings['shot.video.defaultAspectRatio'] ?? '9:16';
+      // 七二第九波(用户②·关键帧):首帧生成尺寸跟「项目设定尺寸」一致 —— 原误用全局
+      //   SystemSetting `shot.video.defaultAspectRatio`,与项目 aspect 可能不符(用户报「尺寸要和项目一致」)。
+      //   优先 Project.aspect,缺失再退 SystemSetting / 9:16。
+      const projForAspect = await ctx.prisma.project.findUnique({
+        where: { id: grp.episode.projectId },
+        select: { aspect: true },
+      });
+      const aspectRatio =
+        projForAspect?.aspect ?? settings['shot.video.defaultAspectRatio'] ?? '9:16';
 
       // 组提示词编译(复用视频同一真相源);关键帧是静帧 → 用 parts 重组,去掉时长参数段
       const { compiled } = await compileVideoPromptForGroup(ctx.prisma, {
@@ -416,19 +425,86 @@ export const keyframeProcedures = {
           throw new TRPCError({ code: 'BAD_REQUEST', message: '媒体不存在或不是本项目的图片' });
         }
       }
-      await ctx.prisma.shot.update({
-        where: { id: firstShot.id },
-        data: { startFrameMediaId: input.mediaId },
+      // 七二第九波(用户②·首帧):点首帧候选 → 形成约束 + 提示词自动补文字 + 自动 @ 该图片资产
+      //   (确保关联成功、@成功)。toggle/重选都先回收上一次首帧自动关联,防孤儿 @图片N。
+      //   范式镜像 chainTailFrame(尾帧链),但作用于「本组」。
+      const KF_NOTE = '首帧约束:自动关联(关键帧)';
+      const KF_LINE_MARK = '本组首帧约束画面';
+      const result = await ctx.prisma.$transaction(async (tx) => {
+        // 1) 回收上次首帧自动 binding + 提示词行
+        const prev = await tx.assetUsageBinding.findMany({
+          where: { shotGroupId: grp.id, deletedAt: null, note: KF_NOTE },
+          select: { id: true },
+        });
+        if (prev.length > 0) {
+          await tx.assetUsageBinding.updateMany({
+            where: { id: { in: prev.map((b) => b.id) } },
+            data: { deletedAt: new Date() },
+          });
+          const cur = await tx.shotGroup.findUnique({ where: { id: grp.id }, select: { prompt: true } });
+          if (cur?.prompt) {
+            const cleaned = cur.prompt
+              .split('\n')
+              .filter((ln) => !ln.includes(KF_LINE_MARK))
+              .join('\n')
+              .trimEnd();
+            await tx.shotGroup.update({ where: { id: grp.id }, data: { prompt: cleaned } });
+          }
+        }
+        // 2) 设/清首帧约束(submit.ts 读 startFrameMediaId 作 firstFrameUrl 送 provider)
+        await tx.shot.update({ where: { id: firstShot.id }, data: { startFrameMediaId: input.mediaId } });
+        // 3) 设了首帧 → 包成参考资产 + 绑本组 refSlotIdx + 提示词追加 @图片N(关联+@ 落库即成功)
+        let token: string | null = null;
+        if (input.mediaId) {
+          const kfAsset = await tx.asset.create({
+            data: {
+              projectId: grp.episode.projectId,
+              type: 'STYLE_REFERENCE',
+              name: `G${grp.number} 首帧`,
+              description: `第 ${grp.episode.number ?? '?'} 集 G${grp.number} 首帧约束画面(关键帧)`,
+              prompt: '本组开场首帧约束画面',
+              mainMediaId: input.mediaId,
+            },
+            select: { id: true },
+          });
+          const maxSlot = await tx.assetUsageBinding.aggregate({
+            where: { shotGroupId: grp.id, deletedAt: null },
+            _max: { refSlotIdx: true },
+          });
+          const refSlotIdx = (maxSlot._max.refSlotIdx ?? 0) + 1;
+          await tx.assetUsageBinding.create({
+            data: {
+              assetId: kfAsset.id,
+              projectId: grp.episode.projectId,
+              episodeId: grp.episodeId,
+              shotGroupId: grp.id,
+              usageType: 'APPEAR',
+              required: false,
+              note: KF_NOTE,
+              refSlotIdx,
+            },
+          });
+          token = `@图片${refSlotIdx}`;
+          const cur = await tx.shotGroup.findUnique({ where: { id: grp.id }, select: { prompt: true } });
+          const line = `${token} 为${KF_LINE_MARK},作为本次生成视频的开场首帧,开场画面需与其一致。`;
+          await tx.shotGroup.update({
+            where: { id: grp.id },
+            data: { prompt: `${(cur?.prompt ?? '').trimEnd()}\n${line}` },
+          });
+        }
+        return { token };
       });
+
       await logOperation(ctx, 'aigc.confirmKeyframe', 'shotGroup', grp.id, {
         startFrameMediaId: firstShot.startFrameMediaId,
       }, {
         startFrameMediaId: input.mediaId,
+        token: result.token,
         groupNumber: grp.number,
         episodeId: grp.episodeId,
         projectId: grp.episode.projectId,
       });
-      return { firstShotId: firstShot.id, mediaId: input.mediaId };
+      return { firstShotId: firstShot.id, mediaId: input.mediaId, token: result.token };
     }),
 
   /**
@@ -509,8 +585,21 @@ export const keyframeProcedures = {
         }
 
         // 抽尾帧 → 存储 → MediaItem
+        // 七二第九波(用户②·尾帧真实非空白):抽「倒数 ~0.4s」的代表帧,而非绝对末帧 —— 绝对末帧
+        //   若是淡出黑场会得到纯黑图;退后 0.4s 落在最后一秒内、又避开收尾黑帧。probe 失败回退绝对末帧。
         const framePath = join(tmp, 'tail.png');
-        await extractFrame({ input: videoPath, output: framePath });
+        let atS: number | undefined;
+        try {
+          const dur = await probeDurationS(videoPath);
+          if (Number.isFinite(dur) && dur > 0.6) atS = Math.max(0, dur - 0.4);
+        } catch {
+          /* probe 失败 → 走绝对末帧兜底 */
+        }
+        await extractFrame({
+          input: videoPath,
+          output: framePath,
+          ...(atS !== undefined ? { atS } : {}),
+        });
         const buf = await readFile(framePath);
         const key = buildStorageKey({
           scope: 'project',

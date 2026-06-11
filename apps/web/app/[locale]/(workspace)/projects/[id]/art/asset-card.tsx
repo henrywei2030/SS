@@ -7,6 +7,7 @@ import { characterNeedsVoice } from '@ss/shared';
 import type { AppRouter } from '@ss/api';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
+import { ImageLightbox, ImagePreviewButton } from '@/components/ui/image-lightbox';
 import { cn } from '@/lib/utils';
 
 type Binding = inferRouterOutputs<AppRouter>['asset']['listBindings'][number];
@@ -81,12 +82,16 @@ export function AssetCard({ asset, heroUrl, bindings, onClick }: Props): React.R
   // 五七-3:紧凑视图 — 人物卡缩略用 3:4(原 9:16 太高),场景/道具 16:9
   const aspectClass = asset.type === 'CHARACTER' ? 'aspect-[3/4]' : 'aspect-[16/9]';
 
+  // 七二第九波(用户③):卡片右上角「预览」图标 → 当前页 lightbox 看大图
+  const [previewOpen, setPreviewOpen] = React.useState(false);
+
   // 主标签 — 优先角色 > importance > type
   const primaryBadge =
     asset.characterRole ??
     (asset.importance ? `${asset.importance} 级` : null);
 
   return (
+    <>
     <Card
       onClick={onClick}
       className={cn(
@@ -129,8 +134,10 @@ export function AssetCard({ asset, heroUrl, bindings, onClick }: Props): React.R
           </Badge>
         )}
 
-        {/* 右上 — 合规 + 锁定 */}
-        <div className="absolute right-1.5 top-1.5 flex gap-1">
+        {/* 右上 — 预览 + 合规 + 锁定 */}
+        <div className="absolute right-1.5 top-1.5 flex items-center gap-1">
+          {/* 七二第九波(用户③):预览大图 —— stopPropagation 防触发卡片 onClick(编辑弹窗) */}
+          {heroUrl && <ImagePreviewButton onOpen={() => setPreviewOpen(true)} />}
           {asset.lockedAt && (
             <div
               title="资产已锁定"
@@ -210,6 +217,11 @@ export function AssetCard({ asset, heroUrl, bindings, onClick }: Props): React.R
         )}
       </div>
     </Card>
+    {/* 七二第九波(用户③):预览 lightbox — 当前页大图,点图/遮罩/X/ESC 均关闭 */}
+    {previewOpen && heroUrl && (
+      <ImageLightbox url={heroUrl} alt={asset.name} onClose={() => setPreviewOpen(false)} />
+    )}
+    </>
   );
 }
 
@@ -221,18 +233,13 @@ function MaturityChips({ asset }: { asset: AssetBrief }): React.ReactElement {
   const chips: Array<{ label: string; tone: 'success' | 'warn' | 'default' }> = [];
 
   if (asset.type === 'CHARACTER') {
+    // 七二第九波(用户②):三视图并入「主体形象」单图 —— 原「形象图 + 三视图」两 chip 合一,
+    //   只显主体形象状态;合规由右上角绿点徽章呈现,不再单列 chip。
     chips.push(
       asset.portraitMediaId
-        ? { label: '形象图已完成', tone: 'success' }
-        : { label: '形象图未完成', tone: 'warn' },
+        ? { label: '主体形象已完成', tone: 'success' }
+        : { label: '主体形象未完成', tone: 'warn' },
     );
-    if (asset.complianceStatus === 'APPROVED') {
-      chips.push({ label: '三视图已合规', tone: 'success' });
-    } else if (asset.threeViewMediaId) {
-      chips.push({ label: '三视图待合规', tone: 'warn' });
-    } else {
-      chips.push({ label: '三视图未完成', tone: 'warn' });
-    }
     // 六八:声音关联状态 — 只对需要声线的角色(主演/配角)显示;群演不需要不标
     if (characterNeedsVoice(asset.characterRole)) {
       chips.push(

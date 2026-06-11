@@ -6,7 +6,7 @@
  */
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { compileAssetPrompt } from "@ss/core/asset";
+import { compileAssetPrompt, compileOutfitPrompt } from "@ss/core/asset";
 import { assetCategoryFromType, assetImageFilename, syncMediaToRelay } from "@ss/core/media";
 import { getImageProvider, getTextProvider } from "@ss/adapters/provider";
 import { getStorageAdapter } from "@ss/adapters/storage";
@@ -345,6 +345,15 @@ export const generateProcedures = {
         refImageIds: z.array(z.string().cuid()).max(16).optional(),
         strength: z.number().min(0).max(1).optional(),
         extraNegative: z.array(z.string().max(50)).max(20).optional(),
+        // 七二第九波(用户①·换衣/变装):outfit 模式 —— 以 asset.portraitMediaId(主体形象)为参考
+        //   图生图换装。desc 留空=随机一套适合人设的衣服;episodeId 传了则生成后顺手设为该集造型
+        //   (AssetVersion.portraitMediaId)。slot 仍传 'portrait',产物进 portrait 候选池(inputJson.kind 软区分)。
+        outfit: z
+          .object({
+            desc: z.string().max(300).optional(),
+            episodeId: z.string().cuid().optional(),
+          })
+          .optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -377,35 +386,60 @@ export const generateProcedures = {
         });
       }
 
-      const compiled = compileAssetPrompt({
-        asset: {
-          type: asset.type as 'CHARACTER' | 'SCENE' | 'PROP' | 'STYLE_REFERENCE',
-          name: asset.name,
-          description: asset.description,
-          prompt: asset.prompt,
-          archetypeKey: asset.archetypeKey,
-        },
-        style: project?.style ?? null,
-        slot: input.slot,
-        extraInstruction: input.extraInstruction,
-        extraNegative: input.extraNegative,
-      });
+      // 七二第九波(用户①·换衣):outfit 模式以主体形象为基底图生图换装;否则常规槽位生成
+      const isOutfit = !!input.outfit;
+      if (isOutfit && !asset.portraitMediaId) {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: '换衣需要先有「主体形象」图 — 请先在主体形象槽位生成并确认一张,再变装。',
+        });
+      }
+      const compiled = isOutfit
+        ? compileOutfitPrompt({
+            asset: {
+              type: asset.type as 'CHARACTER' | 'SCENE' | 'PROP' | 'STYLE_REFERENCE',
+              name: asset.name,
+              description: asset.description,
+              prompt: asset.prompt,
+            },
+            style: project?.style ?? null,
+            outfitDesc: input.outfit?.desc,
+            extraNegative: input.extraNegative,
+          })
+        : compileAssetPrompt({
+            asset: {
+              type: asset.type as 'CHARACTER' | 'SCENE' | 'PROP' | 'STYLE_REFERENCE',
+              name: asset.name,
+              description: asset.description,
+              prompt: asset.prompt,
+              archetypeKey: asset.archetypeKey,
+            },
+            style: project?.style ?? null,
+            slot: input.slot,
+            extraInstruction: input.extraInstruction,
+            extraNegative: input.extraNegative,
+          });
 
       const aspectRatio =
         input.aspectRatio ??
-        (input.slot === 'portrait'
-          ? '9:16'
-          : input.slot === 'three_view'
-            ? '16:9'
-            : input.slot === 'panorama'
-              ? '2:1'
-              : '1:1');
+        (isOutfit
+          ? (project?.aspect ?? '16:9') // 换衣沿用主体形象/项目尺寸(16:9 turnaround)
+          : input.slot === 'portrait'
+            ? '16:9' // 七二第九波:人物主体形象 turnaround 16:9(原 9:16)
+            : input.slot === 'three_view'
+              ? '16:9'
+              : input.slot === 'panorama'
+                ? '2:1'
+                : '1:1');
+      // 换衣强制以主体形象为参考图(锁脸/发型/身材);默认 strength 0.7 锚定身份
+      const effectiveRefIds = isOutfit ? [asset.portraitMediaId!] : input.refImageIds;
+      const effectiveStrength = input.strength ?? (isOutfit ? 0.7 : undefined);
 
       // 五七-3:解析参考图 mediaId → 可 fetch 的 http URL(给图生图 /images/edits;adapter 会 fetch bytes)
       let refImageUrls: string[] | undefined;
-      if (input.refImageIds && input.refImageIds.length > 0) {
+      if (effectiveRefIds && effectiveRefIds.length > 0) {
         const refMedias = await ctx.prisma.mediaItem.findMany({
-          where: { id: { in: input.refImageIds }, deletedAt: null },
+          where: { id: { in: effectiveRefIds }, deletedAt: null },
           select: { storageKey: true, cdnUrl: true },
         });
         const storage = getStorageAdapter();
@@ -443,7 +477,7 @@ export const generateProcedures = {
             //   providerId 只用于上面 getImageProvider() 选配置;真实模型名由该配置 defaultModel 提供
             //   (adapter:req.model ?? cfg.defaultModel)。原来误传 providerId → moyu 找不到模型 → 无可用渠道(从没到引擎)。
             refImageUrls,
-            ...(input.strength != null ? { extra: { strength: input.strength } } : {}),
+            ...(effectiveStrength != null ? { extra: { strength: effectiveStrength } } : {}),
           },
           {
             userId: ctx.user.id,
@@ -618,6 +652,10 @@ export const generateProcedures = {
               sizePx: input.sizePx,
               count: input.count,
               parts: compiled.parts,
+              // 七二第九波(用户①·换衣):软标记换装候选(前端按 kind 区分「换装」候选;不动 schema)
+              ...(isOutfit
+                ? { kind: 'outfit', outfitDesc: input.outfit?.desc ?? null, random: !input.outfit?.desc }
+                : {}),
             },
             outputMediaId: ids[0],
             outputMediaIds: ids,
@@ -653,12 +691,33 @@ export const generateProcedures = {
         return { mediaIds: ids, attempt: attemptRow };
       });
 
+      // 七二第九波(用户①·换衣):若指定目标集,生成成功后把首张换装图设为该集造型
+      //   (AssetVersion.portraitMediaId),一步「变装并设为第N集」;未指定则仅进候选池由用户后续设定。
+      if (isOutfit && input.outfit?.episodeId && mediaIds[0]) {
+        const ep = await ctx.prisma.episode.findFirst({
+          where: { id: input.outfit.episodeId, projectId: asset.projectId, deletedAt: null },
+          select: { id: true },
+        });
+        if (ep) {
+          try {
+            await ctx.prisma.assetVersion.upsert({
+              where: { assetId_episodeId: { assetId: asset.id, episodeId: ep.id } },
+              create: { assetId: asset.id, episodeId: ep.id, portraitMediaId: mediaIds[0] },
+              update: { portraitMediaId: mediaIds[0] },
+            });
+          } catch (e) {
+            console.error('[asset.generateImage] 换装设为按集造型失败(图已生成,忽略):', e);
+          }
+        }
+      }
+
       await logOperation(ctx, 'asset.generateImage', 'asset', asset.id, null, {
         slot: input.slot,
         count: imageResult.imageUrls.length,
         providerId,
         aspectRatio,
         cost: imageResult.costCny,
+        outfit: isOutfit ? { desc: input.outfit?.desc ?? null, episodeId: input.outfit?.episodeId ?? null } : undefined,
         projectId: asset.projectId,
       });
 

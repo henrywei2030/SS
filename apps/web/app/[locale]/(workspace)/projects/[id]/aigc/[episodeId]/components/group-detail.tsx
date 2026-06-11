@@ -14,6 +14,7 @@ import * as React from 'react';
 import { toast } from 'sonner';
 
 import { trpc } from '@/lib/trpc/client';
+import { ImageLightbox, ImagePreviewButton } from '@/components/ui/image-lightbox';
 import { normalizePrompt } from '@ss/shared';
 import { type AspectRatio } from '@ss/shared/constants';
 
@@ -517,6 +518,26 @@ export function GroupDetail({
               )}
             </div>
           )}
+        {/* 七二第九波(用户报超 9 张):参考图超 happyhorse R2V 上限 9 张时预警(按 URL 去重,口径同后端截断) */}
+        {compiled &&
+          (() => {
+            const urls = new Set<string>();
+            for (const b of bindings) {
+              if (b.kind === 'IMAGE' && b.mediaUrl) urls.add(b.mediaUrl);
+            }
+            for (const r of compiled.characterImageRefs) {
+              if (r.mediaUrl) urls.add(r.mediaUrl);
+            }
+            return urls.size > 9 ? (
+              <p className="mt-1.5 flex items-start gap-1.5 text-xs text-[hsl(var(--color-warning))]">
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                <span>
+                  已关联 {urls.size} 张参考图,超过 happyhorse R2V 上限 9 张 —— 生成会自动截断保留前 9
+                  张(@ 引用图优先),建议精简关联资产,或改用支持更多参考的模型。
+                </span>
+              </p>
+            ) : null;
+          })()}
         {/* H0(docs/07):编译预览 — 送模型的完整 prompt(含【时间轴】结构段 +【画质/稳定】强化词) */}
         {compiled && (
           <details className="mt-2 text-xs">
@@ -751,8 +772,16 @@ function KeyframeSection({ groupId }: { groupId: string }): React.ReactElement {
   });
   const confirmMut = trpc.aigc.confirmKeyframe.useMutation({
     onSuccess: (r) => {
-      toast.success(r.mediaId ? '已设为本组首帧(生成视频将作首帧约束)' : '已清除首帧');
+      // 七二第九波(用户②·首帧):提示词已自动补文字 + @ 资产
+      toast.success(
+        r.mediaId
+          ? `已设为本组首帧约束 ✓${r.token ? ` · 提示词已 @${r.token.replace('@', '')} 标注首帧 + 自动关联资产 ✓` : ''}`
+          : '已清除首帧约束(含提示词 @ 标注)',
+      );
       invalidate();
+      // 首帧自动关联改了本组提示词 + 资产 binding → 失效 getGroupDetail 让提示词区/关联区刷新
+      void utils.aigc.getGroupDetail.invalidate();
+      void utils.aigc.listGroups.invalidate();
     },
     onError: (e) => toast.error(e.message),
   });
@@ -771,6 +800,13 @@ function KeyframeSection({ groupId }: { groupId: string }): React.ReactElement {
     onError: (e) => toast.error(e.message),
   });
 
+  // 七二第九波(用户②·尾帧):尾帧功能门禁 —— 只有本组已有成功未拒的视频 take 才可用(可见 disable,
+  //   不再点了才报错)。复用 listVideoTakes 缓存(视频预览区已查)。
+  const { data: kfTakes } = trpc.aigc.listVideoTakes.useQuery({ groupId });
+  const hasSuccessTake = (kfTakes ?? []).some(
+    (t) => t.status === 'SUCCESS' && !t.rejected && !!t.videoUrl,
+  );
+
   const confirmedId = data?.confirmedMediaId ?? null;
   const candidateIds = React.useMemo(() => {
     const ids: string[] = [];
@@ -779,6 +815,8 @@ function KeyframeSection({ groupId }: { groupId: string }): React.ReactElement {
     }
     return ids.slice(0, 8);
   }, [data?.attempts]);
+  // 七二第九波(用户:全覆盖):关键帧候选/首帧大图预览
+  const [kfPreviewUrl, setKfPreviewUrl] = React.useState<string | null>(null);
 
   return (
     <section className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] p-3">
@@ -795,8 +833,12 @@ function KeyframeSection({ groupId }: { groupId: string }): React.ReactElement {
           </button>
           <button
             onClick={() => chainMut.mutate({ groupId })}
-            disabled={chainMut.isPending}
-            title="抽本组最新成功 take 的尾帧 → 设为下一组首帧(同场景才允许,切场自动拒绝)"
+            disabled={chainMut.isPending || !hasSuccessTake}
+            title={
+              hasSuccessTake
+                ? '抽本组最新成功 take 的尾帧(真实末帧)→ 设为下一组首帧 + 自动 @ 关联(同场景才允许,切场自动拒绝)'
+                : '尾帧功能需本组先生成出一条成功视频 take(去右侧「视频预览」抽卡)'
+            }
             className="rounded border border-[hsl(var(--color-border))] px-2 py-1 text-[length:0.78em] hover:bg-[hsl(var(--color-muted))] disabled:opacity-50"
           >
             {chainMut.isPending ? '链接中...' : '尾帧链下一组'}
@@ -806,7 +848,7 @@ function KeyframeSection({ groupId }: { groupId: string }): React.ReactElement {
 
       {confirmedId && data?.urlMap[confirmedId] ? (
         <div className="mb-2">
-          <div className="relative overflow-hidden rounded-md border-2 border-[hsl(var(--color-accent))]">
+          <div className="group relative overflow-hidden rounded-md border-2 border-[hsl(var(--color-accent))]">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={data.urlMap[confirmedId]}
@@ -817,6 +859,11 @@ function KeyframeSection({ groupId }: { groupId: string }): React.ReactElement {
               <Check className="size-3" />
               首帧约束
             </span>
+            {/* 七二第九波(用户:全覆盖):预览大图(置于清除按钮左侧) */}
+            <ImagePreviewButton
+              onOpen={() => setKfPreviewUrl(data.urlMap[confirmedId] ?? null)}
+              className="absolute right-7 top-1 rounded-full bg-black/45 p-1 text-white opacity-0 backdrop-blur-sm transition hover:bg-black/65 group-hover:opacity-100"
+            />
             <button
               onClick={() => confirmMut.mutate({ groupId, mediaId: null })}
               disabled={confirmMut.isPending}
@@ -839,30 +886,45 @@ function KeyframeSection({ groupId }: { groupId: string }): React.ReactElement {
             const url = data?.urlMap[id];
             const isConfirmed = id === confirmedId;
             return (
-              <button
+              // 七二第九波(用户:全覆盖):外层 div 容纳「设为首帧 button」+「预览 Eye 兄弟节点」(避免 button 嵌套)
+              <div
                 key={id}
-                onClick={() => !isConfirmed && confirmMut.mutate({ groupId, mediaId: id })}
-                disabled={confirmMut.isPending || isConfirmed}
-                title={isConfirmed ? '当前首帧' : '设为本组首帧'}
                 className={
-                  'relative aspect-[9/16] overflow-hidden rounded border ' +
+                  'group relative aspect-[9/16] overflow-hidden rounded border ' +
                   (isConfirmed
                     ? 'border-[hsl(var(--color-accent))] opacity-60'
                     : 'border-[hsl(var(--color-border))] hover:border-[hsl(var(--color-accent))]')
                 }
               >
-                {url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={url} alt="关键帧候选" className="h-full w-full object-cover" />
-                ) : (
-                  <span className="flex h-full items-center justify-center text-[10px] text-[hsl(var(--color-muted-foreground))]">
-                    加载中
-                  </span>
+                <button
+                  type="button"
+                  onClick={() => !isConfirmed && confirmMut.mutate({ groupId, mediaId: id })}
+                  disabled={confirmMut.isPending || isConfirmed}
+                  title={isConfirmed ? '当前首帧' : '设为本组首帧'}
+                  className="block h-full w-full"
+                >
+                  {url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={url} alt="关键帧候选" className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="flex h-full items-center justify-center text-[10px] text-[hsl(var(--color-muted-foreground))]">
+                      加载中
+                    </span>
+                  )}
+                </button>
+                {url && (
+                  <ImagePreviewButton
+                    onOpen={() => setKfPreviewUrl(url)}
+                    className="absolute right-1 top-1 rounded-full bg-black/45 p-1 text-white opacity-0 backdrop-blur-sm transition hover:bg-black/65 group-hover:opacity-100"
+                  />
                 )}
-              </button>
+              </div>
             );
           })}
         </div>
+      )}
+      {kfPreviewUrl && (
+        <ImageLightbox url={kfPreviewUrl} onClose={() => setKfPreviewUrl(null)} />
       )}
     </section>
   );

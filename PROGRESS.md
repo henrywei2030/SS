@@ -5,6 +5,31 @@
 
 ---
 
+## 2026-06-12(周五,mac-studio · 七二第九波:视频尺寸根因 + 4 任务 + 换衣/关键帧 + 变装bug + DMG)
+
+**完成**(开工 a 同步:本地=origin/main · 当日多轮)
+
+- ✅ **视频尺寸 bug 根因(用户报 9:16 设定却出 16:9)**:① **adapter 根因** — happyhorse/wan 走 1.x relay 分支只发顶层 `ratio`(Seedance 惯例),但 OpenAI 兼容中转站标准比例字段是顶层 `aspect_ratio`(下划线)→ 静默回落 16:9。改**同值双写 `ratio`+`aspect_ratio`**(覆盖 seedance/happyhorse/wan)+ relay SUCCESS 路径补抽 width/height + duration 有限性自卫(seedance.ts)。② **前端预览** — `use-video-settings` 去一次性门闩改「跟随 project.aspect 变化」+ 主预览框跟随 aspectRatio + 编辑项目失效 `getGroupDetail`。**浏览器实证**:改项目 16:9↔9:16 预览框实时翻转。⚠️ 发现该项目 DB aspect 实为 16:9(非用户以为的 9:16),已还原未擅改。⚠️ adapter 字段名属文档推断(moyu 自家未实证),双写是免探针兜底。
+- ✅ **4 任务(用户第二批)**:① **过场去 seedance** — 占位/expectedMs/tooltip 写死 Seedance 全改动态 provider 名;**happyhorse 默认 1080p**(后端 modelId 推断 720p/1080p + 前端跟随 defaultResolution);预览框按 aspect 分档放大(16:9→max-w-[32rem],实证铺满无留白)。② **立绘三视图合一**(用户定 16:9 turnaround)— 人物编辑单「主体形象」槽(删三视图 tab + 一键生成三视图按钮)、`compileOutfitPrompt` 前身 portrait slotPhrase 重写为 character turnaround、成熟度一张即 L4、卡片单 chip、生成默认 16:9、schema threeView 保留不删。③ **卡片预览 lightbox** — 三类卡右上 Eye 图标 → 全屏大图(点图/遮罩/X/ESC 四关闭,stopPropagation 防误开编辑);实证渲染完美。④ **镜头语言词库**(全部应用)— 景别 8 级/机位补荷兰角·主观·航拍/运镜补环绕·旋转/光线补顶光·侧逆光·伦勃朗光(preset.ts + 落 seed.ts 补跨机同步缺口)+ storyboard 模板升 **v4**(运镜光位动机 + 新增焦段/构图/色调维度,generate.ts 镜像同步);db:sync 实证 isDefault:false 生效。
+- ✅ **换衣 + 关键帧(用户第三批)**:① **换衣/变装** — `generateImage` 加 outfit 模式(强制以 portraitMediaId 为参考图生图 + `compileOutfitPrompt` 保身份只换衣 + 留空随机 + 可一步设为按集造型 AssetVersion)+ 美术工坊「换衣/变装」面板(造型输入框 + 目标集下拉 + 变装按钮);复用现有图生图+按集造型基建零破坏性 migration。② **关键帧首尾帧** — 首帧生成尺寸改读 **Project.aspect**(原误用全局 SystemSetting);`confirmKeyframe` 重写为「点首帧→约束+自动补提示词+@资产」(toggle/清除自动回收旧 @,镜像 chainTailFrame);尾帧按钮加「已生成视频」门禁(实证无 take 正确禁用);尾帧抽「倒数 0.4s」代表帧避开收尾黑帧。
+- ✅ **变装 bug 修复(用户报失败)**:根因 = gpt-image 的 /images/edits **不认 `strength`**(`req.extra` 全量透传 → "Unknown parameter: 'strength'" 整单失败)。修 openai-compat-image adapter 按模型剔除不支持 extra(gpt-image 去 strength,seedream/wan 照常);placeholder「JK制服」→「礼服」。**同步生成**显式带槽位尺寸(portrait/three_view 16:9)不依赖后端默认。
+- ✅ **参考图超 9 张失败修复(用户报 happyhorse「media list must have at most 9 reference_images, got 15」)**:根因 = 立绘合一后旧数据残留三视图,每人物仍送「形象+三视图」两张(5 人×2 + 场景/道具=15),且无 provider 上限截断。三修:① compile.ts 人物**只送主体形象一张**(去三视图,旧数据残留也不附带)② submit.ts 按 provider 上限截断(`maxRefImagesFor`:happyhorse 9 / 其他 16,优先 @token 引用图)主+对决双路 ③ group-detail 超 9 张前端预警(按 URL 去重,口径同后端)。**浏览器实证**:附带参考文案由「(形象+三视图)」变「(形象)」。**确认**:音频是独立 reference_audio 字段**不计入 9 张图**;happyhorse R2V 当前**不收音频**(supportsRefAudio 未启用,声线静默丢弃 —— 要音画同出用 Seedance 2.0)。
+- ✅ **图像预览 lightbox 全覆盖(用户)**:把任务③的卡片大图预览推广到**所有图像生成+预览界面** —— 抽共享组件 `components/ui/image-lightbox.tsx`(`ImageLightbox` + `ImagePreviewButton`),接入美术卡(重构去内联)/ 生成候选卡 / 已确认槽位 / 关键帧候选与首帧;每张图右上角 Eye → 全屏大图,点图/遮罩/X/ESC 四关闭。浏览器实证:单弹窗 11 个预览按钮、开/点图关均通。
+- ✅ **最新 mac DMG 打包**(收工时):`SS_DESKTOP_BUILD=1 web build` → `desktop-pack` → `tauri:build`(随代码迭代多次重打,最终含全部修复)。
+- ✅ 回归全程绿:**typecheck 16/16 · core 277(+2skip) · api 57 · adapters 59** · 浏览器多轮实证零 console 错误。
+
+**方法论**:每批用 Workflow 并行深挖(理解→对抗式验证根因/全网考证)+ 直读交叉验证 + 逐项浏览器实证。
+
+**问题/待决策**
+- ❓ 需真打确认:happyhorse 双写 aspect_ratio 真生效(或 ¥20 探针)/ 换衣出图保身份只换衣 / 首帧 @ 真送达 provider(R2V 需 supportsFirstFrame)/ v4 模板分镜质量。
+- ❓ 本波留尾(无害):尾帧「先看帧再确认链入」回路(现一键直链)/ 黑帧像素级校验(已用倒数0.4s规避)/ 生成面板人物 three_view 死分支 / 换装 outfit three_view 槽。
+
+**下次接着做**
+- 📌 真打验证上述四项(花钱项,用户点头后)
+- 📌 既有:UI 批④ admin / relay 填 group_id 真启用 / 字号软约束 token
+
+---
+
 ## 2026-06-12(周五,mac-studio · 七二第八波:场景工作流改造 — 九宫格为主、下线主视角)
 
 **完成**

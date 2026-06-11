@@ -38,6 +38,16 @@ const ASPECT_CLASS: Record<AspectRatio, string> = {
   '9:16': 'aspect-[9/16]',
   '21:9': 'aspect-[21/9]',
 };
+// 七二第九波(用户③:横屏适当放大不留白):预览框最大宽度按 aspect 分档 —— 竖屏窄、横屏宽,
+//   横屏不再被 18rem 卡成小条占满列宽(max-w 只是上限,列更窄时自然收缩,不会溢出)。
+const ASPECT_MAXW: Record<AspectRatio, string> = {
+  '21:9': 'max-w-[36rem]',
+  '16:9': 'max-w-[32rem]',
+  '4:3': 'max-w-[26rem]',
+  '1:1': 'max-w-[22rem]',
+  '3:4': 'max-w-[19rem]',
+  '9:16': 'max-w-[18rem]',
+};
 
 export interface VideoPreviewProps {
   groupId: string;
@@ -156,6 +166,9 @@ export function VideoPreviewSection({
     setGenerateAudio,
   } = useVideoSettings({ capabilities, groupDetail });
 
+  // 七二第九波(用户③):预览框最大宽度跟随 aspect(横屏放大,竖屏保持窄)
+  const previewMaxW = ASPECT_MAXW[aspectRatio] ?? 'max-w-[18rem]';
+
   // W5.5 D5:终态后 invalidate listVideoTakes + 当前 episode 的 listGroups
   // 2026-05-27 audit r12 P1:listGroups invalidate 限定 episodeId(从 groupDetail 取),防跨 episode cache 污染
   React.useEffect(() => {
@@ -173,9 +186,14 @@ export function VideoPreviewSection({
   // 二十九收工 S1:1s timer 抽到 <InflightProgressPanel> 子组件,
   // 父组件不再因 nowTick state 全量 re-render(原 1949 行组件每秒刷新)
   // expected duration:2.0 fast 3 分钟 / 2.0 std 6 分钟(从 capabilities.providerId 区分)
-  const expectedMs = (capabilities?.providerId ?? '').includes('fast')
+  // 七二第九波(用户①):去 seedance 专属假设 —— 非 fast 不再一律按 seedance 6 分钟,
+  //   happyhorse/wan 等落中性 5 分钟估值(仅影响进度条估算,不影响真实生成)。
+  const _pid = capabilities?.providerId ?? '';
+  const expectedMs = _pid.includes('fast')
     ? 3 * 60_000
-    : 6 * 60_000;
+    : _pid.includes('seedance')
+      ? 6 * 60_000
+      : 5 * 60_000;
 
   // 默认选中最新 take(无论 status — FAILED/RUNNING 也显,让用户看错误 / 进度)
   // 用户删了当前 selectedTake 后自动重选 latest
@@ -307,7 +325,7 @@ export function VideoPreviewSection({
               setResolution(e.target.value as '480p' | '720p' | '1080p')
             }
             disabled={!capabilities}
-            title="视频分辨率(Seedance 2.0 仅 480p/720p)"
+            title={`视频分辨率(当前模型支持 ${(capabilities?.supportedResolutions ?? ['480p', '720p', '1080p']).join('/')})`}
             className="rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-2 py-1.5 text-xs"
           >
             {(capabilities?.supportedResolutions ?? ['480p', '720p', '1080p']).map(
@@ -321,7 +339,7 @@ export function VideoPreviewSection({
           {capabilities?.supportsAudio && (
             <label
               className="inline-flex items-center gap-1.5 rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-2 py-1.5 text-xs"
-              title="生成同步音频(Seedance 2.0 真支持);绑定角色的参考音频会自动带上作配音参考"
+              title="生成同步音频(当前模型支持);绑定角色的参考音频会自动带上作配音参考"
             >
               <input
                 type="checkbox"
@@ -467,9 +485,11 @@ export function VideoPreviewSection({
       <div>
         {selectedTake && selectedTake.videoUrl ? (
           <div
-            className={`relative mx-auto max-w-[18rem] overflow-hidden rounded-md border border-[hsl(var(--color-border))] bg-black ${
-              ASPECT_CLASS[selectedTake.aspectRatio as AspectRatio] ??
-              'aspect-[9/16]'
+            className={`relative mx-auto ${previewMaxW} overflow-hidden rounded-md border border-[hsl(var(--color-border))] bg-black ${
+              // 七二第九波:预览框跟随项目配置的 aspect(经 useVideoSettings 跟随 project.aspect),
+              //   与占位框统一,满足「预览窗口与项目尺寸一致 + 改项目自动调整」;横屏按 previewMaxW 放大。
+              //   <video object-contain> 保证真实视频不变形;历史错配 take 会 letterbox 如实呈现。
+              ASPECT_CLASS[aspectRatio] ?? 'aspect-[9/16]'
             }`}
           >
             {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
@@ -497,7 +517,7 @@ export function VideoPreviewSection({
         ) : (
           // 2026-05-27 用户反馈:placeholder 区分 FAILED/RUNNING/empty 显具体原因
           <div
-            className={`mx-auto flex max-w-[18rem] flex-col items-center justify-center gap-2 rounded-md border border-dashed p-4 text-center text-xs ${
+            className={`mx-auto flex ${previewMaxW} flex-col items-center justify-center gap-2 rounded-md border border-dashed p-4 text-center text-xs ${
               ASPECT_CLASS[aspectRatio] ?? 'aspect-[9/16]'
             } ${
               selectedTake?.status === 'FAILED'
@@ -537,7 +557,9 @@ export function VideoPreviewSection({
                 <span className="inline-block size-3 animate-pulse rounded-full bg-[hsl(var(--color-warning))]" />
                 <span className="font-medium">生成中...</span>
                 <span className="text-[10px] opacity-70">
-                  Seedance 2.0 Fast 约 3-4 分钟,系统每 5 秒自动刷新状态
+                  {/* 七二第九波(用户①):过场文案跟当前 provider 动态,不再写死 Seedance */}
+                  {capabilities?.displayName ?? '视频模型'} 约 {Math.round(expectedMs / 60_000)}{' '}
+                  分钟,系统每 5 秒自动刷新状态
                 </span>
               </>
             ) : (

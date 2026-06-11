@@ -76,28 +76,44 @@ export function useVideoSettings(input: {
     setDurationS(def);
   }, [capabilities, groupDetail]);
 
-  // 用户反馈 2026-05-27:首次默认 aspect 跟项目 aspect 走;切 Provider fallback 到 first
-  // 2026-05-27 audit r14 P1:用 useRef 替代 useState 防 provider 快速切换初始化逻辑被打断
-  const aspectRatioInitializedRef = React.useRef(false);
+  // 七二第九波(用户诉求:预览跟随项目尺寸 + 改项目后自动调整):
+  //   不再「一次性初始化」—— 改为「跟随 project.aspect 的变化」。记录上次见过的
+  //   project.aspect,仅当它真变化时(含首次 undefined→值)才回写预览 aspectRatio;
+  //   capabilities 切换(换 provider)时只做「当前值不被支持就 fallback」。
+  //   收益:① 首次跟项目;② 用户在预览手选的比例,在同一项目 aspect 下不被 provider
+  //   refetch 冲掉(projectChanged=false 只走 fallback 分支,functional setter 保留手选);
+  //   ③ 用户改了项目 aspect → getGroupDetail 失效刷新带来新值 → projectChanged=true → 预览自动调整。
+  const lastProjectAspectRef = React.useRef<AspectRatio | undefined>(undefined);
   React.useEffect(() => {
     if (!capabilities) return;
     const supported = capabilities.supportedAspectRatios;
-    // 全盘审查 #15:用函数式 setter 读最新 aspectRatio,从 deps 移除 aspectRatio
-    //   (effect 依赖自己 set 的 state 是易回归模式;对齐下方 resolution effect 的写法)
-    if (aspectRatioInitializedRef.current) {
-      setAspectRatio((prev) => (supported.includes(prev) ? prev : (supported[0] ?? prev)));
+    const projectAspect = groupDetail?.project?.aspect as AspectRatio | undefined;
+    if (projectAspect !== undefined && projectAspect !== lastProjectAspectRef.current) {
+      lastProjectAspectRef.current = projectAspect;
+      const next = supported.includes(projectAspect) ? projectAspect : (supported[0] ?? projectAspect);
+      if (next) setAspectRatio(next);
       return;
     }
-    if (!groupDetail) return;
-    const candidate = groupDetail.project?.aspect as AspectRatio | undefined;
-    const next = candidate && supported.includes(candidate) ? candidate : supported[0];
-    if (next) setAspectRatio(next);
-    aspectRatioInitializedRef.current = true;
+    // 换 provider:当前选择若不被新 provider 支持,回退到首个支持项(不动项目跟随)
+    setAspectRatio((prev) => (supported.includes(prev) ? prev : (supported[0] ?? prev)));
   }, [capabilities, groupDetail]);
 
-  // W5.5.1:capabilities 加载后,同步默认分辨率(切 Provider 时 list 可能变)
+  // W5.5.1:capabilities 加载后同步分辨率。
+  // 七二第九波(用户①:happyhorse 默认 1080p):provider 的 defaultResolution 变化时(切 provider /
+  //   首次)主动跟随到该 provider 推荐默认 —— 原逻辑只在「当前值不被支持」时才 fallback,而 720p
+  //   恒被支持 → happyhorse 的 1080p 默认永远生效不了。同 provider 下 default 不变时只保
+  //   「当前值不被支持就回退」,不冲掉用户手选。
+  const lastDefaultResolutionRef = React.useRef<string | undefined>(undefined);
   React.useEffect(() => {
     if (!capabilities) return;
+    const def = capabilities.defaultResolution;
+    if (def !== lastDefaultResolutionRef.current) {
+      lastDefaultResolutionRef.current = def;
+      if (capabilities.supportedResolutions.includes(def)) {
+        setResolution(def);
+        return;
+      }
+    }
     setResolution((prev) =>
       capabilities.supportedResolutions.includes(prev) ? prev : capabilities.defaultResolution,
     );

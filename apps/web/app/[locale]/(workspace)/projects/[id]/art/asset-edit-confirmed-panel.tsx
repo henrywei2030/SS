@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 
 import { trpc } from '@/lib/trpc/client';
 import { Label } from '@/components/ui/label';
+import { ImageLightbox, ImagePreviewButton } from '@/components/ui/image-lightbox';
 import { cn } from '@/lib/utils';
 import { fileToBase64 } from '@/lib/file-to-base64';
 
@@ -32,6 +33,8 @@ export function ConfirmedSlotsPanel({
 }): React.ReactElement {
   const [outfitEpisodeId, setOutfitEpisodeId] = React.useState<string | null>(null); // null = 通用造型
   const [uploadingSlot, setUploadingSlot] = React.useState<Slot | null>(null);
+  // 七二第九波(用户:全覆盖):已确认槽位图大图预览
+  const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
 
   // 仅人物/场景支持按集造型(道具/风格参考无换装语义)
   const supportsOutfit = asset.type === 'CHARACTER' || asset.type === 'SCENE';
@@ -247,7 +250,7 @@ export function ConfirmedSlotsPanel({
                 }
                 className={cn(
                   // 五八:限高 + 下面 object-contain → 已确认槽位也一屏看完整
-                  'relative flex max-h-[44vh] items-center justify-center overflow-hidden rounded border bg-[hsl(var(--color-secondary)/0.3)]',
+                  'group relative flex max-h-[44vh] items-center justify-center overflow-hidden rounded border bg-[hsl(var(--color-secondary)/0.3)]',
                   s.aspectClass,
                   inherited && 'opacity-50',
                   hasOwn
@@ -259,6 +262,11 @@ export function ConfirmedSlotsPanel({
                   <>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={url} alt={s.label} className="absolute inset-0 size-full object-contain" />
+                    {/* 七二第九波(用户:全覆盖):槽位图右上角预览大图 */}
+                    <ImagePreviewButton
+                      onOpen={() => setPreviewUrl(url)}
+                      className="absolute right-1.5 top-1.5 rounded-full bg-black/45 p-1 text-white opacity-0 backdrop-blur-sm transition hover:bg-black/65 focus:opacity-100 group-hover:opacity-100"
+                    />
                     {complianceApproved && (
                       <span className="absolute left-1.5 top-1.5 flex items-center gap-1 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-[hsl(var(--color-success))]">
                         <CheckCircle2 className="size-3" />
@@ -297,6 +305,9 @@ export function ConfirmedSlotsPanel({
           );
         })}
       </div>
+      {previewUrl && (
+        <ImageLightbox url={previewUrl} onClose={() => setPreviewUrl(null)} />
+      )}
     </div>
   );
 }

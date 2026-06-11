@@ -7,6 +7,7 @@ import {
   Image as ImageIcon,
   Info,
   Upload,
+  Shirt,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -43,7 +44,8 @@ export function GenerationPanel({
   const [selectedSlot, setSelectedSlot] = React.useState<Slot>(slots[0]!.slot);
   const [modelId, setModelId] = React.useState('');
   const [aspectRatio, setAspectRatio] = React.useState<string>(
-    selectedSlot === 'portrait' ? '9:16' : selectedSlot === 'panorama' ? '2:1' : '16:9',
+    // 七二第九波(用户②):人物 portrait=「主体形象」turnaround 默认 16:9(原 9:16);panorama 2:1
+    selectedSlot === 'panorama' ? '2:1' : '16:9',
   );
   const [sizePx, setSizePx] = React.useState<string>('2K (2048)');
   const [extraInstruction, setExtraInstruction] = React.useState('');
@@ -54,6 +56,13 @@ export function GenerationPanel({
   const [strength, setStrength] = React.useState(0.6);
   const [extraNegative, setExtraNegative] = React.useState('');
   const [refUploading, setRefUploading] = React.useState(false);
+  // 七二第九波(用户①·换衣/变装):造型描述 + 目标集(可选)。复用 listOutfits 拿集列表(与确认面板共享缓存)
+  const [outfitDesc, setOutfitDesc] = React.useState('');
+  const [outfitEpisodeId, setOutfitEpisodeId] = React.useState('');
+  const { data: outfitData } = trpc.asset.listOutfits.useQuery(
+    { assetId: asset.id },
+    { enabled: type === 'CHARACTER' },
+  );
   const refFileRef = React.useRef<HTMLInputElement>(null);
   const uploadRef = trpc.media.upload.useMutation();
 
@@ -140,13 +149,9 @@ export function GenerationPanel({
 
   React.useEffect(() => {
     setAspectRatio(
-      selectedSlot === 'portrait'
-        ? '9:16'
-        : selectedSlot === 'panorama'
-          ? '2:1'
-          : selectedSlot === 'three_view'
-            ? '16:9' // 七二第八波:三视图/九宫格统一 16:9(场景九宫格默认从 1:1 改 16:9)
-            : '16:9',
+      // 七二第九波(用户②):人物 portrait=「主体形象」turnaround 默认 16:9;场景九宫格(three_view)16:9;
+      //   仅 360° 全景 panorama 用 2:1。
+      selectedSlot === 'panorama' ? '2:1' : '16:9',
     );
   }, [selectedSlot, type]);
 
@@ -473,6 +478,65 @@ export function GenerationPanel({
             {threeViewFromPortrait ? '用形象图生成三视图' : '开始生成'}
           </Button>
         </div>
+
+        {/* 七二第九波(用户①·换衣/变装):主体形象已确认 → 以它为参考图生图换装(只换衣不改人) */}
+        {type === 'CHARACTER' && selectedSlot === 'portrait' && asset.portraitMediaId && (
+          <div className="mt-2 rounded-md border border-[hsl(var(--color-accent)/0.3)] bg-[hsl(var(--color-accent)/0.05)] p-2">
+            <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-[hsl(var(--color-accent))]">
+              <Shirt className="size-3.5" /> 换衣 / 变装
+              <span className="text-[10px] font-normal text-[hsl(var(--color-muted-foreground))]">
+                以主体形象为参考,只换衣不改人
+              </span>
+            </div>
+            <div className="flex gap-2">
+              <Input
+                value={outfitDesc}
+                onChange={(e) => setOutfitDesc(e.target.value)}
+                placeholder="造型描述,如「礼服」;留空=随机一套适合的衣服"
+                className="h-8 flex-1 text-xs"
+              />
+              <select
+                value={outfitEpisodeId}
+                onChange={(e) => setOutfitEpisodeId(e.target.value)}
+                title="可直接设为某集造型;不选则只进候选池,稍后在「已确认槽位」设定"
+                className="h-8 rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-1.5 text-[11px]"
+              >
+                <option value="">仅存候选</option>
+                {outfitData?.episodes.map((ep) => (
+                  <option key={ep.id} value={ep.id}>
+                    设为第{ep.number}集造型
+                  </option>
+                ))}
+              </select>
+              <Button
+                onClick={() =>
+                  generateMut.mutate({
+                    assetId: asset.id,
+                    slot: 'portrait',
+                    count: 1,
+                    modelId: modelId || undefined,
+                    aspectRatio,
+                    outfit: {
+                      desc: outfitDesc.trim() || undefined,
+                      episodeId: outfitEpisodeId || undefined,
+                    },
+                  })
+                }
+                disabled={generateMut.isPending}
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+              >
+                {generateMut.isPending ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Shirt className="size-3.5" />
+                )}
+                变装
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 候选图栅格 */}

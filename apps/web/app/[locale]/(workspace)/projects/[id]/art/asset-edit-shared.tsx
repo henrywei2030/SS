@@ -23,9 +23,12 @@ export type Slot =
   | 'main';
 
 export const SLOTS_BY_TYPE: Record<AssetType, Array<{ slot: Slot; label: string; aspectClass: string }>> = {
+  // 七二第九波(用户②定调):人物下线独立「三视图」窗口,合并为单一「主体形象」—
+  //   一张 16:9 横版图同框呈现正面立绘 + 三视图(character turnaround / model sheet),
+  //   既当 portrait 主图、又是下游视频的身份级参考(threeViewMediaId 字段保留,旧数据兜底,
+  //   不写破坏性 migration;照场景「下线主视角」先例)。
   CHARACTER: [
-    { slot: 'portrait', label: '已确认人物形象 (9:16)', aspectClass: 'aspect-[9/16]' },
-    { slot: 'three_view', label: '已确认三视图 (16:9)', aspectClass: 'aspect-[16/9]' },
+    { slot: 'portrait', label: '主体形象 (正面+三视图同框 · 16:9)', aspectClass: 'aspect-[16/9]' },
   ],
   // 七二第八波(用户定调):场景下线「主视角」窗口,九宫格为主 —
   //   九宫格(threeViewMediaId,16:9)= 场景主资产,一次性直接生成(文生图,不再以主视角图生图);

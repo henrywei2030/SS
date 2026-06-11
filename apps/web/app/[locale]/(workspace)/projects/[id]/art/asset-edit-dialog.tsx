@@ -149,7 +149,7 @@ function CreateMode({
       <div className="flex flex-col gap-3 p-5">
         <h2 className="text-lg font-semibold">新建{typeLabel}资产</h2>
         <p className="text-xs text-[hsl(var(--color-muted-foreground))]">
-          填好基本信息和提示词,创建后可在编辑弹窗中生成主形象 / 三视图 / 多角度。
+          填好基本信息和提示词,创建后可在编辑弹窗中生成主体形象(正面立绘 + 三视图同框一张图)。
         </p>
 
         <div className="grid grid-cols-2 gap-3 pt-2">

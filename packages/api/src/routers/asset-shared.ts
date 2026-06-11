@@ -247,7 +247,7 @@ export function computeMaturity(asset: {
 
   const consistencyReady =
     asset.type === 'CHARACTER'
-      ? !!asset.threeViewMediaId
+      ? true // 七二第九波:人物三视图已并入「主体形象」一张图,有主图(L3)即达一致性(L4)
       : asset.type === 'SCENE'
         ? !!asset.panoramaMediaId // 七二第八波:场景一致性=360°全景(主视角/单视角槽位下线)
         : true; // 道具 / 风格只要主图即可

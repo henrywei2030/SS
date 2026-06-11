@@ -20,7 +20,9 @@ describe('compileAssetPrompt', () => {
     expect(r.positive).toContain('照片级写实');
     expect(r.positive).toContain('20-25 岁男性');
     expect(r.positive).toContain('清瘦,黑色短发');
-    expect(r.positive).toContain('9:16 竖版正面');
+    // 七二第九波(用户②):portrait 槽位=「主体形象」16:9 turnaround(正面立绘+三视图同框)
+    expect(r.positive).toContain('主体形象设定图');
+    expect(r.positive).toContain('turnaround');
     expect(r.negative).toBe('动漫、卡通、变形');
   });
 

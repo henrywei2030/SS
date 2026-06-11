@@ -3,6 +3,7 @@ import * as React from 'react';
 import { Image as ImageIcon, CheckCircle2 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
+import { ImageLightbox, ImagePreviewButton } from '@/components/ui/image-lightbox';
 import { cn } from '@/lib/utils';
 
 export function CandidateCard({
@@ -22,6 +23,7 @@ export function CandidateCard({
   onConfirm: () => void;
   onReject: () => void;
 }): React.ReactElement {
+  const [previewOpen, setPreviewOpen] = React.useState(false);
   const aspectClass =
     aspectRatio === '9:16'
       ? 'aspect-[9/16]'
@@ -31,6 +33,7 @@ export function CandidateCard({
           ? 'aspect-[2/1]'
           : 'aspect-square';
   return (
+    <>
     <div
       className={cn(
         'group relative overflow-hidden rounded border',
@@ -56,12 +59,16 @@ export function CandidateCard({
         <span className="absolute left-1.5 top-1.5 rounded bg-black/60 px-1.5 py-0.5 font-mono text-[9px] text-white">
           {aspectRatio}
         </span>
-        {isConfirmed && (
-          <Badge variant="default" className="absolute right-1.5 top-1.5 gap-1 px-1.5 text-[9px]">
-            <CheckCircle2 className="size-2.5" />
-            已确认
-          </Badge>
-        )}
+        {/* 七二第九波(用户:全覆盖):候选图右上角预览大图 + 已确认徽章 */}
+        <div className="absolute right-1.5 top-1.5 flex items-center gap-1">
+          {url && <ImagePreviewButton onOpen={() => setPreviewOpen(true)} />}
+          {isConfirmed && (
+            <Badge variant="default" className="gap-1 px-1.5 text-[9px]">
+              <CheckCircle2 className="size-2.5" />
+              已确认
+            </Badge>
+          )}
+        </div>
       </div>
       <div className="absolute inset-x-0 bottom-0 flex gap-1 bg-gradient-to-t from-black/80 to-transparent p-1.5 opacity-0 transition-opacity group-hover:opacity-100">
         <button
@@ -79,5 +86,7 @@ export function CandidateCard({
         </button>
       </div>
     </div>
+    {previewOpen && url && <ImageLightbox url={url} onClose={() => setPreviewOpen(false)} />}
+    </>
   );
 }

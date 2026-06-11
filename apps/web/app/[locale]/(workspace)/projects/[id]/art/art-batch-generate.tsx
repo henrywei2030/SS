@@ -114,6 +114,14 @@ export function ArtBatchGenerate({
             assetId: t.id,
             slot: t.slot,
             count: 1,
+            // 七二第九波(用户②):同步生成显式带槽位尺寸,不依赖后端默认 ——
+            //   人物主体形象(portrait,turnaround)/ 场景九宫格(three_view)16:9、360°全景 2:1、其余默认。
+            aspectRatio:
+              t.slot === 'portrait' || t.slot === 'three_view'
+                ? '16:9'
+                : t.slot === 'panorama'
+                  ? '2:1'
+                  : undefined,
             // 图生图批量(三视图以形象图为参考)— 有 refImageIds 才透传 strength
             ...(t.refImageIds && t.refImageIds.length > 0
               ? { refImageIds: t.refImageIds, strength: t.strength ?? 0.6 }

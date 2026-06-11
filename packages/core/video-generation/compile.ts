@@ -303,24 +303,25 @@ export async function compileVideoPromptForGroup(
     (mediaId) => mediaMap.get(mediaId) ?? voiceSignedMap.get(mediaId) ?? null,
   );
 
-  // 六八下(关联即全喂):人物绑定 → 形象图 + 三视图全部进图参考(身份级,同 voiceRefs 模式)。
-  // 旧行为只送 pickAssetMediaId 的第一命中(portrait),三视图沦为 fallback 从不并送 —
-  // 用户定调:关联人物 = 形象/三视图/声音全部作为参考资源投喂(seedance ≤16 图,router 端去重)。
+  // 七二第九波(用户报超 9 张参考):三视图已并入「主体形象」(portrait)单图 —— 每个人物**只送一张**
+  //   主体形象作身份参考,不再 portrait+three_view 双送(旧数据残留的三视图也不附带),从源头收敛参考图
+  //   数量(happyhorse R2V 硬限 9 张;5 人物×2 + 场景/道具就超了)。threeView 字段保留兜底但不进参考链。
   const characterImageRefs: CharacterImageRef[] = [];
   {
     const seenChar = new Set<string>();
     for (const b of dbBindings) {
       if (b.asset.type !== 'CHARACTER' || seenChar.has(b.asset.id)) continue;
       seenChar.add(b.asset.id);
-      const pairs: Array<['portrait' | 'three_view', string | null]> = [
-        ['portrait', b.asset.portraitMediaId],
-        ['three_view', b.asset.threeViewMediaId],
-      ];
-      for (const [kind, mediaId] of pairs) {
-        const url = mediaId ? (mediaMap.get(mediaId) ?? null) : null;
-        if (url) {
-          characterImageRefs.push({ assetId: b.asset.id, name: b.asset.name, kind, mediaUrl: url });
-        }
+      // 优先主体形象(portrait);极旧数据无 portrait 时兜底用 three_view 作单张身份参考
+      const mediaId = b.asset.portraitMediaId ?? b.asset.threeViewMediaId;
+      const url = mediaId ? (mediaMap.get(mediaId) ?? null) : null;
+      if (url) {
+        characterImageRefs.push({
+          assetId: b.asset.id,
+          name: b.asset.name,
+          kind: 'portrait',
+          mediaUrl: url,
+        });
       }
     }
   }

@@ -111,6 +111,12 @@ class InflightConflictError extends Error {
   }
 }
 
+/** 七二第九波(用户报超 9 张):provider 参考图上限 —— happyhorse R2V 硬限 9 张
+ *  (catalog 描述「最多 9 张参考」,超限整单 InvalidParameter);其他中转站视频(seedance/wan)默认 16。 */
+function maxRefImagesFor(providerId: string): number {
+  return /happyhorse/i.test(providerId) ? 9 : 16;
+}
+
 export async function submitVideoGeneration(
   prisma: PrismaClient,
   args: SubmitVideoArgs,
@@ -409,8 +415,8 @@ export async function submitVideoGeneration(
     },
   });
 
-  // 六八下(关联即全喂):token 引用图 + 人物身份级图参考(形象/三视图全送)合并去重
-  const refImageUrls = Array.from(
+  // 六八下(关联即全喂):token 引用图 + 人物身份级图参考(主体形象,七二第九波已每人收敛为一张)合并去重
+  const rawRefImageUrls = Array.from(
     new Set([
       ...compiled.references
         .filter((r) => r.kind === 'IMAGE')
@@ -419,6 +425,16 @@ export async function submitVideoGeneration(
       ...characterImageRefs.map((r) => r.mediaUrl),
     ]),
   );
+  // 七二第九波(用户报失败:happyhorse「media list must have at most 9 reference_images, got 15」):
+  //   按 provider 上限截断参考图 —— happyhorse R2V 硬限 9 张,超了整单 InvalidParameter。优先保留
+  //   @token 引用图(compiled.references 在 Set 前段先入),再补人物主体形象参考;截断记警。
+  const maxRefImages = maxRefImagesFor(providerId);
+  if (rawRefImageUrls.length > maxRefImages) {
+    console.warn(
+      `[generateVideo] group ${grp.number} 参考图 ${rawRefImageUrls.length} 张超 provider ${providerId} 上限 ${maxRefImages},截断保留前 ${maxRefImages} 张(优先 @token 引用图)`,
+    );
+  }
+  const refImageUrls = rawRefImageUrls.slice(0, maxRefImages);
   // 2026-05-27 audit r13:binding 含 AUDIO 类资产(角色配音 voiceMediaId)时收集
   // capsParams.supportsRefAudio !== true 时静默丢弃(Provider 不支持就别传,避 422)
   // 六八(人到声必到):voiceRefs(人物绑定的参考声线)无条件并入 — 不依赖 @音频N token;
@@ -604,7 +620,8 @@ export async function submitVideoGeneration(
             .filter((u): u is string => !!u),
           ...duelCompiled.characterImageRefs.map((r) => r.mediaUrl),
         ]),
-      );
+        // 七二第九波:对决第二家同样按 provider 上限截断参考图
+      ).slice(0, maxRefImagesFor(duelProviderId!));
       const rawAudioB = [
         ...duelCompiled.compiled.references
           .filter((r) => r.kind === 'AUDIO')

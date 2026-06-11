@@ -344,15 +344,23 @@ export const videoProcedures = {
         : null;
       // 用户反馈 2026-05-27:分辨率默认全 3 档 480p/720p/1080p
       // 各 model 实际能力由 admin 后台 ProviderConfig.defaultParams.supportedResolutions 覆盖
+      // 七二第九波(用户①:happyhorse 默认 1080p):catalog 未给 happyhorse 声明分辨率档,
+      //   按 providerId 关键字推断 —— happyhorse(DashScope)支持 720p/1080p、默认 1080p;
+      //   admin 在 /admin/providers 显式配 supportedResolutions/defaultResolution 时仍以 admin 为准。
+      const isHappyhorse = /happyhorse/i.test(providerId);
       const supportedResolutions: Array<'480p' | '720p' | '1080p'> =
         adminResolutions && adminResolutions.length > 0
           ? adminResolutions
-          : ['480p', '720p', '1080p'];
-      const defaultResolution =
+          : isHappyhorse
+            ? ['720p', '1080p']
+            : ['480p', '720p', '1080p'];
+      const defaultResolution: '480p' | '720p' | '1080p' =
         typeof params.defaultResolution === 'string' &&
         ['480p', '720p', '1080p'].includes(params.defaultResolution)
           ? (params.defaultResolution as '480p' | '720p' | '1080p')
-          : '720p';
+          : isHappyhorse
+            ? '1080p'
+            : '720p';
 
       const supportsAudio = params.supportsAudio === true;
       const supportsWatermark = params.supportsWatermark !== false; // 默认 true(水印多数 Provider 都能后处理)
