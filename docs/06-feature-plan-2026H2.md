@@ -95,7 +95,8 @@
 
 ### M4 + M5 · F4 批量 + F5 并抽/failover(~3.5 sessions)
 
-> **状态(2026-06-11 六九 mac-studio)**:先决重构 ✅ + F4 ✅ + F5a(relay 泛化)✅,经两遍深审 16 实修(含 2 条资金 P1:取消白嫖序列 / worker 终态覆写)。**剩 F5b**(并抽/failover/A/B),压在「单点真打回归 gate + M5 各家请求形状真打」之后。
+> **状态(2026-06-11 六九 mac-studio)**:先决重构 ✅ + F4 ✅ + F5a(relay 泛化)✅,经两遍深审 16 实修(含 2 条资金 P1:取消白嫖序列 / worker 终态覆写)。~~剩 F5b~~
+> **F5b ✅(2026-06-11 七二 mac-mini 第五波,真打验收)**:并抽 `duelProviderId`(≤2,同事务双占位各 PREPAY + `duel_` 配对标签;A 路审计主路零改动,B 路失败降级退 B 保 A)— 真打 seedance×wan 双路独立终态;failover `provider-health.ts`(真打终态 ±步进健康度 + `shot.video.fallbackProviderIds` 备选链,显式 override 不偷换,单点/批量同口径)— 真打切换/通知/成功回写全验;⚔ 并排对比卡(QC/实扣价/一键采纳)。**M4+M5 全清,本蓝图 M0–M6 主线收官**(wan2.6/happyhorse 形状已真打,kling 接入照 wan 路径)。
 
 - **先决重构** ✅:`generateVideo` 主体下沉 `core/video-generation/submit.ts`(锁/sweep/占位/预算/编译/合规/入队),core 返判别、TRPCError 留 router(同 stale-sweep 分层纪律);机械对账零漂移。单点真打回归后再叠 F5b。
 - **F4** ✅:`batchGenerateForEpisode`(待生成 groups → **成本预估强制确认**(confirmTotalCny+confirmGroupIds 双比对)→ 按 `Shot.priority` S>A>B>C 排序,**接上 `ScriptAnalysis.productionPlan`** 场级回退(ordinal 从 Scene.number 解析))+ `cancelQueuedForEpisode`(只摘 BullMQ waiting 的批量任务,先落库后摘 job + worker CANCELLED 幂等门)+ 失败 retryable 自动重抽 ≤ `batch.retry.max`(默认 0)+ web 批量工具条 + 总进度 + 完成/全败**通知推手机**(batch-followup:advisory lock + payload.batchId 判重)。

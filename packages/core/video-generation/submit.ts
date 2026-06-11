@@ -14,6 +14,8 @@
  * 调用方约定:providerId/durationS/aspectRatio/wantAudio 已解析完毕(binding 读取与
  * fallback 留在 api 层 getVideoBindings),group 已过访问/锁检查(loadGroupOrThrow)。
  */
+import { randomUUID } from 'node:crypto';
+
 import { getVideoProvider } from '@ss/adapters/provider';
 import type { PrismaClient } from '@ss/db';
 import { enqueueVideoGenJob } from '@ss/queue/video-gen';
@@ -71,6 +73,10 @@ export interface SubmitVideoArgs {
   requestId?: string;
   /** F4 批量:同批次共享标签(写 GenerationAttempt.groupId)— 单点生成不传 */
   attemptGroupId?: string;
+  /** F5b(七二)并抽对决:第二家 provider(≤2 家,与 providerId 不同;同事务双占位双 PREPAY,
+   * 共享 duel_ 标签)。B 路任何 provider 级失败只降级(退 B 保 A),组级 deny 仍双退。
+   * 与批量互斥(attemptGroupId 已是 batch_ 时调用方不传本参数)。 */
+  duelProviderId?: string;
 }
 
 export type SubmitVideoDenyCode =
@@ -81,7 +87,14 @@ export type SubmitVideoDenyCode =
   | 'ENQUEUE_FAILED';
 
 export type SubmitVideoResult =
-  | { ok: true; attemptId: string }
+  | {
+      ok: true;
+      attemptId: string;
+      /** F5b 并抽:B 路 attempt(成功入队时);degraded 时为 undefined */
+      duelAttemptId?: string;
+      /** F5b 并抽:B 路被降级(退 B 保 A)的原因 — UI toast 提示 */
+      duelDegraded?: string;
+    }
   | {
       ok: false;
       code: SubmitVideoDenyCode;
@@ -115,6 +128,15 @@ export async function submitVideoGeneration(
     durationS,
     aspectRatio,
   });
+  // F5b(七二)并抽:B 路 provider 与预扣额(同 A 公式;无 duel 时全程 null 零影响)
+  const duelProviderId = args.duelProviderId?.trim() || null;
+  const duelPrepayEstimateCny = duelProviderId
+    ? (await getVideoProvider(duelProviderId)).estimateCost({ prompt: '', durationS, aspectRatio })
+    : 0;
+  // 对决标签:UI/QC 按它配对两条 take(批量已带 batch_ 标签时调用方不会传 duel)
+  const duelTag = duelProviderId
+    ? (args.attemptGroupId ?? `duel_${randomUUID()}`)
+    : args.attemptGroupId;
 
   // W1-W5 audit 三轮 G1 + 7 轮 audit P0(A1):advisory lock 必须在 $transaction 内,
   // 否则 pg_advisory_xact_lock 在 implicit transaction(单条 raw)立即释放,串行失效。
@@ -123,6 +145,8 @@ export async function submitVideoGeneration(
   // 锁释放后占位 attempt 仍在 DB,其他并发 inflight check 会看到 QUEUED → 拒。
   // 后续检查(gachaMax/budget/compile)失败时 update 占位为 FAILED + 写 REFUND 退还 PREPAY;通过则 worker 接管。
   let earlyAttempt: { id: string };
+  // F5b:B 路占位(无 duel 时 null,后续全部分支零影响)
+  let duelAttempt: { id: string } | null = null;
   // 七二:sweep 清掉的批量标签 attempt — 事务提交后补批次完成判定(通知漏发 P2 修)
   let sweptBatchAttempts: Array<{ batchLabel: string; createdBy: string }> = [];
   try {
@@ -145,7 +169,7 @@ export async function submitVideoGeneration(
         throw new InflightConflictError(aliveInflight.providerId);
       }
       // 三十六收工 R2:placeholder attempt + PREPAY ledger 抽到 createPlaceholderAttemptWithPrepay
-      return createPlaceholderAttemptWithPrepay(tx, {
+      const primary = await createPlaceholderAttemptWithPrepay(tx, {
         userId,
         projectId: grp.projectId,
         episodeId: grp.episodeId,
@@ -153,11 +177,27 @@ export async function submitVideoGeneration(
         providerId,
         durationS,
         prepayEstimateCny,
-        // F4 批量:批次标签下穿(单点生成 undefined,行为不变)
-        attemptGroupId: args.attemptGroupId,
+        // F4 批量:批次标签下穿(单点生成 undefined);F5b 对决时双方共享 duel_ 标签
+        attemptGroupId: duelTag,
       });
+      // F5b(七二)并抽:同事务第二占位 + 第二 PREPAY — 原子性保证「要么两占位都在,要么都不在」,
+      //   不会出现付了 B 没占 B 的半态。后续组级 deny 双退,B 路 provider 级失败单退 B。
+      const duel = duelProviderId
+        ? await createPlaceholderAttemptWithPrepay(tx, {
+            userId,
+            projectId: grp.projectId,
+            episodeId: grp.episodeId,
+            shotGroupId: grp.id,
+            providerId: duelProviderId,
+            durationS,
+            prepayEstimateCny: duelPrepayEstimateCny,
+            attemptGroupId: duelTag,
+          })
+        : null;
+      return { primary, duel };
     });
-    earlyAttempt = created.attempt;
+    earlyAttempt = created.primary.attempt;
+    duelAttempt = created.duel?.attempt ?? null;
   } catch (e) {
     if (e instanceof InflightConflictError) {
       return {
@@ -197,24 +237,31 @@ export async function submitVideoGeneration(
     denyReason?: 'BUDGET_EXCEEDED' | 'GACHA_LIMIT',
   ): Promise<SubmitVideoResult> => {
     await prisma.$transaction(async (tx) => {
-      await tx.generationAttempt.updateMany({
-        where: { id: earlyAttempt.id, status: 'QUEUED' },
-        data: {
-          status: 'FAILED',
-          errorMsg: err.message,
-          finishedAt: new Date(),
-        },
-      });
-      // 四十收工 P2:用共享 refundPrepayForAttempt(查 PREPAY + idempotent 防双退),
-      //   收敛退费单一真相源(跟 stale-sweep / enqueue-fail 一致)。
-      await refundPrepayForAttempt(tx, {
-        attemptId: earlyAttempt.id,
-        userId,
-        projectId: grp.projectId,
-        episodeId: grp.episodeId,
-        providerId,
-        reason: 'video_task_precheck_failed',
-      });
+      // F5b:组级 deny 双退 — A/B 占位一起 FAILED + 各退各的 PREPAY(无 duel 时数组只有 A)
+      const legs = [
+        { id: earlyAttempt.id, providerId },
+        ...(duelAttempt ? [{ id: duelAttempt.id, providerId: duelProviderId! }] : []),
+      ];
+      for (const leg of legs) {
+        await tx.generationAttempt.updateMany({
+          where: { id: leg.id, status: 'QUEUED' },
+          data: {
+            status: 'FAILED',
+            errorMsg: err.message,
+            finishedAt: new Date(),
+          },
+        });
+        // 四十收工 P2:用共享 refundPrepayForAttempt(查 PREPAY + idempotent 防双退),
+        //   收敛退费单一真相源(跟 stale-sweep / enqueue-fail 一致)。
+        await refundPrepayForAttempt(tx, {
+          attemptId: leg.id,
+          userId,
+          projectId: grp.projectId,
+          episodeId: grp.episodeId,
+          providerId: leg.providerId,
+          reason: 'video_task_precheck_failed',
+        });
+      }
     });
     // r11 audit:err.message 可能含 Provider URL / token / stack trace,脱敏防泄漏
     return { ok: false, code, message: sanitizeErrorMsg(err), denyReason };
@@ -239,10 +286,12 @@ export async function submitVideoGeneration(
         status: { in: ['SUCCESS', 'FAILED'] },
       },
     });
-    if (used >= gachaMax) {
+    // F5b:对决一次吃 2 个名额 — used+本次条数 超限即拒(双退)
+    const thisBatchCount = duelAttempt ? 2 : 1;
+    if (used + thisBatchCount > gachaMax) {
       return denyPlaceholder(
         new Error(
-          `本生成段已抽 ${used} 次(上限 ${gachaMax}),把废片标 rejected 或在后台调高 system.gacha.max_attempts 再试`,
+          `本生成段已抽 ${used} 次(上限 ${gachaMax}${duelAttempt ? ',对决需 2 个名额' : ''}),把废片标 rejected 或在后台调高 system.gacha.max_attempts 再试`,
         ),
         'TOO_MANY_REQUESTS',
         'GACHA_LIMIT',
@@ -251,11 +300,13 @@ export async function submitVideoGeneration(
   }
 
   // 三十六收工 R2:每日预算守卫抽到 checkDailyVideoBudget(Decimal 比较防 IEEE-754 漂移)
+  // F5b:对决时预算口径 = A+B 合并预估,且两笔 PREPAY 都从"已花"里排除(否则自重复计)
   const budgetDenyMsg = await checkDailyVideoBudget(prisma, {
     projectId: grp.projectId,
     dailyBudgetCny: args.dailyBudgetCny,
-    prepayEstimateCny,
+    prepayEstimateCny: prepayEstimateCny + duelPrepayEstimateCny,
     excludeAttemptId: earlyAttempt.id,
+    excludeAttemptIds: duelAttempt ? [earlyAttempt.id, duelAttempt.id] : undefined,
   });
   if (budgetDenyMsg) {
     return denyPlaceholder(new Error(budgetDenyMsg), 'TOO_MANY_REQUESTS', 'BUDGET_EXCEEDED');
@@ -468,6 +519,19 @@ export async function submitVideoGeneration(
       enqueue: (p) => enqueueVideoGenJob(p),
     });
   } catch (enqueueErr) {
+    // F5b:A 路入队失败时 B 占位仍 QUEUED+PREPAY — 一并释放(幂等),不留半态
+    if (duelAttempt && duelProviderId) {
+      await releaseDuelPlaceholder(prisma, {
+        attemptId: duelAttempt.id,
+        userId,
+        projectId: grp.projectId,
+        episodeId: grp.episodeId,
+        providerId: duelProviderId,
+        errorMsg: 'A 路入队失败,对决取消',
+      }).catch((e) =>
+        console.warn('[submit] 对决 B 占位释放失败(A 入队失败路):', sanitizeErrorMsg(e)),
+      );
+    }
     // 深审修(P2-1):BullMQ/Redis 报错常含内网 host:port(ECONNREFUSED 127.0.0.1:6379 等),
     // 必须脱敏 — 原 router 版就漏了这一处(enqueue.ts docstring 的承诺今天兑现)
     return {
@@ -478,5 +542,170 @@ export async function submitVideoGeneration(
     };
   }
 
-  return { ok: true, attemptId: attempt.id };
+  // ---- F5b(七二)B 路:对决第二家 ----
+  // 纪律:A 路(上方)是审计过的资金主路,零改动;B 路独立支线,任何 provider 级失败
+  // (compile/caps/入队)只「降级」:退 B 保 A,ok 返回带 duelDegraded 供 UI 提示。
+  let duelAttemptId: string | undefined;
+  let duelDegraded: string | undefined;
+  if (duelAttempt && duelProviderId) {
+    try {
+      const duelCompiled = await compileVideoPromptForGroup(prisma, {
+        group: {
+          id: grp.id,
+          prompt: grp.prompt,
+          durationS: grp.durationS,
+          episode: { projectId: grp.projectId },
+        },
+        providerId: duelProviderId,
+        durationS,
+        aspectRatio,
+        extraInstruction: args.extraInstruction,
+        extraNegative: args.extraNegative,
+        includeVoiceDescriptions: wantAudio,
+      });
+      const capsB = await prisma.providerConfig.findUnique({
+        where: { providerId: duelProviderId },
+        select: { defaultParams: true },
+      });
+      const capsParamsB =
+        capsB?.defaultParams && typeof capsB.defaultParams === 'object'
+          ? (capsB.defaultParams as Record<string, unknown>)
+          : {};
+      if (args.refVideoUrl && capsParamsB.supportsRefVideo !== true) {
+        throw new Error(`对决方 ${duelProviderId} 不支持 refVideo`);
+      }
+      const startedAtB = new Date();
+      await prisma.generationAttempt.update({
+        where: { id: duelAttempt.id },
+        data: {
+          inputJson: {
+            kind: 'aigc.generateVideo',
+            groupNumber: grp.number,
+            positivePrompt: sanitizePromptForLedger(duelCompiled.compiled.positive),
+            negativePrompt: sanitizePromptForLedger(duelCompiled.compiled.negative),
+            aspectRatio,
+            durationS,
+            references: sanitizeReferencesForLedger(duelCompiled.compiled.references),
+            voiceRefAssetIds: duelCompiled.voiceRefs.map((r) => r.assetId),
+            characterImageRefCount: duelCompiled.characterImageRefs.length,
+            voiceMissing: duelCompiled.voiceMissing.map((m) => m.name),
+            duelOf: attempt.id, // 对决配对审计(标签 groupId=duel_* 已共享)
+          },
+          status: 'RUNNING',
+          startedAt: startedAtB,
+          createdBy: userId,
+        },
+      });
+      const refImageUrlsB = Array.from(
+        new Set([
+          ...duelCompiled.compiled.references
+            .filter((r) => r.kind === 'IMAGE')
+            .map((r) => r.mediaUrl)
+            .filter((u): u is string => !!u),
+          ...duelCompiled.characterImageRefs.map((r) => r.mediaUrl),
+        ]),
+      );
+      const rawAudioB = [
+        ...duelCompiled.compiled.references
+          .filter((r) => r.kind === 'AUDIO')
+          .map((r) => r.mediaUrl)
+          .filter((u): u is string => !!u),
+        ...duelCompiled.voiceRefs.map((r) => r.mediaUrl),
+      ];
+      const refAudioUrlsB =
+        capsParamsB.supportsRefAudio === true
+          ? Array.from(new Set([...rawAudioB, ...(args.refAudioUrl ? [args.refAudioUrl] : [])]))
+          : [];
+      let firstFrameUrlB: string | undefined;
+      if (firstShot?.startFrameMediaId && capsParamsB.supportsFirstFrame === true) {
+        const mB = await prisma.mediaItem.findFirst({
+          where: { id: firstShot.startFrameMediaId, deletedAt: null },
+          select: { cdnUrl: true, storageKey: true },
+        });
+        const uB = mB ? await resolveMediaFetchUrl(mB, { expiresInSeconds: 12 * 3600 }) : null;
+        if (uB) firstFrameUrlB = uB;
+      }
+      const payloadB: VideoGenJobData = {
+        attemptId: duelAttempt.id,
+        projectId: grp.projectId,
+        episodeId: grp.episodeId,
+        shotGroupId: grp.id,
+        userId,
+        providerId: duelProviderId,
+        modelId: duelProviderId,
+        prompt: duelCompiled.compiled.positive,
+        durationS,
+        aspectRatio,
+        refImageUrls: refImageUrlsB.length > 0 ? refImageUrlsB : undefined,
+        refAudioUrls: refAudioUrlsB.length > 0 ? refAudioUrlsB : undefined,
+        firstFrameUrl: firstFrameUrlB,
+        resolution: args.resolution,
+        generateAudio: wantAudio,
+        addWatermark: args.addWatermark,
+        webSearchEnabled: args.webSearchEnabled,
+        refVideoUrl: args.refVideoUrl,
+        refAudioUrl: args.refAudioUrl,
+        groupNumber: grp.number,
+        requestId: args.requestId,
+      };
+      await enqueueVideoJobOrRefund(prisma, {
+        attemptId: duelAttempt.id,
+        startedAt: startedAtB,
+        userId,
+        projectId: grp.projectId,
+        episodeId: grp.episodeId,
+        providerId: duelProviderId,
+        payload: payloadB,
+        enqueue: (p) => enqueueVideoGenJob(p),
+      });
+      duelAttemptId = duelAttempt.id;
+    } catch (duelErr) {
+      // 降级:退 B 保 A(QUEUED 守卫 + 幂等退款 — enqueue 内部已回滚时这里全 no-op)
+      duelDegraded = sanitizeErrorMsg(duelErr);
+      await releaseDuelPlaceholder(prisma, {
+        attemptId: duelAttempt.id,
+        userId,
+        projectId: grp.projectId,
+        episodeId: grp.episodeId,
+        providerId: duelProviderId,
+        errorMsg: `对决降级:${duelDegraded}`,
+      }).catch((e) =>
+        console.warn('[submit] 对决 B 占位释放失败(降级路):', sanitizeErrorMsg(e)),
+      );
+      console.warn(
+        `[submit] 组 ${grp.number} 对决 B 路(${duelProviderId})降级,A 路不受影响:`,
+        duelDegraded,
+      );
+    }
+  }
+
+  return { ok: true, attemptId: attempt.id, duelAttemptId, duelDegraded };
+}
+
+/** F5b:释放对决 B 占位(FAILED + 退 PREPAY;QUEUED 守卫 + 幂等,可重复调) */
+async function releaseDuelPlaceholder(
+  prisma: PrismaClient,
+  args: {
+    attemptId: string;
+    userId: string;
+    projectId: string;
+    episodeId: string;
+    providerId: string;
+    errorMsg: string;
+  },
+): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await tx.generationAttempt.updateMany({
+      where: { id: args.attemptId, status: 'QUEUED' },
+      data: { status: 'FAILED', errorMsg: args.errorMsg, finishedAt: new Date() },
+    });
+    await refundPrepayForAttempt(tx, {
+      attemptId: args.attemptId,
+      userId: args.userId,
+      projectId: args.projectId,
+      episodeId: args.episodeId,
+      providerId: args.providerId,
+      reason: 'duel_leg_released',
+    });
+  });
 }

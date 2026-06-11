@@ -38,6 +38,7 @@ import {
 } from '../qc/process-job.js';
 // F4 批量:终态跟进(retryable 自动重抽 + 批次完成通知)— 仅 batch_ 标签 attempt 生效
 import { handleBatchTerminal } from './batch-followup.js';
+import { recordProviderOutcome } from './provider-health.js';
 // 第 18 轮 audit P1:errorMsg 入库 + SSE + OperationLog 前脱敏,防真接 Provider 后 URL/token 泄漏
 import { sanitizeErrorMsg, billingCycle } from '@ss/shared';
 
@@ -350,6 +351,12 @@ export async function processVideoGenJob(
       retryable: !unrecoverable,
     });
 
+    // F5b-b(七二):真打失败记健康度(score-0.2 + lastErrorAt;增强项 fire-and-forget)。
+    // 仅 claim 成功(真失败)才扣 — 被取消/清扫的迟到失败不算 provider 的锅。
+    if (failClaimed) {
+      void recordProviderOutcome(prisma, providerId, 'failure');
+    }
+
     // F4 批量:失败终态跟进(retryable 自动重抽 ≤ batch.retry.max + 批次完成通知)。
     // 单点 attempt(无 batch_ 标签)函数内零开销返回;任何异常不影响失败主流程。
     // 复查修:仅在本 worker 真正完成 RUNNING→FAILED 迁移时跟进 — claim 失败说明已被
@@ -515,6 +522,9 @@ export async function processVideoGenJob(
     throw e;
   }
   const { mediaId, updatedAttemptId } = txOut;
+
+  // F5b-b(七二):真打成功记健康度(score+0.1,clamp 1;增强项 fire-and-forget)
+  void recordProviderOutcome(prisma, providerId, 'success');
 
   // 六八:视频落本地缓存(异步 cache-video job)— 播放/成片/抽帧走本地不卡顿,
   // provider 直链 24h 过期前留底。入队失败不影响主流程(直链仍可播)。

@@ -42,8 +42,18 @@
 - ✅ 走查红利:发现并还原 ep3 标题被锁定测试上传污染(「覆盖测试」→「打脸势利亲戚」);「0 场」列表计数疑 bug 记案
 - ✅ 第四波回归:typecheck 16/16 全绿(收工前全套终验见下)
 
+**完成(第五波 · UI-P0 三连 + F5b 并抽/failover/对比卡全落地)**
+- ✅ **UI-P0 三连**(docs/08 即修项):①顶部导航折行修复(shrink-0+nowrap+lg 以下 icon-only+title;项目名 12rem 截断)— 浏览器双态实证(窄屏 icon-only/1440 全文,navH 29.75 单行) ②AIGC 左列表 ✓1✕1⋯ 符号串→lucide mini-chip(色块+数字+tooltip「成功 N 条」),✎/🗄 → Pencil/Archive ③**「0 场」破案**:不是计数 bug,是历史分镜重生成软删场行未重建(ep1 实测 11 行全软删)— 显示口径改 max(存活场数, 分镜实际引用去重场数),全列表恢复(ep1 0→5 场)
+- ✅ **F5b-a 并抽对决**:`SubmitVideoArgs.duelProviderId`(≤2 家)— **同事务双占位双 PREPAY**(原子性:要么都在要么都不在)+ 共享 `duel_` 标签;组级 deny 双退/gacha 对决吃 2 名额/预算 A+B 合并估+双排除(budget-check 加 excludeAttemptIds 向后兼容);**B 路独立支线纪律**:审计过的 A 路资金主路零改动,B 路 provider 级失败只降级(退 B 保 A,duelDegraded 返回)。**真打**:seedance×wan2.6 双占位双 PREPAY(¥4.86/¥6.60 分毫不差)→ 天然剧本:A 撞 moyu 瞬断 FAILED 退净,B SUCCESS ¥6.6 — 双路独立终态实证
+- ✅ **F5b-b failover**:`provider-health.ts` — 真打终态记健康度(失败 -0.2 clamp0.2 + lastErrorAt/成功 +0.1 clamp1;仅 worker 真失败计,预检 deny 不背锅)+ `resolveHealthyVideoProvider`(主家 score<0.5 且 10min 内有失败 → 取 CSV 备选第一个健康者;**显式 override 绝不偷换**);`shot.video.fallbackProviderIds` 进 seed/bindings;router 返 failoverNotice。**真打**:压 seedance 0.3+配 wan 备选 → 无 override 提交 → 自动切 wan(通知文案完整)→ take SUCCESS ¥4.4 → 成功回写健康度 ✓;批量路同样接入(deriveBatchPlan)
+- ✅ **F5b-c 对决对比卡**:listVideoTakes 加 duelTag;生成面板「⚔ vs 第二家」选择器(紫色高亮,排除主家);takes 区**并排对比卡**(双列视频/失败占位+provider 名+QC 分+实扣价+「采纳此条」=对方标废片);hook 三态 toast(对决提交/降级已退款/⚡failover 切换)。**浏览器实证**:G18-19 真实对决对渲染全中(双列/视频/失败占位/采纳钮/双家名)
+- ✅ 第五波回归:typecheck 16/16 · core 278+2skip · api 57 · adapters 53 · queue 11 全绿;db:sync 42 设置(+fallbackProviderIds)
+- 💰 第五波真打:对决 ¥6.6(A 退净)+ failover ¥4.4 = ¥11.0;**蓝图 F5b 验收四项全过**(并抽双占位/¥ 同公式/A/B 并排/不健康自动 failover)— M4+M5 主线条目就此全清
+
 **问题/待决策**
 - ❓ ~~真打期间勿改仓内代码~~ **L5 落地后该纪律解除**:重启/改码只会触发续轮询,不再产生孤儿任务(收工 commit 后可在 moyu 账单复核:11:05 task 之后无第二只 ¥10 预扣)
+- ❓ failover 备选链本机已配 `moyu-wan2-6-t2v`(主家健康时零影响);seedance 健康度现值 0.8(今日真实瞬断 1 次),连败 3 次才进切换区
+- ❓ 对决卡「采纳」= 对方标废片(DB 留审计);两路都在跑时卡片实时轮询更新
 - ❓ happyhorse 首条 take 内账结算 0(修复前历史行,relay 侧已实扣 ≈¥8)— 一次性偏差,记账即可
 - ❓ wan2.6/happyhorse 的 QC 自动评分异步进行中(take.qc.enabled=true);kling 家族形状仍未真打(catalog 未补 adapter 字段,接入时照 wan 路径)
 - ❓ 旧机器 DB 里 `asset.compliance.requireForVideo` 残留行无害(无代码读);admin 设置页若展示可手删

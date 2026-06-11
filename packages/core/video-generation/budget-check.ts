@@ -20,6 +20,9 @@ export async function checkDailyVideoBudget(
     dailyBudgetCny: number;
     prepayEstimateCny: number;
     excludeAttemptId: string;
+    /** F5b(七二)并抽:对决两占位都已写 PREPAY,须双双排除防自重复计;
+     * 传了即覆盖 excludeAttemptId(单占位调用方不传,行为不变)。 */
+    excludeAttemptIds?: string[];
   },
 ): Promise<string | null> {
   if (args.dailyBudgetCny <= 0) return null; // 0 / 负 = 不限
@@ -28,13 +31,17 @@ export async function checkDailyVideoBudget(
   //   (DB createdAt 存 UTC;原 setHours 用 server local 时区会让"今天"边界偏移几小时)
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
+  const excludeIds =
+    args.excludeAttemptIds && args.excludeAttemptIds.length > 0
+      ? args.excludeAttemptIds
+      : [args.excludeAttemptId];
   const todaySpent = await tx.costLedgerEntry.aggregate({
     where: {
       projectId: args.projectId,
       action: 'video.generate',
       success: true,
       createdAt: { gte: todayStart },
-      attemptId: { not: args.excludeAttemptId }, // 排除当前 attempt 已写入的 PREPAY
+      attemptId: { notIn: excludeIds }, // 排除当前(对决时为两个)attempt 已写入的 PREPAY
     },
     _sum: { costCny: true },
   });

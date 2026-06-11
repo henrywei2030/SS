@@ -1,6 +1,7 @@
 'use client';
 import * as React from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
+import { Archive, Check, Loader2, Pencil, X } from 'lucide-react';
 
 import { trpc } from '@/lib/trpc/client';
 // 三十三收工 R1 Phase A1:dialog / confirm 态聚合
@@ -238,21 +239,34 @@ export function AigcWorkspace({
                   {/* 行 2:资产数 + badges 内联 — 仅有 badges 或 binding 时显 */}
                   <div className="flex w-full items-center justify-between text-[10px] opacity-70">
                     <span>资产 {g.bindingCount}</span>
+                    {/* 七二 UI-P0(docs/08 §1-2):✓1✕1⋯ 符号串 → 可读 mini-chip(lucide 图标+数字+tooltip) */}
                     {hasBadges && (
                       <span className="flex shrink-0 items-center gap-1">
                         {successCount > 0 && (
-                          <span className="text-green-700 dark:text-green-400">
-                            ✓{successCount}
+                          <span
+                            title={`成功 ${successCount} 条`}
+                            className="flex items-center gap-0.5 rounded bg-green-500/10 px-1 py-px text-green-700 dark:text-green-400"
+                          >
+                            <Check className="size-2.5" />
+                            {successCount}
                           </span>
                         )}
                         {failed > 0 && (
-                          <span className="text-red-700 dark:text-red-400">
-                            ✕{failed}
+                          <span
+                            title={`失败 ${failed} 条`}
+                            className="flex items-center gap-0.5 rounded bg-red-500/10 px-1 py-px text-red-700 dark:text-red-400"
+                          >
+                            <X className="size-2.5" />
+                            {failed}
                           </span>
                         )}
                         {running > 0 && (
-                          <span className="text-amber-700 dark:text-amber-400">
-                            ⋯{running}
+                          <span
+                            title={`生成中 ${running} 条`}
+                            className="flex items-center gap-0.5 rounded bg-amber-500/10 px-1 py-px text-amber-700 dark:text-amber-400"
+                          >
+                            <Loader2 className="size-2.5 animate-spin" />
+                            {running}
                           </span>
                         )}
                       </span>
@@ -267,7 +281,7 @@ export function AigcWorkspace({
                     title="重命名"
                     className="rounded px-1 py-0.5 hover:bg-black/10 focus-visible:bg-black/10 focus-visible:outline focus-visible:outline-1 focus-visible:outline-blue-500 dark:hover:bg-white/10 dark:focus-visible:bg-white/10"
                   >
-                    ✎
+                    <Pencil className="size-3" />
                   </button>
                   <button
                     onClick={() => onArchiveGroup(g)}
@@ -275,7 +289,7 @@ export function AigcWorkspace({
                     title="归档(软删,可在 DB 恢复)"
                     className="rounded px-1 py-0.5 hover:bg-red-500/20 hover:text-red-500 focus-visible:bg-red-500/20 focus-visible:text-red-500 focus-visible:outline focus-visible:outline-1 focus-visible:outline-red-500"
                   >
-                    🗄
+                    <Archive className="size-3" />
                   </button>
                 </div>
               </div>

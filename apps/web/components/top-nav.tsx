@@ -104,7 +104,10 @@ export function TopNav({
               Projects
             </Link>
             <span className="text-[12px] text-[hsl(var(--color-muted-foreground))]">/</span>
-            <span className="text-[13px] font-medium">{currentProject.name}</span>
+            {/* 七二 UI-P0:长项目名截断,防挤压右侧导航(docs/08 §1-1) */}
+            <span className="max-w-[12rem] truncate text-[13px] font-medium" title={currentProject.name}>
+              {currentProject.name}
+            </span>
           </>
         ) : (
           <span className="text-[13px] text-[hsl(var(--color-muted-foreground))]">Projects</span>
@@ -335,28 +338,32 @@ function HoverNav({
     return Array.from(map.entries());
   }, [items]);
 
+  // 七二 UI-P0:shrink-0 + whitespace-nowrap — flex 挤压时「导演」被折成竖排两行(docs/08 §1-1)
   const buttonClass = cn(
-    'flex h-7 items-center gap-1 rounded px-2 text-[12px] transition-colors',
+    'flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded px-2 text-[12px] transition-colors',
     active
       ? 'bg-[hsl(var(--color-secondary))] text-[hsl(var(--color-foreground))]'
       : 'text-[hsl(var(--color-muted-foreground))] hover:text-[hsl(var(--color-foreground))]',
     disabled && 'cursor-not-allowed opacity-50 hover:text-[hsl(var(--color-muted-foreground))]',
   );
 
+  // 七二 UI-P0:lg 以下 icon-only(title 提示),防窄视口横向溢出(docs/08 §1-1 响应式折叠)
+  const labelEl = <span className="hidden lg:inline">{label}</span>;
+
   // 无子菜单 → 纯 Link 按钮(无 hover 状态变化)
   if (!hasMenu) {
     if (disabled) {
       return (
-        <span className={buttonClass} title="请先选择项目">
+        <span className={buttonClass} title={`${label} — 请先选择项目`}>
           <TriggerIcon className="size-3" />
-          <span>{label}</span>
+          {labelEl}
         </span>
       );
     }
     return (
-      <Link href={mainHref!} className={buttonClass}>
+      <Link href={mainHref!} className={buttonClass} title={label}>
         <TriggerIcon className="size-3" />
-        <span>{label}</span>
+        {labelEl}
       </Link>
     );
   }
@@ -372,15 +379,15 @@ function HoverNav({
       onMouseLeave={scheduleClose}
     >
       {disabled ? (
-        <span className={buttonClass} title="请先选择项目">
+        <span className={buttonClass} title={`${label} — 请先选择项目`}>
           <TriggerIcon className="size-3" />
-          <span>{label}</span>
+          {labelEl}
           <ChevronDown className="size-3" />
         </span>
       ) : (
-        <Link href={mainHref!} className={buttonClass}>
+        <Link href={mainHref!} className={buttonClass} title={label}>
           <TriggerIcon className="size-3" />
-          <span>{label}</span>
+          {labelEl}
           <ChevronDown className={cn('size-3 transition-transform', open && 'rotate-180')} />
         </Link>
       )}

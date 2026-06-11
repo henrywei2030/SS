@@ -113,7 +113,17 @@ export function useAigcMutations(deps: UseAigcMutationsDeps) {
   const generateVideoMutation = trpc.aigc.generateVideo.useMutation({
     onSuccess: (data, variables) => {
       // W5.5:视频生成异步化(ADR-25),handler 入队后立即返回 attemptId(status=RUNNING)
-      toast.success('视频任务已提交,等待生成完成');
+      // F5b(七二):对决/降级/failover 三态提示
+      if (data.duelAttemptId) {
+        toast.success('对决已提交:两家 Provider 并行生成,完成后出对比卡', { duration: 6000 });
+      } else if (data.duelDegraded) {
+        toast.warning(`主路已提交;对决第二家降级(已退款):${data.duelDegraded}`, { duration: 8000 });
+      } else {
+        toast.success('视频任务已提交,等待生成完成');
+      }
+      if (data.failoverNotice) {
+        toast.info(`⚡ ${data.failoverNotice}`, { duration: 8000 });
+      }
       invalidateGroup(variables.groupId);
       setAutoSelect({ groupId: variables.groupId, attemptId: data.attemptId });
     },
@@ -251,6 +261,8 @@ export function useAigcMutations(deps: UseAigcMutationsDeps) {
         resolution?: '480p' | '720p' | '1080p';
         generateAudio?: boolean;
         providerOverride?: string;
+        // F5b(七二)对决:第二家 provider(与主家不同)
+        duelProviderOverride?: string;
       },
     ) => {
       generateVideoMutation.mutate({ groupId, ...opts });

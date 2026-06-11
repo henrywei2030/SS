@@ -25,6 +25,7 @@ import {
   orderBatchCandidates,
   parseProductionPlanPriorities,
   refundPrepayForAttempt,
+  resolveHealthyVideoProvider,
   submitVideoGeneration,
   type BatchGroupCandidate,
   type BatchPriority,
@@ -63,6 +64,20 @@ async function deriveBatchPlan(ctx: Context, episodeId: string): Promise<BatchPl
       message:
         '视频生成未配置 Video Provider — 请去 /admin/bindings 选择 binding.shot.video.providerId 后再批量生成',
     });
+  }
+  // F5b-b(七二)failover:批量与单点同口径 — 主家不健康自动切备选(estimate 与提交共用
+  // 本推导,报价/确认/PREPAY 天然同一家;estimate 响应的 providerId 即实际下发家)
+  if (bindings.fallbackProviderIds) {
+    const resolved = await resolveHealthyVideoProvider(ctx.prisma, {
+      primaryProviderId: bindings.providerId,
+      fallbackCsv: bindings.fallbackProviderIds,
+    });
+    if (resolved.failedOver) {
+      console.warn(
+        `[batch] failover: ${resolved.failedOver.reason}:${resolved.failedOver.from} → ${resolved.providerId}`,
+      );
+      bindings.providerId = resolved.providerId;
+    }
   }
 
   const groups = await ctx.prisma.shotGroup.findMany({

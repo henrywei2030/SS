@@ -14,6 +14,7 @@ import { getStorageAdapter } from '@ss/adapters/storage';
 // 编译/合规/入队全在 core,本层只做 binding 解析 + 判别结果 → TRPCError 映射)
 import {
   loadVideoGenBindings,
+  resolveHealthyVideoProvider,
   submitVideoGeneration,
   type VideoGenBindings,
 } from '@ss/core/video-generation';
@@ -101,6 +102,8 @@ export const videoProcedures = {
         // 用户反馈 2026-05-27:不再支持 'auto',aspectRatio 必须显式选(用户偏好 explicit-choice-only)
         aspectRatio: aspectRatioSchema.optional(),
         providerOverride: z.string().max(100).optional(),
+        // F5b(七二)并抽对决:第二家 provider(与主家不同;双占位双 PREPAY,B 路失败降级保 A)
+        duelProviderOverride: z.string().max(100).optional(),
         extraInstruction: z.string().max(500).optional(),
         extraNegative: z.array(z.string().max(50)).max(20).optional(),
         // W5.5.1 扩展参数(2026-05-24)
@@ -116,12 +119,33 @@ export const videoProcedures = {
       const grp = await loadGroupOrThrow(ctx, input.groupId);
       const bindings = await getVideoBindings(ctx);
 
-      const providerId = input.providerOverride ?? bindings.providerId;
+      let providerId = input.providerOverride ?? bindings.providerId;
+      // F5b-b(七二)failover:仅默认绑定路生效 — 用户显式 override = 点名意图,绝不偷换
+      let failoverNotice: string | undefined;
+      if (!input.providerOverride && providerId && bindings.fallbackProviderIds) {
+        const resolved = await resolveHealthyVideoProvider(ctx.prisma, {
+          primaryProviderId: providerId,
+          fallbackCsv: bindings.fallbackProviderIds,
+        });
+        if (resolved.failedOver) {
+          providerId = resolved.providerId;
+          failoverNotice = `${resolved.failedOver.reason}:${resolved.failedOver.from} → ${providerId}`;
+          console.warn(`[generateVideo] failover: ${failoverNotice}`);
+        }
+      }
       // 二十收工后用户反馈:不 hardcode 默认 provider,binding 空 + 无 override 时显式拒绝
       if (!providerId) {
         throw new TRPCError({
           code: 'PRECONDITION_FAILED',
           message: '视频生成未配置 Video Provider — 请去 /admin/bindings 选择 binding.shot.video.providerId(或在调用时传 input.providerOverride 显式指定)',
+        });
+      }
+      // F5b:对决第二家校验 — 必须与主家不同(同家对决无意义且双倍扣费)
+      const duelProviderId = input.duelProviderOverride?.trim() || undefined;
+      if (duelProviderId && duelProviderId === providerId) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: '对决的第二家 Provider 不能与主 Provider 相同',
         });
       }
       // 2026-05-27:不再支持 'auto',undefined 时 fallback 到 binding 默认值
@@ -162,6 +186,7 @@ export const videoProcedures = {
         refAudioUrl: input.refAudioUrl,
         // 第 19 轮 audit P1:requestId 贯通到 worker,运维 grep 日志可看全链路
         requestId: ctx.requestId,
+        duelProviderId,
       });
       if (!result.ok) {
         if (result.code === 'ENQUEUE_FAILED') {
@@ -180,11 +205,20 @@ export const videoProcedures = {
         aspectRatio,
         durationS,
         projectId: grp.episode.projectId,
+        ...(result.duelAttemptId
+          ? { duelAttemptId: result.duelAttemptId, duelProviderId }
+          : {}),
+        ...(result.duelDegraded ? { duelDegraded: result.duelDegraded } : {}),
       });
 
       return {
         attemptId: result.attemptId,
         status: 'RUNNING' as const,
+        // F5b 并抽:B 路 attempt(降级时 undefined + 原因)
+        duelAttemptId: result.duelAttemptId,
+        duelDegraded: result.duelDegraded,
+        // F5b-b failover:发生自动切换时的人类可读说明(UI toast)
+        failoverNotice,
       };
     }),
 
@@ -463,6 +497,8 @@ export const videoProcedures = {
           aspectRatio: media?.aspectRatio ?? null,
           mediaId: media?.id ?? null,
           rejected: a.rejected,
+          // F5b-c(七二):对决配对标签(duel_ 前缀;UI 并排对比卡按它配对两条 take)
+          duelTag: a.groupId?.startsWith('duel_') ? a.groupId : null,
           // M3c QC:分数/漂移/点评/失败原因 + pending(轮询依据,时间窗防旧 take 永轮询)
           qcScore: a.qcScore,
           qcDrift: qc.drift,

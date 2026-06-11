@@ -1,6 +1,6 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-06-11(**七二 · mac-mini 全天四波**:gate 全过+三债清偿 → DMG 打包 → 四件套(TTS 可观测安装/合规改标识/分集锁定/wan2.6+happyhorse 打通) → AIGC 三增强(历史窗 2 条/尾帧链产品化/@ 自动补全)+ [docs/08 UI 优化方案](docs/08-ui-optimization-plan.md) · 详见 [PROGRESS](PROGRESS.md))
+> 最后更新:2026-06-11(**七二 · mac-mini 全天五波**:gate 全过+三债清偿 → DMG → 四件套 → AIGC 三增强+UI 方案 → **UI-P0 三连 + F5b 并抽/failover/对比卡全落地(M0–M6 主线全清)** · 详见 [PROGRESS](PROGRESS.md))
 > 仓库:https://github.com/henrywei2030/SS
 > **🚀 一键启动**:`pnpm start`(详见 [README.md](README.md#快速启动) / [CLAUDE.md](CLAUDE.md#设备登记))
 > **📖 主线蓝图**:[docs/06-feature-plan-2026H2.md](docs/06-feature-plan-2026H2.md)(M0–M6 可直接 coding;2026-06-10 mac-mini 逐项核对与代码一致)
@@ -10,7 +10,7 @@
 
 ## 🚧 进行中
 
-- [ ] **🎬 七功能 AIGC 增强路线图(M0–M6)**(蓝图 [docs/06](docs/06-feature-plan-2026H2.md))— ✅ M0 基建 / ✅ M1 成片 / ✅ M2′ 配音补强(均六七)/ ✅ **M3 全清**(3a/3b 六八真打通 + 3c QC 六九)/ ✅ **M4 先决重构 + F4 整集批量**(六九)/ ✅ F5a relay 泛化(六九)/ ✅ **M6a/b 动态 Prompt 优化**(七十)/ ✅ **真打回归 gate 全过(七二 mac-mini)**:出片+扣费/退差/超时退净/stale-sweep 自愈/批量分流+取消退费净 0/QC 自动触发。**剩:F5b 并抽/failover**(已解锁)+ L5 providerJobId 真金债(¥7/重启,见工程卫生)
+- [x] **🎬 七功能 AIGC 增强路线图(M0–M6)主线全清(2026-06-11 七二)**(蓝图 [docs/06](docs/06-feature-plan-2026H2.md))— ✅ M0 基建 / ✅ M1 成片 / ✅ M2′ 配音补强(均六七)/ ✅ M3 全清(六八/六九)/ ✅ M4+F4(六九)/ ✅ F5a(六九)/ ✅ M6a/b(七十)/ ✅ 真打回归 gate 全过(七二)/ ✅ L5 断点续跑(七二)/ ✅ **F5b 并抽/failover/对比卡(七二 第五波)**:同事务双占位双 PREPAY 对决(真打 seedance×wan 双路独立终态)+ provider 健康度±步进 + 备选链自动切换(真打验证切换/通知/成功回写)+ ⚔ 并排对比卡(QC/价格/采纳)。**留运营**:旗舰档对比数据积累(kling 接入照 wan 路径)
 - [ ] **🧠 Prompt Mini-Harness(八维知识库 × 装配流水线)**(蓝图 [docs/07](docs/07-prompt-harness.md))— ✅ H0-H3 全落地(七一)/ ✅ **gate 顺验全过(七二)**:✨四路径(happy/乐观锁/硬门/TOKEN_LOST)/✨✨判官八维+定向修复/知识检索对症命中+hitCount 飞轮/权重 -0.05 生产接线/v3 三纪律+音桥教科书级 / ✅ **语义检索解锁**(七二修 embedding batch≤10 真 bug,77/83 向量回填;本机已配,其他机器照 PROGRESS 七二 Gate⑧ 步骤)。**剩**:① 飞轮持续运营(权重演化/蒸馏候选审核,/admin/knowledge)② optimizer meta-prompt 补「@token 逐字保留」强化(gpt-5-4/sonnet 对混用 prompt 丢 token 率高,守卫接得住但费重试钱)
 - [ ] **🔊 本地 TTS 声线生成(MOSS-TTS-Nano)**— 六七闭环,六八三需求加固;✅ **七二:桌面包权重首跑验证通过**(打包资源+全新数据目录完整复现新 Mac:746MB 下载+推理+样本全链 ~20min 成功 — 故障实为"纯不可观测")+ **可观测安装落地**(进度落盘+后台安装 job+声音面板四态卡:安装/进度条/失败重试+清缓存/就绪)。**留**:win-laptop onnxruntime 真跑 /「从有声视频抽音轨反向采纳声线」
 - [ ] **🖥️ 桌面程序化遗留**(ADR-35;六八:**dmg 缺四原生依赖的六七债已修**(依赖闭包补包+darwin-arm64 裁剪,238M 残→300M 全)+ 构建隔离 .next-desktop(打包不再打断 dev server))— 剩:① win-laptop CI artifact 真装真跑(出差时)② 桌面包 Mock 视频端到端 + TTS 权重首跑真打 ③ 退出钩子加固 ④ .dmg Finder 美化/自动更新(低优)⑤ Developer ID + 公证(分发才需要)
@@ -46,7 +46,7 @@
 
 ### 🎨 UI 优化(七二 · 方案见 [docs/08](docs/08-ui-optimization-plan.md),按 P0→P1 排期)
 
-- [ ] **P0(半天)**:顶部导航文字竖排折行修复(nowrap+响应式 icon-only)/ 左列表 ✓1✕1✎ 符号串→可读 chip / 分集列表「0 场」计数排查
+- [x] ~~**P0(半天)**~~ ✅ 七二第五波:导航折行修复(nowrap+lg 以下 icon-only+项目名截断,双态浏览器实证)/ 符号串→lucide mini-chip+tooltip / 「0 场」破案(历史软删场,显示口径改分镜实际引用数,ep1 0→5 场)
 - [ ] **P1(3-4 天)**:字号 9 种→5 级 token + lint 禁任意值 / 手写按钮~40 处→Button 组件 / emoji 图标→lucide(保留 ✨系)/ 硬编码状态色~50→语义五族变量(并清工程卫生既有色债)/ AIGC 右栏边框预算整改
 - [ ] P2 塞缝:相对时间/tabular-nums/滚动渐隐/统一空态组件(与 a11y 债合并)
 

@@ -672,6 +672,13 @@ issue ≤40 字;score ≥70 时 issue 可为空串。
     },
     // 七二(用户指令):asset.compliance.requireForVideo 已退役 — 合规改纯标识环节
     //   (人物卡绿点/编辑页绿字),不再门控视频生成。老机器 DB 里的残留行无害(无人读)。
+    {
+      key: 'shot.video.fallbackProviderIds',
+      value: '',
+      category: 'general',
+      description:
+        'F5b failover 备选视频 Provider(CSV,按序取第一个健康的;空=关)。主 Provider 健康度<0.5 且 10 分钟内有失败时自动切换(仅默认绑定路,显式指定不偷换)',
+    },
 
     // ----- W5.0 视频生成 model 绑定(admin 显式选,默认空) -----
     {

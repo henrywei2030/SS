@@ -34,7 +34,10 @@ export const episodeProcedures = {
             },
           },
           // 拉 shot/group 的 status,用于「分镜已生成 vs 已发布」判断(数据量小,每集数十行 status)
-          shots: { where: { deletedAt: null }, select: { status: true } },
+          // 七二 UI-P0(docs/08 §1-3):+sceneId — 历史分镜重生成软删过场行未重建,
+          //   纯 _count.scenes(deletedAt:null)会把有 63 镜的集显示成「0 场」(ep1 实测 11 场全软删)。
+          //   显示口径改为 max(存活场数, 分镜实际引用的去重场数),反映真实结构。
+          shots: { where: { deletedAt: null }, select: { status: true, sceneId: true } },
           shotGroups: { where: { deletedAt: null }, select: { status: true } },
         },
       });
@@ -46,7 +49,10 @@ export const episodeProcedures = {
         publishedAt: e.publishedAt,
         publishedVersion: e.publishedVersion,
         batchLocked: e.batchLocked,
-        sceneCount: e._count.scenes,
+        sceneCount: Math.max(
+          e._count.scenes,
+          new Set(e.shots.map((s) => s.sceneId).filter(Boolean)).size,
+        ),
         shotCount: e.shots.length,
         groupCount: e.shotGroups.length,
         // 2026-06:发布后又改了分镜/组(自动整合 / 重新生成 → 新建的是 DRAFT)→ 标"有未发布改动",

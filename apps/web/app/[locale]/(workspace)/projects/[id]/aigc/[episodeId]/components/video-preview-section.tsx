@@ -38,6 +38,8 @@ export interface VideoPreviewProps {
     generateAudio?: boolean;
     // 2026-05-27:用户在视频预览选了非 binding 默认的 provider 时传过来
     providerOverride?: string;
+    // F5b(七二)对决:第二家 provider(与主家不同;双扣费,各自独立终态)
+    duelProviderOverride?: string;
   }) => void;
   generatePending: boolean;
   onReject: (attemptId: string) => void;
@@ -88,6 +90,8 @@ export function VideoPreviewSection({
   // 三十三收工 R1 Phase A2:4 个 video setting state + 4 effect 抽到 useVideoSettings
   // selectedProviderId 留主组件管理(capabilities query input,避免循环依赖)
   const [selectedProviderId, setSelectedProviderId] = React.useState<string | null>(null);
+  // F5b(七二)对决:第二家 provider(null=不对决)
+  const [duelProviderId, setDuelProviderId] = React.useState<string | null>(null);
   const { data: videoProviders } = trpc.aigc.listVideoProviders.useQuery();
 
   // W5.5 D6:Provider 能力查询 — providerId 传 selectedProviderId(null 时 server 走 binding)
@@ -223,6 +227,30 @@ export function VideoPreviewSection({
               <option value="">加载中...</option>
             )}
           </select>
+          {/* F5b(七二)对决:第二家 provider — 选了即双扣费并行生成,完成出对比卡 */}
+          {videoProviders && videoProviders.length > 1 && (
+            <select
+              value={duelProviderId ?? ''}
+              onChange={(e) => setDuelProviderId(e.target.value || null)}
+              className={`rounded-md border px-2 py-1.5 text-xs ${
+                duelProviderId
+                  ? 'border-purple-500/60 bg-purple-500/10 text-purple-700 dark:text-purple-300'
+                  : 'border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))]'
+              }`}
+              title="对决:再选一家并行生成同一组(双倍扣费),完成后并排对比择优"
+            >
+              <option value="">⚔ 不对决</option>
+              {videoProviders
+                .filter(
+                  (p) => p.providerId !== (selectedProviderId ?? capabilities?.providerId),
+                )
+                .map((p) => (
+                  <option key={p.providerId} value={p.providerId}>
+                    ⚔ vs {p.displayName}
+                  </option>
+                ))}
+            </select>
+          )}
           {/* W5.5 D7:aspectRatio 按 Provider 支持的渲染(用户反馈 2026-05-27 扩 6 选项) */}
           <select
             value={aspectRatio}
@@ -325,6 +353,12 @@ export function VideoPreviewSection({
                 generateAudio: capabilities?.supportsAudio ? generateAudio : undefined,
                 // 2026-05-27:用户改了 provider 下拉时传 override(空 = 用 binding 默认)
                 providerOverride: selectedProviderId ?? undefined,
+                // F5b(七二)对决:第二家(与主家相同时不传,服务端也有同家校验)
+                duelProviderOverride:
+                  duelProviderId &&
+                  duelProviderId !== (selectedProviderId ?? capabilities?.providerId)
+                    ? duelProviderId
+                    : undefined,
               })
             }
             disabled={
@@ -573,6 +607,73 @@ export function VideoPreviewSection({
           </div>
         </div>
       </div>
+
+      {/* F5b-c(七二):对决并排对比卡 — 最新 duel 配对的两条 take 并排(QC/价格对照 + 一键采纳) */}
+      {(() => {
+        const tagged = (takes ?? []).filter((t) => !t.rejected && t.duelTag);
+        if (tagged.length === 0) return null;
+        const latestTag = tagged[0]!.duelTag;
+        const pair = tagged.filter((t) => t.duelTag === latestTag);
+        if (pair.length < 2) return null;
+        const bothDone = pair.every((t) => t.status === 'SUCCESS' || t.status === 'FAILED');
+        const provName = (pid: string): string =>
+          videoProviders?.find((p) => p.providerId === pid)?.displayName ?? pid.replace(/^moyu-/, '');
+        return (
+          <div className="mt-3 rounded-md border border-purple-500/40 bg-purple-500/5 p-2">
+            <div className="mb-1.5 flex items-center justify-between text-[11px] font-medium text-purple-700 dark:text-purple-300">
+              <span>⚔ 对决对比</span>
+              {!bothDone && <span className="font-normal opacity-70">生成中,完成自动更新…</span>}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {pair.slice(0, 2).map((t) => {
+                const rival = pair.find((x) => x.id !== t.id);
+                return (
+                  <div
+                    key={t.id}
+                    className="overflow-hidden rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))]"
+                  >
+                    <div className="bg-black">
+                      {t.videoUrl ? (
+                        // eslint-disable-next-line jsx-a11y/media-has-caption
+                        <video src={t.videoUrl} controls playsInline preload="metadata" className="aspect-[9/16] max-h-48 w-full object-contain" />
+                      ) : (
+                        <div className="flex aspect-[9/16] max-h-48 w-full items-center justify-center text-[10px] text-white/60">
+                          {t.status === 'FAILED' ? `✕ 失败:${(t.errorMsg ?? '').slice(0, 30)}` : '生成中…'}
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-0.5 p-1.5 text-[10px]">
+                      <div className="truncate font-medium" title={t.providerId}>
+                        {provName(t.providerId)}
+                      </div>
+                      <div className="flex items-center justify-between text-[hsl(var(--color-muted-foreground))]">
+                        <span>{t.qcScore !== null ? `QC ${t.qcScore}` : t.qcPending ? 'QC…' : 'QC -'}</span>
+                        <span>¥{Number(t.costCny ?? 0).toFixed(2)}</span>
+                      </div>
+                      {t.status === 'SUCCESS' && rival && (
+                        <button
+                          onClick={() => {
+                            if (rival.status === 'SUCCESS') {
+                              if (!window.confirm(`采纳 ${provName(t.providerId)},把对方标废片?`)) return;
+                              onReject(rival.id);
+                            }
+                            handleSelectHistoryTake(t.id);
+                          }}
+                          disabled={rejectPending}
+                          className="w-full rounded bg-purple-600 py-1 text-[10px] font-medium text-white hover:bg-purple-700 disabled:opacity-50"
+                          title={rival.status === 'SUCCESS' ? '采纳此条(对方标废片,DB 保留审计)' : '切到主预览'}
+                        >
+                          采纳此条
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 2026-05-27 用户反馈:历史常驻列表(不再 dialog),点条目自动播放;rejected take filter 掉(视为删除) */}
       {visibleTakes.length > 0 && (

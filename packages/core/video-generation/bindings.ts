@@ -14,6 +14,8 @@ export interface VideoGenBindings {
   maxDurationS: number;
   defaultAspectRatio: AspectRatio;
   dailyBudgetCny: number;
+  /** F5b-b:failover 备选 provider CSV(空=关) */
+  fallbackProviderIds: string;
   defaultGenerateAudio: boolean;
   audioSurchargeCnyPerS: number;
 }
@@ -43,6 +45,8 @@ export async function loadVideoGenBindings(
           'shot.video.maxDurationS',
           'shot.video.defaultAspectRatio',
           'shot.video.dailyBudgetCny',
+          // F5b-b(七二):failover 备选链(CSV;空=关)
+          'shot.video.fallbackProviderIds',
           // M2′ 配音产品化(2026-06-10):有声默认开关 + 有声差价
           'shot.video.generateAudio.default',
           'shot.video.audioSurchargeCnyPerS',
@@ -66,6 +70,8 @@ export async function loadVideoGenBindings(
     maxDurationS: parseNum(settings['shot.video.maxDurationS'], 15),
     defaultAspectRatio: ar,
     dailyBudgetCny: parseNum(settings['shot.video.dailyBudgetCny'], 500),
+    // F5b-b(七二):failover 备选链(resolveHealthyVideoProvider 消费;空=关)
+    fallbackProviderIds: settings['shot.video.fallbackProviderIds'] ?? '',
     // 七二:requireComplianceForVideo 已退役(合规改纯标识,不再门控生成)
     // seedance 2.0 文档默认 generate_audio=true → 系统默认跟随,admin 可改
     defaultGenerateAudio: (settings['shot.video.generateAudio.default'] ?? 'true') === 'true',

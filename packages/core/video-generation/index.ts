@@ -70,6 +70,13 @@ export {
   type ProcessResult,
 } from './process-job.js';
 export { recoverStaleVideoAttempts } from './recover.js';
+// F5b-b(七二):provider 健康度 + failover 解析
+export {
+  FALLBACK_PROVIDERS_KEY,
+  recordProviderOutcome,
+  resolveHealthyVideoProvider,
+  type FailoverResolution,
+} from './provider-health.js';
 export {
   sweepStaleGroupAttempts,
   type SweepStaleGroupArgs,
