@@ -88,7 +88,7 @@ export function InspirationPane({ projectId }: { projectId: string }): React.Rea
           </span>
           <button
             onClick={openNew}
-            className="inline-flex items-center gap-1 rounded bg-blue-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-blue-700"
+            className="inline-flex items-center gap-1 rounded bg-[hsl(var(--color-info))] px-2 py-1 text-[11px] font-medium text-white hover:bg-[hsl(var(--color-info)/0.9)]"
           >
             <Plus className="size-3" />
             新建
@@ -111,9 +111,9 @@ export function InspirationPane({ projectId }: { projectId: string }): React.Rea
                 key={d.id}
                 className={`group/d relative mb-1 rounded-md border transition-colors ${
                   d.pinned
-                    ? 'border-amber-500/60 bg-amber-500/10'
+                    ? 'border-[hsl(var(--color-warning)/0.6)] bg-[hsl(var(--color-warning)/0.1)]'
                     : isActive
-                      ? 'border-blue-600 bg-blue-600/10'
+                      ? 'border-[hsl(var(--color-info))] bg-[hsl(var(--color-info)/0.1)]'
                       : 'border-transparent hover:bg-[hsl(var(--color-muted))]'
                 }`}
               >
@@ -122,12 +122,12 @@ export function InspirationPane({ projectId }: { projectId: string }): React.Rea
                   className="block w-full px-2.5 py-2 pr-7 text-left"
                 >
                   <div className="flex items-center gap-1">
-                    {d.pinned && <Pin className="size-3 shrink-0 fill-amber-500 text-amber-500" />}
+                    {d.pinned && <Pin className="size-3 shrink-0 fill-[hsl(var(--color-warning))] text-[hsl(var(--color-warning))]" />}
                     <span className="truncate text-xs font-medium">{d.title}</span>
                   </div>
                   <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-[hsl(var(--color-muted-foreground))]">
                     {d.pinned && (
-                      <span className="rounded bg-amber-500/20 px-1 text-amber-700 dark:text-amber-300">
+                      <span className="rounded bg-[hsl(var(--color-warning-bg))] px-1 text-[hsl(var(--color-warning))]">
                         顶置
                       </span>
                     )}
@@ -143,8 +143,8 @@ export function InspirationPane({ projectId }: { projectId: string }): React.Rea
                   disabled={togglePin.isPending}
                   className={`absolute right-1 top-1.5 rounded p-0.5 transition-opacity ${
                     d.pinned
-                      ? 'text-amber-500'
-                      : 'text-[hsl(var(--color-muted-foreground))] opacity-0 group-hover/d:opacity-100 hover:text-amber-500'
+                      ? 'text-[hsl(var(--color-warning))]'
+                      : 'text-[hsl(var(--color-muted-foreground))] opacity-0 group-hover/d:opacity-100 hover:text-[hsl(var(--color-warning))]'
                   }`}
                   title={d.pinned ? '取消顶置' : '顶置 — 顶置后才能在剧本「关联剧本」选用'}
                 >
@@ -229,7 +229,7 @@ function NewInspirationForm({
   return (
     <div className="mx-auto max-w-2xl p-6">
       <div className="mb-4 flex items-center gap-2">
-        <Lightbulb className="size-5 text-amber-500" />
+        <Lightbulb className="size-5 text-[hsl(var(--color-warning))]" />
         <h2 className="text-lg font-semibold">灵感创作</h2>
       </div>
       <p className="mb-4 text-xs text-[hsl(var(--color-muted-foreground))]">
@@ -290,7 +290,7 @@ function NewInspirationForm({
       <button
         onClick={submit}
         disabled={gen.isPending || !idea.trim()}
-        className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+        className="inline-flex items-center gap-1.5 rounded-md bg-[hsl(var(--color-info))] px-4 py-2 text-sm font-medium text-white hover:bg-[hsl(var(--color-info)/0.9)] disabled:opacity-50"
       >
         {gen.isPending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
         {gen.isPending ? '生成大纲中…' : '生成分集大纲'}
@@ -477,7 +477,7 @@ function DraftDetail({
           <button
             onClick={() => setDeleteOpen(true)}
             disabled={batchRunning}
-            className="inline-flex items-center gap-1 rounded-md border border-red-500/40 px-2.5 py-1.5 text-xs text-red-600 hover:bg-red-500/10 disabled:opacity-50 dark:text-red-400"
+            className="inline-flex items-center gap-1 rounded-md border border-[hsl(var(--color-danger)/0.4)] px-2.5 py-1.5 text-xs text-[hsl(var(--color-danger))] hover:bg-[hsl(var(--color-danger)/0.1)] disabled:opacity-50"
           >
             <Trash2 className="size-3.5" />
             删除
@@ -487,9 +487,9 @@ function DraftDetail({
 
       {/* 四九收工:全部展开进度条 + 动画(慢模型 ~分钟级,让用户看见在动而非卡死) */}
       {batchRunning && (
-        <div className="border-b border-[hsl(var(--color-border))] bg-blue-500/5 px-4 py-2.5">
+        <div className="border-b border-[hsl(var(--color-border))] bg-[hsl(var(--color-info)/0.05)] px-4 py-2.5">
           <div className="mb-1.5 flex items-center justify-between text-xs">
-            <span className="flex items-center gap-1.5 font-medium text-blue-700 dark:text-blue-300">
+            <span className="flex items-center gap-1.5 font-medium text-[hsl(var(--color-info))]">
               <Loader2 className="size-3.5 animate-spin" />
               正在分批统筹生成剧本… 已完成 {batchProgress.done}/{batchProgress.total} 集
             </span>
@@ -499,7 +499,7 @@ function DraftDetail({
           </div>
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-[hsl(var(--color-muted))]">
             <div
-              className="h-full rounded-full bg-blue-600 transition-all duration-500"
+              className="h-full rounded-full bg-[hsl(var(--color-info))] transition-all duration-500"
               style={{
                 width: `${batchProgress.total > 0 ? Math.round((batchProgress.done / batchProgress.total) * 100) : 0}%`,
               }}
@@ -521,7 +521,7 @@ function DraftDetail({
                 onClick={() => setActiveEp(o.number)}
                 className={`mb-1.5 cursor-pointer rounded-md border px-2.5 py-2 ${
                   activeEp === o.number
-                    ? 'border-blue-600 bg-blue-600/10'
+                    ? 'border-[hsl(var(--color-info))] bg-[hsl(var(--color-info)/0.1)]'
                     : 'border-[hsl(var(--color-border))] hover:border-[hsl(var(--color-muted-foreground))]'
                 }`}
               >
@@ -530,7 +530,7 @@ function DraftDetail({
                     第{o.number}集 · {o.title}
                   </span>
                   {done ? (
-                    <span className="shrink-0 rounded bg-emerald-500/20 px-1 text-[10px] text-emerald-700 dark:text-emerald-300">
+                    <span className="shrink-0 rounded bg-[hsl(var(--color-success-bg))] px-1 text-[10px] text-[hsl(var(--color-success))]">
                       已展开
                     </span>
                   ) : (
@@ -553,7 +553,7 @@ function DraftDetail({
                       <button
                         onClick={() => saveOutlineSynopsis(o.number)}
                         disabled={saveOutline.isPending}
-                        className="inline-flex items-center gap-1 rounded bg-blue-600 px-2 py-0.5 text-[11px] text-white hover:bg-blue-700 disabled:opacity-50"
+                        className="inline-flex items-center gap-1 rounded bg-[hsl(var(--color-info))] px-2 py-0.5 text-[11px] text-white hover:bg-[hsl(var(--color-info)/0.9)] disabled:opacity-50"
                       >
                         {saveOutline.isPending ? <Loader2 className="size-2.5 animate-spin" /> : null}
                         保存
@@ -620,7 +620,7 @@ function DraftDetail({
               <button
                 onClick={() => genEp.mutate({ draftId, episodeNumber: activeEp })}
                 disabled={anyGenning}
-                className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-md bg-[hsl(var(--color-info))] px-3 py-1.5 text-xs font-medium text-white hover:bg-[hsl(var(--color-info)/0.9)] disabled:opacity-50"
               >
                 {isGenningEp(activeEp) ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
                 {isGenningEp(activeEp) ? '展开中…' : '展开本集剧本'}
@@ -711,7 +711,7 @@ function EpisodeContent({
           <button
             onClick={handleSave}
             disabled={!dirty || save.isPending}
-            className="inline-flex items-center gap-1 rounded bg-blue-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            className="inline-flex items-center gap-1 rounded bg-[hsl(var(--color-info))] px-2 py-1 text-[11px] font-medium text-white hover:bg-[hsl(var(--color-info)/0.9)] disabled:opacity-50"
           >
             {save.isPending && <Loader2 className="size-3 animate-spin" />}
             在线保存

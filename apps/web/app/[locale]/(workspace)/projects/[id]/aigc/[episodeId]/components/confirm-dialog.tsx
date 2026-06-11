@@ -63,8 +63,8 @@ export function ConfirmDialog({
             onClick={onConfirm}
             className={`rounded-md px-3 py-1.5 text-xs font-medium text-white ${
               danger
-                ? 'bg-red-600 hover:bg-red-700'
-                : 'bg-blue-600 hover:bg-blue-700'
+                ? 'bg-[hsl(var(--color-danger))] hover:bg-[hsl(var(--color-danger)/0.9)]'
+                : 'bg-[hsl(var(--color-info))] hover:bg-[hsl(var(--color-info)/0.9)]'
             }`}
           >
             {confirmLabel}

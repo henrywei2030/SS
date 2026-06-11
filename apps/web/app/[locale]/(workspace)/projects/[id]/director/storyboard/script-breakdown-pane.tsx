@@ -169,7 +169,7 @@ export function ScriptBreakdownPane({ projectId }: { projectId: string }): React
           <Button
             size="sm"
             variant="outline"
-            className="h-7 gap-1.5 border-red-500/40 text-xs text-red-600 hover:bg-red-500/10 dark:text-red-400"
+            className="h-7 gap-1.5 border-[hsl(var(--color-danger)/0.4)] text-xs text-[hsl(var(--color-danger))] hover:bg-[hsl(var(--color-danger)/0.1)]"
             onClick={() => setClearAllConfirm(true)}
             disabled={clearAll.isPending}
             title="清空本项目全部人物/场景/道具设定(软删,数据库保留审计)"
@@ -337,7 +337,7 @@ function TypePanel({
               {assets.length > 0 && (
                 <button
                   onClick={() => setClearTypeConfirm(true)}
-                  className="text-[10px] text-red-500 hover:underline"
+                  className="text-[10px] text-[hsl(var(--color-danger))] hover:underline"
                   title={`清空全部${label}`}
                 >
                   清空
@@ -447,7 +447,7 @@ function TypePanel({
               <button
                 onClick={() => setDelSelConfirm(true)}
                 disabled={checkedIds.size === 0 || delMany.isPending}
-                className="ml-auto flex items-center gap-0.5 text-[10px] font-medium text-red-600 hover:underline disabled:opacity-40 dark:text-red-400"
+                className="ml-auto flex items-center gap-0.5 text-[10px] font-medium text-[hsl(var(--color-danger))] hover:underline disabled:opacity-40"
               >
                 {delMany.isPending ? (
                   <Loader2 className="size-2.5 animate-spin" />

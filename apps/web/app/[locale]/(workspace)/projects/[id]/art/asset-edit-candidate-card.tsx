@@ -73,7 +73,7 @@ export function CandidateCard({
         </button>
         <button
           onClick={onReject}
-          className="rounded bg-rose-500/80 px-2 py-1 text-[10px] text-white"
+          className="rounded bg-[hsl(var(--color-danger)/0.8)] px-2 py-1 text-[10px] text-white"
         >
           删除
         </button>

@@ -1,6 +1,17 @@
 'use client';
 import * as React from 'react';
-import { Download, History, Trash2 } from 'lucide-react';
+import {
+  Ban,
+  Check,
+  Download,
+  History,
+  Minus,
+  MoreHorizontal,
+  Swords,
+  TriangleAlert,
+  Trash2,
+  X,
+} from 'lucide-react';
 
 import { trpc } from '@/lib/trpc/client';
 import { useAigcProgress } from '@/lib/hooks/use-aigc-progress';
@@ -196,7 +207,7 @@ export function VideoPreviewSection({
         <h3 className="text-sm font-semibold">
           视频预览
           {capabilities?.isMock && (
-            <span className="ml-1 rounded bg-amber-500/15 px-1 text-[10px] font-normal text-amber-700 dark:text-amber-400">
+            <span className="ml-1 rounded bg-[hsl(var(--color-warning-bg))] px-1 text-[10px] font-normal text-[hsl(var(--color-warning))]">
               MOCK
             </span>
           )}
@@ -316,7 +327,7 @@ export function VideoPreviewSection({
                 type="checkbox"
                 checked={generateAudio}
                 onChange={(e) => setGenerateAudio(e.target.checked)}
-                className="size-3 cursor-pointer accent-blue-600"
+                className="size-3 cursor-pointer accent-[hsl(var(--color-info))]"
               />
               <span>
                 音频
@@ -370,7 +381,7 @@ export function VideoPreviewSection({
               !!capabilitiesError ||
               !capabilities
             }
-            className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            className="rounded-md bg-[hsl(var(--color-info))] px-3 py-1.5 text-xs font-medium text-white hover:bg-[hsl(var(--color-info)/0.85)] disabled:opacity-50"
             title={
               capabilitiesError
                 ? `当前 Provider 不可用:${capabilitiesError.message}`
@@ -395,9 +406,9 @@ export function VideoPreviewSection({
 
       {/* 2026-05-27:capabilities query 失败 → 红色 banner 引导用户切换 / 去后台配置 */}
       {capabilitiesError && (
-        <div className="mb-3 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-700 dark:text-red-300">
+        <div className="mb-3 rounded-md border border-[hsl(var(--color-danger)/0.3)] bg-[hsl(var(--color-danger)/0.05)] px-3 py-2 text-xs text-[hsl(var(--color-danger))]">
           <div className="flex items-center gap-2">
-            <span>⛔</span>
+            <Ban className="size-3.5" />
             <span className="font-medium">当前 Provider 不可用</span>
           </div>
           <div className="mt-1 break-words">{capabilitiesError.message}</div>
@@ -409,9 +420,9 @@ export function VideoPreviewSection({
 
       {/* 2026-05-27 audit r12 P1:Mock fallback 时显式告诉用户原因 — 防止假装跑了真 Provider */}
       {capabilities?.isMock && capabilities.fallbackReason !== 'explicit_mock' && (
-        <div className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+        <div className="mb-3 rounded-md border border-[hsl(var(--color-warning)/0.3)] bg-[hsl(var(--color-warning)/0.05)] px-3 py-2 text-xs text-[hsl(var(--color-warning))]">
           <div className="flex items-center gap-2">
-            <span>⚠️</span>
+            <TriangleAlert className="size-3.5" />
             <span className="font-medium">
               当前 Provider 未真实接入 — 生成的是占位样片(非真实视频)
             </span>
@@ -442,8 +453,9 @@ export function VideoPreviewSection({
         />
       )}
       {progress.kind === 'failed' && (
-        <div className="mb-3 rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-700 dark:text-red-300">
-          ⛔ 生成失败:{progress.errorMsg}
+        <div className="mb-3 flex items-center gap-1.5 rounded-md border border-[hsl(var(--color-danger)/0.3)] bg-[hsl(var(--color-danger)/0.05)] px-3 py-2 text-xs text-[hsl(var(--color-danger))]">
+          <Ban className="size-3.5 shrink-0" />
+          <span>生成失败:{progress.errorMsg}</span>
           {progress.retryable && (
             <span className="ml-2 text-[hsl(var(--color-muted-foreground))]">(可重试)</span>
           )}
@@ -489,10 +501,10 @@ export function VideoPreviewSection({
               ASPECT_CLASS[aspectRatio] ?? 'aspect-[9/16]'
             } ${
               selectedTake?.status === 'FAILED'
-                ? 'border-red-500/40 bg-red-500/5 text-red-700 dark:text-red-300'
+                ? 'border-[hsl(var(--color-danger)/0.4)] bg-[hsl(var(--color-danger)/0.05)] text-[hsl(var(--color-danger))]'
                 : selectedTake?.status === 'RUNNING' ||
                     selectedTake?.status === 'QUEUED'
-                  ? 'border-amber-500/40 bg-amber-500/5 text-amber-700 dark:text-amber-300'
+                  ? 'border-[hsl(var(--color-warning)/0.4)] bg-[hsl(var(--color-warning)/0.05)] text-[hsl(var(--color-warning))]'
                   : 'border-[hsl(var(--color-border))] bg-[hsl(var(--color-muted))] text-[hsl(var(--color-muted-foreground))]'
             }`}
           >
@@ -500,7 +512,7 @@ export function VideoPreviewSection({
               <span>加载中...</span>
             ) : selectedTake?.status === 'FAILED' ? (
               <>
-                <span className="text-lg">❌</span>
+                <X className="size-5" />
                 <span className="font-medium">生成失败</span>
                 <div className="max-h-32 max-w-full overflow-y-auto break-words text-[10px] leading-relaxed opacity-90">
                   {selectedTake.errorMsg ?? '(无具体原因 — 见管理后台 /admin/api-usage 复盘)'}
@@ -513,7 +525,7 @@ export function VideoPreviewSection({
               // F4 深审修(P2):取消批量后最新 take 是 CANCELLED — 原 else 分支显示
               // "还没有视频"误导;主动取消用中性灰呈现,不当失败
               <>
-                <span className="text-lg">−</span>
+                <Minus className="size-5" />
                 <span className="font-medium">已取消</span>
                 <span className="text-[10px] opacity-70">
                   批量排队时被取消,预扣费用已退还 — 点右上"生成视频"可重新抽卡
@@ -522,7 +534,7 @@ export function VideoPreviewSection({
             ) : selectedTake?.status === 'RUNNING' ||
               selectedTake?.status === 'QUEUED' ? (
               <>
-                <span className="inline-block size-3 animate-pulse rounded-full bg-amber-500" />
+                <span className="inline-block size-3 animate-pulse rounded-full bg-[hsl(var(--color-warning))]" />
                 <span className="font-medium">生成中...</span>
                 <span className="text-[10px] opacity-70">
                   Seedance 2.0 Fast 约 3-4 分钟,系统每 5 秒自动刷新状态
@@ -544,11 +556,11 @@ export function VideoPreviewSection({
                   {/* 六八:缓存状态 — 完毕(绿,本地播放顺滑)/缓存中(琥珀,暂走直链可能卡) */}
                   {selectedTake.videoUrl &&
                     (selectedTake.cached ? (
-                      <span className="shrink-0 rounded bg-emerald-500/15 px-1 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
-                        ✓ 缓存完毕
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded bg-[hsl(var(--color-success-bg))] px-1 py-0.5 text-[10px] font-medium text-[hsl(var(--color-success))]">
+                        <Check className="size-3" /> 缓存完毕
                       </span>
                     ) : (
-                      <span className="shrink-0 rounded bg-amber-500/15 px-1 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                      <span className="shrink-0 rounded bg-[hsl(var(--color-warning-bg))] px-1 py-0.5 text-[10px] font-medium text-[hsl(var(--color-warning))]">
                         ● 缓存中…
                       </span>
                     ))}
@@ -597,7 +609,7 @@ export function VideoPreviewSection({
                   }
                 }}
                 disabled={rejectPending}
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-[hsl(var(--color-border))] px-2 hover:bg-red-500/10 hover:text-red-500 disabled:opacity-50"
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-[hsl(var(--color-border))] px-2 hover:bg-[hsl(var(--color-danger)/0.1)] hover:text-[hsl(var(--color-danger))] disabled:opacity-50"
                 title="从历史中删除(DB 保审计,前端隐藏)"
               >
                 <Trash2 className="size-3.5" />
@@ -621,7 +633,9 @@ export function VideoPreviewSection({
         return (
           <div className="mt-3 rounded-md border border-purple-500/40 bg-purple-500/5 p-2">
             <div className="mb-1.5 flex items-center justify-between text-[11px] font-medium text-purple-700 dark:text-purple-300">
-              <span>⚔ 对决对比</span>
+              <span className="inline-flex items-center gap-1">
+                <Swords className="size-3.5" /> 对决对比
+              </span>
               {!bothDone && <span className="font-normal opacity-70">生成中,完成自动更新…</span>}
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -637,8 +651,15 @@ export function VideoPreviewSection({
                         // eslint-disable-next-line jsx-a11y/media-has-caption
                         <video src={t.videoUrl} controls playsInline preload="metadata" className="aspect-[9/16] max-h-48 w-full object-contain" />
                       ) : (
-                        <div className="flex aspect-[9/16] max-h-48 w-full items-center justify-center text-[10px] text-white/60">
-                          {t.status === 'FAILED' ? `✕ 失败:${(t.errorMsg ?? '').slice(0, 30)}` : '生成中…'}
+                        <div className="flex aspect-[9/16] max-h-48 w-full items-center justify-center gap-1 text-[10px] text-white/60">
+                          {t.status === 'FAILED' ? (
+                            <>
+                              <X className="size-3 shrink-0" />
+                              <span>失败:{(t.errorMsg ?? '').slice(0, 30)}</span>
+                            </>
+                          ) : (
+                            '生成中…'
+                          )}
                         </div>
                       )}
                     </div>
@@ -690,7 +711,7 @@ export function VideoPreviewSection({
                 onClick={() => setSortByQc((v) => !v)}
                 className={`rounded border px-1.5 py-0.5 transition-colors ${
                   sortByQc
-                    ? 'border-blue-500 bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                    ? 'border-[hsl(var(--color-info))] bg-[hsl(var(--color-info)/0.1)] text-[hsl(var(--color-info))]'
                     : 'border-[hsl(var(--color-border))] hover:bg-[hsl(var(--color-muted))]'
                 }`}
                 title={sortByQc ? '当前按 QC 分排序(高分在前,未评分压底)' : '当前按时间排序(最新在前)'}
@@ -707,7 +728,7 @@ export function VideoPreviewSection({
                 key={t.id}
                 className={`flex items-center gap-2 rounded-md border px-2 py-1.5 text-xs ${
                   selectedTakeId === t.id
-                    ? 'border-blue-500 bg-blue-500/10'
+                    ? 'border-[hsl(var(--color-info))] bg-[hsl(var(--color-info)/0.1)]'
                     : 'border-[hsl(var(--color-border))]'
                 }`}
               >
@@ -732,21 +753,23 @@ export function VideoPreviewSection({
                   <div
                     className={`flex size-8 shrink-0 items-center justify-center rounded text-[10px] font-medium ${
                       t.status === 'SUCCESS'
-                        ? 'bg-green-600/20 text-green-700 dark:text-green-400'
+                        ? 'bg-[hsl(var(--color-success)/0.2)] text-[hsl(var(--color-success))]'
                         : t.status === 'FAILED'
-                          ? 'bg-red-600/20 text-red-700 dark:text-red-400'
+                          ? 'bg-[hsl(var(--color-danger)/0.2)] text-[hsl(var(--color-danger))]'
                           : t.status === 'CANCELLED'
-                            ? 'bg-zinc-500/20 text-zinc-500 dark:text-zinc-400'
-                            : 'bg-amber-500/20 text-amber-700 dark:text-amber-400'
+                            ? 'bg-[hsl(var(--color-neutral)/0.2)] text-[hsl(var(--color-neutral))]'
+                            : 'bg-[hsl(var(--color-warning)/0.2)] text-[hsl(var(--color-warning))]'
                     }`}
                   >
-                    {t.status === 'SUCCESS'
-                      ? '✓'
-                      : t.status === 'FAILED'
-                        ? '✕'
-                        : t.status === 'CANCELLED'
-                          ? '−'
-                          : '⋯'}
+                    {t.status === 'SUCCESS' ? (
+                      <Check className="size-4" />
+                    ) : t.status === 'FAILED' ? (
+                      <X className="size-4" />
+                    ) : t.status === 'CANCELLED' ? (
+                      <Minus className="size-4" />
+                    ) : (
+                      <MoreHorizontal className="size-4" />
+                    )}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 text-[length:0.78em] font-medium">
@@ -765,13 +788,18 @@ export function VideoPreviewSection({
                     {/* F4 深审修:CANCELLED 是主动取消,中性灰呈现不当失败 */}
                     {t.errorMsg && (
                       <div
-                        className={`mt-0.5 break-words text-[10px] leading-tight ${
+                        className={`mt-0.5 flex items-start gap-1 break-words text-[10px] leading-tight ${
                           t.status === 'CANCELLED'
-                            ? 'text-zinc-500 dark:text-zinc-400'
-                            : 'text-red-700 dark:text-red-400'
+                            ? 'text-[hsl(var(--color-neutral))]'
+                            : 'text-[hsl(var(--color-danger))]'
                         }`}
                       >
-                        {t.status === 'CANCELLED' ? '−' : '❌'} {t.errorMsg}
+                        {t.status === 'CANCELLED' ? (
+                          <Minus className="mt-px size-3 shrink-0" />
+                        ) : (
+                          <X className="mt-px size-3 shrink-0" />
+                        )}
+                        <span>{t.errorMsg}</span>
                       </div>
                     )}
                   </div>
@@ -801,7 +829,7 @@ export function VideoPreviewSection({
                   disabled={rejectPending}
                   title="从历史删除(DB 保审计)"
                   aria-label="删除"
-                  className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-[hsl(var(--color-border))] hover:bg-red-500/10 hover:text-red-500 disabled:opacity-50"
+                  className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-[hsl(var(--color-border))] hover:bg-[hsl(var(--color-danger)/0.1)] hover:text-[hsl(var(--color-danger))] disabled:opacity-50"
                 >
                   <Trash2 className="size-3.5" />
                 </button>
@@ -832,10 +860,10 @@ function QcBadge({
   if (take.qcScore !== null) {
     const tone =
       take.qcScore >= 80
-        ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+        ? 'bg-[hsl(var(--color-success-bg))] text-[hsl(var(--color-success))]'
         : take.qcScore >= 60
-          ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-          : 'bg-rose-500/15 text-rose-600 dark:text-rose-400';
+          ? 'bg-[hsl(var(--color-warning-bg))] text-[hsl(var(--color-warning))]'
+          : 'bg-[hsl(var(--color-danger-bg))] text-[hsl(var(--color-danger))]';
     return (
       <span className="inline-flex shrink-0 items-center gap-1">
         <span
@@ -847,9 +875,9 @@ function QcBadge({
         {take.qcDrift && (
           <span
             title="人物漂移:帧中人物与参考形象图不一致"
-            className="shrink-0 rounded bg-rose-500/15 px-1 py-0.5 text-[10px] font-medium text-rose-600 dark:text-rose-400"
+            className="inline-flex shrink-0 items-center gap-0.5 rounded bg-[hsl(var(--color-danger-bg))] px-1 py-0.5 text-[10px] font-medium text-[hsl(var(--color-danger))]"
           >
-            ⚠ 漂移
+            <TriangleAlert className="size-3" /> 漂移
           </span>
         )}
       </span>
@@ -859,7 +887,7 @@ function QcBadge({
     return (
       <span
         title={`QC 评分失败:${take.qcError}`}
-        className="shrink-0 rounded bg-zinc-500/15 px-1 py-0.5 text-[10px] font-medium text-zinc-500 dark:text-zinc-400"
+        className="shrink-0 rounded bg-[hsl(var(--color-neutral-bg))] px-1 py-0.5 text-[10px] font-medium text-[hsl(var(--color-neutral))]"
       >
         QC 失败
       </span>
@@ -869,7 +897,7 @@ function QcBadge({
     return (
       <span
         title="QC 评分中(VLM 判官抽帧打分,分钟级)"
-        className="shrink-0 rounded bg-sky-500/15 px-1 py-0.5 text-[10px] font-medium text-sky-600 dark:text-sky-400"
+        className="shrink-0 rounded bg-[hsl(var(--color-info-bg))] px-1 py-0.5 text-[10px] font-medium text-[hsl(var(--color-info))]"
       >
         QC…
       </span>

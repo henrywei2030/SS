@@ -1,6 +1,6 @@
 'use client';
 import * as React from 'react';
-import { Loader2, Images, X, RotateCw, Sparkles } from 'lucide-react';
+import { Loader2, Images, X, RotateCw, Sparkles, Check, CircleSlash, Circle } from 'lucide-react';
 
 import { trpc } from '@/lib/trpc/client';
 import { Button } from '@/components/ui/button';
@@ -276,13 +276,13 @@ export function ArtBatchGenerate({
                       {s.status === 'running' ? (
                         <Loader2 className="size-2.5 animate-spin" />
                       ) : s.status === 'done' ? (
-                        '✓'
+                        <Check className="size-2.5" />
                       ) : s.status === 'failed' ? (
-                        '✗'
+                        <X className="size-2.5" />
                       ) : s.status === 'cancelled' ? (
-                        '⊘'
+                        <CircleSlash className="size-2.5" />
                       ) : (
-                        '○'
+                        <Circle className="size-2.5" />
                       )}
                       {s.name}
                     </span>
@@ -309,7 +309,7 @@ export function ArtBatchGenerate({
                 onClick={() => {
                   cancelRef.current = true;
                 }}
-                className="text-red-600"
+                className="text-[hsl(var(--color-danger))]"
               >
                 <X className="size-3.5" />
                 中断(进行中的跑完即停)

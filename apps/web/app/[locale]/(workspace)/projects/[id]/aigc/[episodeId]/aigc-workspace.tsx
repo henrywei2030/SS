@@ -245,7 +245,7 @@ export function AigcWorkspace({
                         {successCount > 0 && (
                           <span
                             title={`成功 ${successCount} 条`}
-                            className="flex items-center gap-0.5 rounded bg-green-500/10 px-1 py-px text-green-700 dark:text-green-400"
+                            className="flex items-center gap-0.5 rounded bg-[hsl(var(--color-success-bg))] px-1 py-px text-[hsl(var(--color-success))]"
                           >
                             <Check className="size-2.5" />
                             {successCount}
@@ -254,7 +254,7 @@ export function AigcWorkspace({
                         {failed > 0 && (
                           <span
                             title={`失败 ${failed} 条`}
-                            className="flex items-center gap-0.5 rounded bg-red-500/10 px-1 py-px text-red-700 dark:text-red-400"
+                            className="flex items-center gap-0.5 rounded bg-[hsl(var(--color-danger-bg))] px-1 py-px text-[hsl(var(--color-danger))]"
                           >
                             <X className="size-2.5" />
                             {failed}
@@ -263,7 +263,7 @@ export function AigcWorkspace({
                         {running > 0 && (
                           <span
                             title={`生成中 ${running} 条`}
-                            className="flex items-center gap-0.5 rounded bg-amber-500/10 px-1 py-px text-amber-700 dark:text-amber-400"
+                            className="flex items-center gap-0.5 rounded bg-[hsl(var(--color-warning-bg))] px-1 py-px text-[hsl(var(--color-warning))]"
                           >
                             <Loader2 className="size-2.5 animate-spin" />
                             {running}
@@ -279,7 +279,7 @@ export function AigcWorkspace({
                     onClick={() => onRenameGroup(g)}
                     aria-label={`重命名生成段 ${g.number}`}
                     title="重命名"
-                    className="rounded px-1 py-0.5 hover:bg-black/10 focus-visible:bg-black/10 focus-visible:outline focus-visible:outline-1 focus-visible:outline-blue-500 dark:hover:bg-white/10 dark:focus-visible:bg-white/10"
+                    className="rounded px-1 py-0.5 hover:bg-black/10 focus-visible:bg-black/10 focus-visible:outline focus-visible:outline-1 focus-visible:outline-[hsl(var(--color-info))] dark:hover:bg-white/10 dark:focus-visible:bg-white/10"
                   >
                     <Pencil className="size-3" />
                   </button>
@@ -287,7 +287,7 @@ export function AigcWorkspace({
                     onClick={() => onArchiveGroup(g)}
                     aria-label={`归档生成段 ${g.number}(软删,可在 DB 恢复)`}
                     title="归档(软删,可在 DB 恢复)"
-                    className="rounded px-1 py-0.5 hover:bg-red-500/20 hover:text-red-500 focus-visible:bg-red-500/20 focus-visible:text-red-500 focus-visible:outline focus-visible:outline-1 focus-visible:outline-red-500"
+                    className="rounded px-1 py-0.5 hover:bg-[hsl(var(--color-danger)/0.2)] hover:text-[hsl(var(--color-danger))] focus-visible:bg-[hsl(var(--color-danger)/0.2)] focus-visible:text-[hsl(var(--color-danger))] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[hsl(var(--color-danger))]"
                   >
                     <Archive className="size-3" />
                   </button>

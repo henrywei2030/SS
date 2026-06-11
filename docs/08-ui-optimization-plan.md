@@ -144,3 +144,31 @@
 - 整改前后各留一套六视图截图(分镜/AIGC/美术/编辑抽屉/素材库/admin)进 docs/ui-baseline/
 - 量化目标:任意值字号 0 处(白名单外)/ 硬编码状态色 0 处 / 手写按钮 0 处 / emoji 图标≤2 种(✨系)
 - 桌面壳(.dmg)与 web 双形态各过一遍 P0 项(导航折行在窄窗桌面壳更易复现)
+
+---
+
+## 6. 执行记录(七二第六波 · 2026-06-12 mac-studio)
+
+> 记录方案实际执行进度 + 落地中发现的「优化修订」(对原方案的纠偏)。
+
+### 已落地
+- **P0**(七二第五波):导航折行 / 符号串→chip / 「0场」破案 — 全部已修。
+- **P1-a token 基座**:
+  - ✅ **语义五族色变量**:globals.css 新增 `--color-{success,warning,danger,info,neutral}` + `-bg` 淡底,亮/暗双值(base success/warning/info 此前已有,本次补 `-bg`/danger/neutral)。
+  - ✅ **Button 组件**:核对发现**已完备**(default/secondary/outline/ghost/destructive + sm `h-7`/default/lg/icon)— 原方案「补 sm 高度与 ghost 规则」**无需做**。
+- **P1-b 批①(AIGC 工作台)+ P1-c(AIGC 边框)**:
+  - `group-detail.tsx`:14 emoji→lucide · 12 色→语义变量 · 4 处去嵌套描边
+  - `video-preview-section.tsx`:11 emoji→lucide · 20 色→语义变量
+  - `aigc-workspace.tsx`:5 色→语义变量
+  - 浏览器实证:lucide 图标渲染正常、语义色生效、✨系保留、**零 console 错误**、typecheck 16/16。
+
+### 优化修订(落地中纠偏)
+1. **⚠️ 字号 5 级 token 迁移暂缓(重要纠偏)**:globals.css 已有一套**上线的全局 +2px 字号系统**(2026-06 用户需求「所有文字增大约 2px」:把 `text-[Npx]` 任意值整体映射 +2,admin-pane 专属再放大)。原方案的「9 种→5 级 + 禁任意值」与之**直接冲突** —— naive 迁移会推翻用户的 +2px 诉求,且 ~428 处高 churn 回归风险大。**修订**:保留 +2px 系统;字号收敛降级为「软约束」(新代码用语义级 `text-2xs/xs/sm/base/lg`,旧代码随 +2px 映射保留,lint 仅警告不阻断)。
+2. **语义色非从零建**:base 已有,本次是补全 `-bg`/danger/neutral + 机械接入。
+3. **Button 已完备**:P1-a 该项跳过。
+4. **relay 素材同步**(本波顺带):`asset-generate`/`aigc-keyframe` 生成图补 `syncMediaToRelay`(详见 PROGRESS)。
+
+### 待续(机械重复 AIGC 模式,每批截图回归)
+- **批② 美术工坊**(`art/`,17 文件)· **批③ 导演分镜**(`director/`,18 文件)· **批④ 管理后台**(`admin/`,35 文件,内部工具优先级低)。
+- **lint 守卫**(禁裸状态色类名 + 字号软警告)待批次清完再上,避免存量噪音。
+- P2 打磨项(相对时间/tabular-nums/滚动渐隐/空态组件)按原计划塞缝。

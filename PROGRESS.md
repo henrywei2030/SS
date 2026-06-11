@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-06-12(周五,mac-studio · 七二第七波:relay 素材同步 + UI 方案执行 + UI 代码三遍复审)
+
+**完成**
+- ✅ **relay 素材同步(用户任务①)**:`generateImage`(人物/场景/三视图等资产图)+ `generateKeyframe`(关键帧)生成后补 `syncMediaToRelay` — 同步到 moyu 素材库拿 asset:// URL,供 relay-* provider 视频生成免重传直引。补上 happyhorse/wan 等 **R2V/I2V 拉不到本机参考图的最后缺口**(此前只有尾帧/声线/上传走了同步)。事务外做避免持锁等 moyu HTTP;`relay.assets.default_group_id` 未配时静默降级(null);best-effort 失败记 meta.relaySyncError 不阻塞。api 57 + core 277 通过。
+- ✅ **UI 方案执行(用户任务②,docs/08)**:
+  - **P1-a 基座**:globals.css 补语义五族色变量 `--color-{success,warning,danger,info,neutral}` + `-bg` 淡底(亮暗双值;base 已有,补 -bg/danger/neutral)
+  - **P1-b 机械替换**:aigc + art + director **三大用户面裸状态色全部清零** — 共 **~38 emoji→lucide · ~118 硬编码色→语义变量 · 4 处减嵌套描边**,跨 ~21 文件(4 个并行 workflow,每批 typecheck + 浏览器截图回归;暗+亮双模式实证零 console 错误)
+  - **优化修订(过程发现,写入 docs/08 §6)**:① **字号 5 级迁移暂缓** — 与已上线全局 +2px 系统冲突,naive 迁移会推翻用户 +2px 诉求,改软约束 ② Button 组件**已完备**,P1-a 跳过 ③ art 目录大多已语义化(实际 3 文件非 17)④ 清理冗余 dark: 变体
+- ✅ **UI 代码三遍复审(用户要求确保美观无漏洞)**:① 我读 group-detail/video-preview diff + relay sync 自检 ② 4 个对抗式 review agent 复审全 21 文件:色语义映射 **100% 正确**(无反转/误映,危险操作正确落 danger,purple对决/✨ 正确保留),import 卫生干净,零逻辑改动,4 组全判「可放心提交」③ typecheck 16/16 + 无 unused lucide import + 裸状态色全目录 0 + 暗亮双模式浏览器实证。修 3 处 P2 打磨:warning 亮模式压暗一档提对比 / ⊘○ 状态符→CircleSlash·Circle(四态徽章统一矢量图标)/ 🩺→Stethoscope
+- ✅ 回归:**typecheck 16/16 · api 57 · core 277+2skip**;25 文件改(2 后端 relay + globals.css + docs/08 + 21 UI)
+
+**问题/待决策**
+- ❓ **relay 真实启用**:需用户在 moyu 后台建 group 拿 group_id 填 `/admin/settings` 的 `relay.assets.default_group_id`(本地 dev MinIO 非公网时同步降级,部署公网存储后才真生效)
+- ❓ warning 亮模式淡底对比仍非严格 AA(根因变量取值)— 已压暗一档改善,彻底解决可加 `--warning-fg` 作设计系统跟进
+- ❓ admin 密码仍初始 `admin123!@#`(上波恢复)
+
+**下次接着做**
+- 📌 **UI P1-b 批④ admin**(35 文件,内部工具低优)+ lint 守卫(禁裸状态色类名,待批次清完上)
+- 📌 字号软约束 token(新代码语义级,不硬替换旧的)+ P2 打磨(相对时间/tabular-nums/滚动渐隐/空态组件)
+
+---
+
 ## 2026-06-12(周五,mac-studio · 七二第六波:开工同步 → 用户报 5 项 + happyhorse 真打诊断 → 全盘复审 2 遍收工)
 
 **完成**

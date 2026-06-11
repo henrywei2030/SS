@@ -12,6 +12,9 @@ import {
   X,
   RotateCw,
   Combine,
+  Check,
+  CircleSlash,
+  Circle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -428,13 +431,13 @@ export function ShotsActions({
                       {e.status === 'running' ? (
                         <Loader2 className="size-2.5 animate-spin" />
                       ) : e.status === 'done' ? (
-                        '✓'
+                        <Check className="size-2.5" />
                       ) : e.status === 'failed' ? (
-                        '✗'
+                        <X className="size-2.5" />
                       ) : e.status === 'cancelled' ? (
-                        '⊘'
+                        <CircleSlash className="size-2.5" />
                       ) : (
-                        '○'
+                        <Circle className="size-2.5" />
                       )}
                       第{e.episodeNumber}集
                     </span>
@@ -455,7 +458,7 @@ export function ShotsActions({
 
           <DialogFooter>
             {batchRunning ? (
-              <Button variant="outline" size="sm" onClick={cancelBatch} className="text-red-600">
+              <Button variant="outline" size="sm" onClick={cancelBatch} className="text-[hsl(var(--color-danger))]">
                 <X className="size-3.5" />
                 中断生成(进行中的集跑完即停)
               </Button>

@@ -8,7 +8,7 @@
  * 「草稿审阅再应用」:用户拍板,LLM 产出永远先过人眼再落库。
  */
 import * as React from 'react';
-import { Loader2, Check, ChevronDown, ChevronRight } from 'lucide-react';
+import { Loader2, Check, ChevronDown, ChevronRight, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
 
 import type { inferRouterOutputs } from '@trpc/server';
@@ -273,8 +273,8 @@ export function BreakdownReviewDialog({
               </div>
             )}
             {warning && (
-              <div className="rounded border border-[hsl(var(--color-warning))]/40 bg-[hsl(var(--color-warning))]/10 px-2 py-1.5 text-[11px] text-[hsl(var(--color-warning))]">
-                ⚠️ {warning}
+              <div className="flex items-center gap-1 rounded border border-[hsl(var(--color-warning))]/40 bg-[hsl(var(--color-warning))]/10 px-2 py-1.5 text-[11px] text-[hsl(var(--color-warning))]">
+                <TriangleAlert className="size-3 shrink-0" /> {warning}
               </div>
             )}
             {(['CHARACTER', 'SCENE', 'PROP'] as const).map((type) => {

@@ -103,7 +103,7 @@ export function EpisodeSidebar({
                     第 {ep.number} 集
                     {ep.batchLocked && (
                       <Lock
-                        className="size-3 text-amber-500"
+                        className="size-3 text-[hsl(var(--color-warning))]"
                         aria-label="已锁定 · 批量生成与重新上传都跳过"
                       />
                     )}
@@ -137,8 +137,8 @@ export function EpisodeSidebar({
                   className={cn(
                     'flex size-6 items-center justify-center rounded text-[hsl(var(--color-muted-foreground))]',
                     ep.batchLocked
-                      ? 'hover:bg-amber-500/10 hover:text-amber-500'
-                      : 'hover:bg-blue-500/10 hover:text-blue-500',
+                      ? 'hover:bg-[hsl(var(--color-warning)/0.1)] hover:text-[hsl(var(--color-warning))]'
+                      : 'hover:bg-[hsl(var(--color-info)/0.1)] hover:text-[hsl(var(--color-info))]',
                   )}
                 >
                   {ep.batchLocked ? <Lock className="size-3.5" /> : <Unlock className="size-3.5" />}
@@ -150,7 +150,7 @@ export function EpisodeSidebar({
                       setPendingDelete(ep);
                     }}
                     title="删除本集(可恢复:数据库 deletedAt 标记)"
-                    className="flex size-6 items-center justify-center rounded text-[hsl(var(--color-muted-foreground))] hover:bg-red-500/10 hover:text-red-500"
+                    className="flex size-6 items-center justify-center rounded text-[hsl(var(--color-muted-foreground))] hover:bg-[hsl(var(--color-danger)/0.1)] hover:text-[hsl(var(--color-danger))]"
                   >
                     <Trash2 className="size-3.5" />
                   </button>
@@ -175,7 +175,7 @@ export function EpisodeSidebar({
               {pendingDelete && pendingDelete.shotCount > 0 ? (
                 <>
                   <br />
-                  <span className="text-red-500">
+                  <span className="text-[hsl(var(--color-danger))]">
                     本集已有 {pendingDelete.shotCount} 镜 / {pendingDelete.groupCount} 组,
                     删除后无法在此页面恢复(数据库 deletedAt 标记可手动还原)。
                   </span>
@@ -235,7 +235,7 @@ function EpisodeStatusBadge({ ep }: { ep: EpisodeBrief }): React.ReactElement {
   // 分镜已生成:有分镜但未发布,或发布后又改了分镜/组(自动整合 / 重新生成)→ 待(重新)发布同步 AIGC
   return (
     <Badge variant="default" className="flex items-center gap-0.5 px-1 text-[9px]">
-      <span className="size-1.5 rounded-full bg-blue-400" />分镜已生成
+      <span className="size-1.5 rounded-full bg-[hsl(var(--color-info))]" />分镜已生成
     </Badge>
   );
 }

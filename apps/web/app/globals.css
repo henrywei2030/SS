@@ -42,8 +42,15 @@
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-fg);
   --color-success: var(--success);
+  --color-success-bg: var(--success-bg);
   --color-warning: var(--warning);
+  --color-warning-bg: var(--warning-bg);
+  --color-danger: var(--destructive);
+  --color-danger-bg: var(--danger-bg);
   --color-info: var(--info);
+  --color-info-bg: var(--info-bg);
+  --color-neutral: var(--neutral);
+  --color-neutral-bg: var(--neutral-bg);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -88,8 +95,15 @@
   --destructive: 0 72% 47%;
   --destructive-fg: 0 0% 100%;
   --success: 142 64% 39%;
-  --warning: 38 92% 47%;
+  --warning: 38 95% 40%;           /* 七二第六波:亮模式压暗一档(原 47%)— 提升 warning 文字在 warning-bg 淡底上的对比 */
   --info: 217 91% 55%;
+  /* 七二第六波·语义五族背景淡色(状态 chip / 提示行底色,亮模式) */
+  --success-bg: 142 50% 92%;
+  --warning-bg: 38 85% 92%;
+  --danger-bg: 0 72% 94%;
+  --info-bg: 217 85% 93%;
+  --neutral: 0 0% 45%;
+  --neutral-bg: 0 0% 93%;
 
   --border: 0 0% 90%;              /* #E5E5E5 浅边 */
   --input: 0 0% 100%;
@@ -131,6 +145,13 @@
   --success: 142 64% 47%;
   --warning: 38 92% 55%;
   --info: 217 91% 62%;
+  /* 七二第六波·语义五族背景淡色(状态 chip / 提示行底色,暗模式) */
+  --success-bg: 142 40% 20%;
+  --warning-bg: 38 55% 20%;
+  --danger-bg: 0 50% 22%;
+  --info-bg: 217 55% 22%;
+  --neutral: 0 0% 62%;
+  --neutral-bg: 0 0% 22%;
 
   --border: 0 0% 23%;              /* #3B3B3B 暗边 */
   --input: 0 0% 16%;

@@ -68,7 +68,7 @@ export function PromptDialog({
             onKeyDown={handleKeyDown}
             maxLength={100}
             aria-label={title}
-            className="w-full rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-3 py-2 text-sm outline-none focus:border-blue-500"
+            className="w-full rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-3 py-2 text-sm outline-none focus:border-[hsl(var(--color-info))]"
           />
         </div>
         <footer className="flex justify-end gap-2 border-t border-[hsl(var(--color-border))] px-5 py-3">
@@ -81,7 +81,7 @@ export function PromptDialog({
           <button
             onClick={() => onConfirm(value)}
             disabled={!value.trim()}
-            className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            className="rounded-md bg-[hsl(var(--color-info))] px-3 py-1.5 text-xs font-medium text-white hover:bg-[hsl(var(--color-info)/0.9)] disabled:opacity-50"
           >
             确定
           </button>

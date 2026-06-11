@@ -41,10 +41,10 @@ export function InflightProgressPanel({
     progress.kind === 'progress' && progress.message ? progress.message : null;
 
   return (
-    <div className="mb-3 rounded-md border border-blue-500/30 bg-blue-500/5 p-3 text-xs text-blue-700 dark:text-blue-300">
+    <div className="mb-3 rounded-md border border-[hsl(var(--color-info)/0.3)] bg-[hsl(var(--color-info)/0.05)] p-3 text-xs text-[hsl(var(--color-info))]">
       <div className="flex items-center justify-between gap-2">
         <span className="flex items-center gap-2">
-          <span className="inline-block size-2 animate-pulse rounded-full bg-blue-500" />
+          <span className="inline-block size-2 animate-pulse rounded-full bg-[hsl(var(--color-info))]" />
           <span className="font-medium">
             {progress.kind === 'connecting' ? '建立连接中...' : '视频生成中'}
           </span>
@@ -56,9 +56,9 @@ export function InflightProgressPanel({
         )}
       </div>
       {startedAt && (
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-blue-500/15">
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[hsl(var(--color-info)/0.15)]">
           <div
-            className="h-full rounded-full bg-blue-500 transition-all duration-1000 ease-linear"
+            className="h-full rounded-full bg-[hsl(var(--color-info))] transition-all duration-1000 ease-linear"
             style={{ width: `${displayPercent}%` }}
           />
         </div>

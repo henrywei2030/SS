@@ -1,6 +1,6 @@
 'use client';
 import * as React from 'react';
-import { Loader2, CircleSlash, CircleCheck, Sparkles, X } from 'lucide-react';
+import { Loader2, CircleSlash, CircleCheck, Sparkles, X, Check } from 'lucide-react';
 
 import { trpc } from '@/lib/trpc/client';
 import { Badge } from '@/components/ui/badge';
@@ -88,15 +88,17 @@ export function GapDetectionDialog({ projectId, onClose, onOpenBreakdown }: Prop
               <Section
                 icon={
                   gaps.missingCharacters.length === 0 ? (
-                    <CircleCheck className="size-4 text-emerald-500" />
+                    <CircleCheck className="size-4 text-[hsl(var(--color-success))]" />
                   ) : (
-                    <CircleSlash className="size-4 text-rose-500" />
+                    <CircleSlash className="size-4 text-[hsl(var(--color-danger))]" />
                   )
                 }
                 title={`缺失人物资产 (${gaps.missingCharacters.length})`}
               >
                 {gaps.missingCharacters.length === 0 ? (
-                  <p className="text-[11px] text-emerald-500">人物资产齐全 ✓</p>
+                  <p className="flex items-center gap-1 text-[11px] text-[hsl(var(--color-success))]">
+                    人物资产齐全 <Check className="size-3" />
+                  </p>
                 ) : (
                   <div className="flex flex-wrap gap-1">
                     {gaps.missingCharacters.map((c) => (
@@ -116,15 +118,17 @@ export function GapDetectionDialog({ projectId, onClose, onOpenBreakdown }: Prop
               <Section
                 icon={
                   gaps.missingScenes.length === 0 ? (
-                    <CircleCheck className="size-4 text-emerald-500" />
+                    <CircleCheck className="size-4 text-[hsl(var(--color-success))]" />
                   ) : (
-                    <CircleSlash className="size-4 text-rose-500" />
+                    <CircleSlash className="size-4 text-[hsl(var(--color-danger))]" />
                   )
                 }
                 title={`缺失场景资产 (${gaps.missingScenes.length})`}
               >
                 {gaps.missingScenes.length === 0 ? (
-                  <p className="text-[11px] text-emerald-500">场景资产齐全 ✓</p>
+                  <p className="flex items-center gap-1 text-[11px] text-[hsl(var(--color-success))]">
+                    场景资产齐全 <Check className="size-3" />
+                  </p>
                 ) : (
                   <ul className="space-y-1">
                     {gaps.missingScenes.map((s) => (

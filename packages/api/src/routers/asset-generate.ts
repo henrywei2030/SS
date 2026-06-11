@@ -7,7 +7,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { compileAssetPrompt } from "@ss/core/asset";
-import { assetCategoryFromType, assetImageFilename } from "@ss/core/media";
+import { assetCategoryFromType, assetImageFilename, syncMediaToRelay } from "@ss/core/media";
 import { getImageProvider, getTextProvider } from "@ss/adapters/provider";
 import { getStorageAdapter } from "@ss/adapters/storage";
 import { getEventBus } from "@ss/adapters/eventbus";
@@ -531,6 +531,28 @@ export const generateProcedures = {
           ? (imageResult.costCny / imageResult.imageUrls.length).toFixed(6)
           : '0';
 
+      // 七二第六波·relay 素材同步:资产图(portrait/threeView/scene 等)同步到中转站素材库 —
+      //   否则 relay-* provider 视频生成拉不到本地 MinIO 图(happyhorse/wan 等 R2V/I2V 报「缺主图」)。
+      //   未配 relay.assets.default_group_id 时静默降级(返回 null);在事务外做,避免持锁等 moyu HTTP。
+      const relayMetas = await Promise.all(
+        imageResult.imageUrls.map((url, i) =>
+          syncMediaToRelay({
+            storageKey: url.startsWith('http')
+              ? `placeholder://external?u=${encodeURIComponent(url)}`
+              : url,
+            kind: 'IMAGE',
+            filename: assetImageFilename(
+              asset.name,
+              input.slot,
+              startedAt,
+              i,
+              input.slot === 'three_view' && asset.type === 'SCENE' ? '九宫格' : undefined,
+            ),
+            publicUrl: url.startsWith('http') ? url : null,
+          }),
+        ),
+      );
+
       // 三类写入(MediaItem×N + GenerationAttempt + CostLedgerEntry)用同一事务
       // 任一失败回滚全部 — 防出现"图片入库但没账单"或"账单但找不到图"
       const { mediaIds, attempt } = await ctx.prisma.$transaction(async (tx) => {
@@ -568,6 +590,9 @@ export const generateProcedures = {
                   height: imageResult.height,
                   providerId,
                   modelId: input.modelId ?? providerId,
+                  // 七二第六波:relay 素材同步结果(relayAssetUrl/relayAssetId 或 relaySyncError)—
+                  //   供 compile 在 relay provider 场景用 asset:// 免重传
+                  ...(relayMetas[i] ?? {}),
                 },
                 aspectRatio,
                 viewKind: input.slot,

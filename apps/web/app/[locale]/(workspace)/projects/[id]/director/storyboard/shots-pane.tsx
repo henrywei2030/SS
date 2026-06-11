@@ -9,6 +9,7 @@ import {
   ArrowDown,
   X,
   Pencil,
+  Music,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -552,8 +553,9 @@ function GroupRow({
                 />
               </span>
               {s.sound && (
-                <div className="text-[length:0.82em] text-[hsl(var(--color-muted-foreground))]/75">
-                  ♪ {s.sound}
+                <div className="flex items-center gap-1 text-[length:0.82em] text-[hsl(var(--color-muted-foreground))]/75">
+                  <Music className="size-3 shrink-0" />
+                  {s.sound}
                 </div>
               )}
             </div>
@@ -856,8 +858,9 @@ function ShotRow({
           {shot.lighting && <span className="ml-1">· 光线:{shot.lighting}</span>}
         </div>
         {shot.sound && (
-          <div className="mt-0.5 text-[length:0.82em] leading-relaxed text-[hsl(var(--color-muted-foreground))]/75">
-            ♪ {shot.sound}
+          <div className="mt-0.5 flex items-center gap-1 text-[length:0.82em] leading-relaxed text-[hsl(var(--color-muted-foreground))]/75">
+            <Music className="size-3 shrink-0" />
+            {shot.sound}
           </div>
         )}
       </td>

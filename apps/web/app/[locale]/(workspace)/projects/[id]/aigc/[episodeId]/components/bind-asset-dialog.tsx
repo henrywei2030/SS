@@ -1,4 +1,5 @@
 'use client';
+import { X } from 'lucide-react';
 import * as React from 'react';
 
 import { trpc } from '@/lib/trpc/client';
@@ -52,9 +53,9 @@ export function BindAssetDialog({
           <h3 className="text-sm font-semibold">关联素材到本生成段</h3>
           <button
             onClick={onClose}
-            className="text-sm text-[hsl(var(--color-muted-foreground))] hover:text-[hsl(var(--color-foreground))]"
+            className="text-[hsl(var(--color-muted-foreground))] hover:text-[hsl(var(--color-foreground))]"
           >
-            ✕
+            <X className="size-4" />
           </button>
         </header>
         <div className="flex gap-2 border-b border-[hsl(var(--color-border))] px-5 py-2">
@@ -85,7 +86,7 @@ export function BindAssetDialog({
                   className={`group flex flex-col overflow-hidden rounded-md border border-[hsl(var(--color-border))] text-left transition ${
                     a.alreadyBound
                       ? 'opacity-40'
-                      : 'hover:border-blue-500'
+                      : 'hover:border-[hsl(var(--color-info))]'
                   }`}
                   title={
                     a.alreadyBound ? '已关联到本生成段' : `点击关联 — ${a.description ?? ''}`
@@ -108,7 +109,7 @@ export function BindAssetDialog({
                       </div>
                     )}
                     {a.alreadyBound && (
-                      <span className="absolute right-1 top-1 rounded bg-green-600/90 px-1.5 py-0.5 text-[10px] text-white">
+                      <span className="absolute right-1 top-1 rounded bg-[hsl(var(--color-success)/0.9)] px-1.5 py-0.5 text-[10px] text-white">
                         已关联
                       </span>
                     )}

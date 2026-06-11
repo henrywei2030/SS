@@ -7,7 +7,7 @@
  * 服务端重估比对防陈旧报价)→ 总进度横幅(listGroups 轮询驱动)+「取消排队」。
  */
 import * as React from 'react';
-import { Loader2, Play, XCircle } from 'lucide-react';
+import { Loader2, Play, TriangleAlert, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { trpc } from '@/lib/trpc/client';
@@ -36,10 +36,10 @@ interface BatchEstimate {
 }
 
 const PRIORITY_CHIP: Record<string, string> = {
-  S: 'bg-rose-500/15 text-rose-600 dark:text-rose-400',
-  A: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
-  B: 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
-  C: 'bg-zinc-500/15 text-zinc-500 dark:text-zinc-400',
+  S: 'bg-[hsl(var(--color-danger)/0.15)] text-[hsl(var(--color-danger))]',
+  A: 'bg-[hsl(var(--color-warning)/0.15)] text-[hsl(var(--color-warning))]',
+  B: 'bg-[hsl(var(--color-info)/0.15)] text-[hsl(var(--color-info))]',
+  C: 'bg-[hsl(var(--color-neutral)/0.15)] text-[hsl(var(--color-neutral))]',
 };
 
 export function BatchToolbar({
@@ -133,7 +133,7 @@ export function BatchToolbar({
     <div className="flex items-center gap-2">
       {/* 总进度横幅(有任务跑时;由父组件 listGroups 轮询驱动刷新) */}
       {runningGroups > 0 && (
-        <span className="flex items-center gap-1 rounded bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-600 dark:text-sky-400">
+        <span className="flex items-center gap-1 rounded bg-[hsl(var(--color-info)/0.1)] px-2 py-0.5 text-[11px] font-medium text-[hsl(var(--color-info))]">
           <Loader2 className="size-3 animate-spin" />
           进行中 {runningGroups} 组 · 完成 {doneGroups}/{groups.length}
         </span>
@@ -143,7 +143,7 @@ export function BatchToolbar({
           type="button"
           onClick={() => setConfirmCancel(true)}
           disabled={cancelMutation.isPending}
-          className="flex items-center gap-1 rounded-md border border-[hsl(var(--color-border))] px-2 py-1 text-[11px] hover:bg-red-500/10 hover:text-red-500 disabled:opacity-50"
+          className="flex items-center gap-1 rounded-md border border-[hsl(var(--color-border))] px-2 py-1 text-[11px] hover:bg-[hsl(var(--color-danger)/0.1)] hover:text-[hsl(var(--color-danger))] disabled:opacity-50"
           title="摘掉还在排队的任务并退费(已开跑的不动)"
         >
           <XCircle className="size-3" />
@@ -208,7 +208,7 @@ export function BatchToolbar({
               {estimate.groups.map((g) => (
                 <div key={g.groupId} className="flex items-center gap-2 text-[11px]">
                   <span
-                    className={`w-5 shrink-0 rounded px-1 text-center text-[10px] font-medium ${g.priority ? PRIORITY_CHIP[g.priority] : 'bg-zinc-500/10 text-zinc-400'}`}
+                    className={`w-5 shrink-0 rounded px-1 text-center text-[10px] font-medium ${g.priority ? PRIORITY_CHIP[g.priority] : 'bg-[hsl(var(--color-neutral)/0.1)] text-[hsl(var(--color-neutral))]'}`}
                   >
                     {g.priority ?? '–'}
                   </span>
@@ -228,8 +228,9 @@ export function BatchToolbar({
               </span>
               <span className="font-semibold">¥{estimate.totalCny.toFixed(2)}</span>
             </div>
-            <p className="mt-1 text-[10px] text-amber-600 dark:text-amber-400">
-              ⚠️ 真实扣费操作 — 入队后可在工具条「取消排队」摘掉未开跑的任务
+            <p className="mt-1 flex items-center gap-1 text-[10px] text-[hsl(var(--color-warning))]">
+              <TriangleAlert className="size-3 shrink-0" />
+              真实扣费操作 — 入队后可在工具条「取消排队」摘掉未开跑的任务
             </p>
             <div className="mt-3 flex justify-end gap-2">
               <button

@@ -56,7 +56,7 @@ function ClearAllProjectButton({ projectId }: { projectId: string }): React.Reac
         variant="ghost"
         size="sm"
         onClick={() => setOpen(true)}
-        className="h-7 gap-1 text-xs text-red-600 hover:bg-red-500/10 hover:text-red-600"
+        className="h-7 gap-1 text-xs text-[hsl(var(--color-danger))] hover:bg-[hsl(var(--color-danger)/0.1)] hover:text-[hsl(var(--color-danger))]"
         title="清空整个剧本子模块(所有集 + 分集列表),自动保护已发布/锁定/生成中的集"
       >
         <Trash2 className="size-3" />
@@ -182,7 +182,7 @@ export function ScriptPane({ episodeId, projectId, onSelectEpisode }: Props): Re
             variant="ghost"
             size="sm"
             onClick={() => setShowDeleteAll(true)}
-            className="h-7 gap-1 text-xs text-red-500 hover:bg-red-500/10 hover:text-red-500"
+            className="h-7 gap-1 text-xs text-[hsl(var(--color-danger))] hover:bg-[hsl(var(--color-danger)/0.1)] hover:text-[hsl(var(--color-danger))]"
             title="清空本集所有剧本版本(集本身保留)"
           >
             <Trash2 className="size-3" />

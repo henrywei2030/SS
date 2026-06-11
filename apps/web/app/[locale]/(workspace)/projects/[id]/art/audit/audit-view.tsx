@@ -77,13 +77,13 @@ export function AuditView({ projectId, locale }: Props): React.ReactElement {
           {/* (a) 剧本提到但没建资产 */}
           <Card className="p-5">
             <div className="mb-3 flex items-center gap-2">
-              <CircleSlash className="size-4 text-rose-500" />
+              <CircleSlash className="size-4 text-[hsl(var(--color-danger))]" />
               <h2 className="text-sm font-semibold">
                 a · 剧本提到但没建资产 ({data.summary.missingCharCount + data.summary.missingSceneCount})
               </h2>
             </div>
             {data.summary.missingCharCount + data.summary.missingSceneCount === 0 ? (
-              <p className="text-xs text-emerald-500">全部覆盖 ✓</p>
+              <p className="text-xs text-[hsl(var(--color-success))]">全部覆盖 ✓</p>
             ) : (
               <div className="space-y-3 text-xs">
                 {data.noAssetForMentioned.characters.length > 0 && (
@@ -127,13 +127,13 @@ export function AuditView({ projectId, locale }: Props): React.ReactElement {
           {/* (b) 资产建了但 0 binding */}
           <Card className="p-5">
             <div className="mb-3 flex items-center gap-2">
-              <Unlink2 className="size-4 text-amber-500" />
+              <Unlink2 className="size-4 text-[hsl(var(--color-warning))]" />
               <h2 className="text-sm font-semibold">
                 b · 资产已建但 0 出场绑定 ({data.summary.unboundCount})
               </h2>
             </div>
             {data.summary.unboundCount === 0 ? (
-              <p className="text-xs text-emerald-500">所有资产都有绑定 ✓</p>
+              <p className="text-xs text-[hsl(var(--color-success))]">所有资产都有绑定 ✓</p>
             ) : (
               <ul className="space-y-1.5 text-xs">
                 {data.noBindingAssets.map((a) => (
@@ -176,13 +176,13 @@ export function AuditView({ projectId, locale }: Props): React.ReactElement {
           {/* (c) 悬空 binding */}
           <Card className="p-5">
             <div className="mb-3 flex items-center gap-2">
-              <AlertTriangle className="size-4 text-rose-500" />
+              <AlertTriangle className="size-4 text-[hsl(var(--color-danger))]" />
               <h2 className="text-sm font-semibold">
                 c · 悬空出场绑定 ({data.summary.danglingCount})
               </h2>
             </div>
             {data.summary.danglingCount === 0 ? (
-              <p className="text-xs text-emerald-500">无悬空 binding ✓</p>
+              <p className="text-xs text-[hsl(var(--color-success))]">无悬空 binding ✓</p>
             ) : (
               <ul className="space-y-1.5 text-xs">
                 {data.danglingBindings.map((b) => (
@@ -224,10 +224,10 @@ function StatCard({
 }): React.ReactElement {
   const toneClass =
     tone === 'ok'
-      ? 'text-emerald-500'
+      ? 'text-[hsl(var(--color-success))]'
       : tone === 'warn'
-        ? 'text-amber-500'
-        : 'text-rose-500';
+        ? 'text-[hsl(var(--color-warning))]'
+        : 'text-[hsl(var(--color-danger))]';
   return (
     <Card className="p-4 text-center">
       <div className={`text-2xl font-semibold tabular-nums ${toneClass}`}>{value}</div>

@@ -7,7 +7,7 @@
  * video-preview-section 的轮询 pattern),含播放 / 下载 MP4 / 下载 SRT / 失败原因。
  */
 import * as React from 'react';
-import { Clapperboard, Download, Loader2, Play } from 'lucide-react';
+import { Check, Clapperboard, Download, Loader2, Play } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -21,10 +21,10 @@ import { trpc } from '@/lib/trpc/client';
 import { cn } from '@/lib/utils';
 
 const STATUS_LABEL: Record<string, { text: string; cls: string }> = {
-  QUEUED: { text: '排队中', cls: 'text-amber-600 dark:text-amber-400' },
-  RUNNING: { text: '渲染中', cls: 'text-blue-600 dark:text-blue-400' },
-  SUCCESS: { text: '完成', cls: 'text-green-700 dark:text-green-400' },
-  FAILED: { text: '失败', cls: 'text-red-700 dark:text-red-400' },
+  QUEUED: { text: '排队中', cls: 'text-[hsl(var(--color-warning))]' },
+  RUNNING: { text: '渲染中', cls: 'text-[hsl(var(--color-info))]' },
+  SUCCESS: { text: '完成', cls: 'text-[hsl(var(--color-success))]' },
+  FAILED: { text: '失败', cls: 'text-[hsl(var(--color-danger))]' },
 };
 
 function fmtTime(d: Date | string): string {
@@ -95,15 +95,17 @@ export function RenderPanel({
         ) : tl ? (
           <div className="mb-3 flex flex-wrap items-center gap-3 text-[length:0.85em]">
             <span>
-              共 <b>{tl.total}</b> 段 · 就绪 <b className="text-green-700 dark:text-green-400">{tl.ready}</b>
+              共 <b>{tl.total}</b> 段 · 就绪 <b className="text-[hsl(var(--color-success))]">{tl.ready}</b>
             </span>
             {hasGaps && (
-              <span className="text-amber-700 dark:text-amber-400">
+              <span className="text-[hsl(var(--color-warning))]">
                 缺口 {tl.gaps.length} 段:{tl.gaps.join(' / ')}
               </span>
             )}
             {!hasGaps && tl.total > 0 && (
-              <span className="text-green-700 dark:text-green-400">全部就绪 ✓</span>
+              <span className="inline-flex items-center gap-1 text-[hsl(var(--color-success))]">
+                全部就绪 <Check className="size-3.5" />
+              </span>
             )}
           </div>
         ) : null}
@@ -239,12 +241,12 @@ export function RenderPanel({
                     )}
                   </div>
                   {r.params.burnFallback && r.status === 'SUCCESS' && (
-                    <div className="mt-1 text-[length:0.78em] text-amber-700 dark:text-amber-400">
+                    <div className="mt-1 text-[length:0.78em] text-[hsl(var(--color-warning))]">
                       字幕烧录回退(本机 ffmpeg 字体环境问题),请下载 SRT 外挂
                     </div>
                   )}
                   {r.status === 'FAILED' && r.errorMsg && (
-                    <div className="mt-1 text-[length:0.78em] text-red-700 dark:text-red-400">
+                    <div className="mt-1 text-[length:0.78em] text-[hsl(var(--color-danger))]">
                       {r.errorMsg}
                     </div>
                   )}

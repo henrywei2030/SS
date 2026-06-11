@@ -100,13 +100,13 @@ export function AigcDashboard({
             总集数
           </span>
           <span className="text-[hsl(var(--color-muted-foreground))]">
-            <strong className="text-green-600 dark:text-green-400">
+            <strong className="text-[hsl(var(--color-success))]">
               {stats.completed}
             </strong>{' '}
             已完成
           </span>
           <span className="text-[hsl(var(--color-muted-foreground))]">
-            <strong className="text-blue-600 dark:text-blue-400">
+            <strong className="text-[hsl(var(--color-info))]">
               {stats.inProgress}
             </strong>{' '}
             进行中
@@ -155,7 +155,7 @@ export function AigcDashboard({
               <Link
                 key={e.id}
                 href={`/${locale}/projects/${projectId}/aigc/${e.id}`}
-                className="group flex flex-col gap-2 rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] p-4 transition hover:border-blue-500"
+                className="group flex flex-col gap-2 rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] p-4 transition hover:border-[hsl(var(--color-info))]"
               >
                 <div className="flex items-baseline justify-between">
                   <span className="text-2xl font-bold">
@@ -164,9 +164,9 @@ export function AigcDashboard({
                   <span
                     className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
                       cls === 'COMPLETED'
-                        ? 'bg-green-600/20 text-green-700 dark:text-green-400'
+                        ? 'bg-[hsl(var(--color-success)/0.2)] text-[hsl(var(--color-success))]'
                         : cls === 'IN_PROGRESS'
-                          ? 'bg-blue-600/20 text-blue-700 dark:text-blue-400'
+                          ? 'bg-[hsl(var(--color-info)/0.2)] text-[hsl(var(--color-info))]'
                           : 'bg-[hsl(var(--color-muted))] text-[hsl(var(--color-muted-foreground))]'
                     }`}
                   >
@@ -183,7 +183,7 @@ export function AigcDashboard({
                 <div>
                   <div className="h-1.5 w-full overflow-hidden rounded-full bg-[hsl(var(--color-muted))]">
                     <div
-                      className="h-full bg-blue-500 transition-all"
+                      className="h-full bg-[hsl(var(--color-info))] transition-all"
                       style={{ width: `${Math.round(progress * 100)}%` }}
                     />
                   </div>

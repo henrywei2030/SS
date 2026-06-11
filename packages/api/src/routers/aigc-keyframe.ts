@@ -261,6 +261,25 @@ export const keyframeProcedures = {
         select: { name: true },
       });
 
+      // 七二第六波·relay 素材同步:关键帧同步到中转站素材库(同尾帧链)— 否则 relay-* provider
+      //   拉不到本地 MinIO 关键帧作首帧参考。未配 group_id 时静默降级;事务外做避免持锁等 HTTP。
+      const relayMetas = await Promise.all(
+        imageResult.imageUrls.map((url, i) =>
+          syncMediaToRelay({
+            storageKey: url.startsWith('http') ? `external://${url}` : url,
+            kind: 'IMAGE',
+            filename: keyframeFilename(
+              project?.name,
+              grp.episode.number ?? null,
+              grp.number,
+              startedAt,
+              i,
+            ),
+            publicUrl: url.startsWith('http') ? url : null,
+          }),
+        ),
+      );
+
       const { mediaIds, attemptId } = await ctx.prisma.$transaction(async (tx) => {
         const createdMedias = await Promise.all(
           imageResult.imageUrls.map((url, i) =>
@@ -290,6 +309,8 @@ export const keyframeProcedures = {
                   prompt,
                   providerId,
                   refCount: refImageUrls.length,
+                  // 七二第六波:relay 素材同步结果(供 compile 在 relay provider 用 asset://)
+                  ...(relayMetas[i] ?? {}),
                 },
                 source: 'AIGC',
                 sourceRef: `keyframe:${grp.id}`,

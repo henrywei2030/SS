@@ -1,4 +1,15 @@
 'use client';
+import {
+  Ban,
+  Check,
+  Image as ImageIcon,
+  Info,
+  Puzzle,
+  Stethoscope,
+  TriangleAlert,
+  Volume2,
+  X,
+} from 'lucide-react';
 import * as React from 'react';
 import { toast } from 'sonner';
 
@@ -112,7 +123,7 @@ function PromptTextareaWithMention({
           // 延迟关闭,让下拉项的 onMouseDown 先触发
           setTimeout(() => setMention(null), 150);
         }}
-        className="min-h-[12rem] w-full rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] p-2 text-[length:0.85em] leading-relaxed outline-none focus:border-blue-500"
+        className="min-h-[12rem] w-full rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] p-2 text-[length:0.85em] leading-relaxed outline-none focus:border-[hsl(var(--color-info))]"
         placeholder="编辑提示词,输入 @ 可从已关联资产中选择插入;保存会写入 PromptEdit 训练集"
       />
       {mention && candidates.length > 0 && (
@@ -133,7 +144,7 @@ function PromptTextareaWithMention({
                 }}
                 onMouseEnter={() => setActiveIdx(i)}
                 className={`flex w-full items-center gap-2 px-2 py-1.5 text-left text-[length:0.82em] ${
-                  i === activeIdx ? 'bg-blue-500/10' : ''
+                  i === activeIdx ? 'bg-[hsl(var(--color-info)/0.12)]' : ''
                 }`}
               >
                 <div className="size-8 shrink-0 overflow-hidden rounded bg-[hsl(var(--color-muted))]">
@@ -141,8 +152,12 @@ function PromptTextareaWithMention({
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={b.mediaUrl} alt={b.asset.name} className="size-full object-cover" />
                   ) : (
-                    <div className="flex size-full items-center justify-center text-sm">
-                      {b.kind === 'AUDIO' ? '🔊' : '🖼'}
+                    <div className="flex size-full items-center justify-center">
+                      {b.kind === 'AUDIO' ? (
+                        <Volume2 className="size-4" />
+                      ) : (
+                        <ImageIcon className="size-4" />
+                      )}
                     </div>
                   )}
                 </div>
@@ -382,7 +397,7 @@ export function GroupDetail({
                 <button
                   onClick={savePrompt}
                   disabled={savePromptPending}
-                  className="rounded bg-blue-600 px-2 py-1 text-[length:0.78em] font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                  className="rounded bg-[hsl(var(--color-info))] px-2 py-1 text-[length:0.78em] font-medium text-white hover:bg-[hsl(var(--color-info)/0.9)] disabled:opacity-50"
                 >
                   {savePromptPending ? '保存中...' : '保存'}
                 </button>
@@ -425,7 +440,7 @@ export function GroupDetail({
             bindings={bindings}
           />
         ) : (
-          <div className="max-h-[60vh] overflow-y-auto rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] p-2 text-[length:0.85em] whitespace-pre-wrap leading-relaxed">
+          <div className="max-h-[60vh] overflow-y-auto rounded-md bg-[hsl(var(--color-secondary)/0.3)] p-2 text-[length:0.85em] whitespace-pre-wrap leading-relaxed">
             {normalizedGroupPrompt || '(还没有 prompt — 去导演工作台生成)'}
           </div>
         )}
@@ -435,8 +450,9 @@ export function GroupDetail({
             compiled.warnings.missingMedia.length > 0) && (
             <div className="mt-2 space-y-1 text-xs">
               {compiled.warnings.missingMedia.length > 0 && (
-                <p className="text-red-600 dark:text-red-400">
-                  ⛔ 缺主图(去美术工作台补图):
+                <p className="flex items-center gap-1.5 text-[hsl(var(--color-danger))]">
+                  <Ban className="size-3.5 shrink-0" />
+                  缺主图(去美术工作台补图):
                   {compiled.warnings.missingMedia
                     .map(
                       (m) =>
@@ -446,13 +462,15 @@ export function GroupDetail({
                 </p>
               )}
               {compiled.warnings.unknownTokens.length > 0 && (
-                <p className="text-amber-600 dark:text-amber-400">
-                  ⚠️ 提示词里用了但未关联:{compiled.warnings.unknownTokens.join(', ')}
+                <p className="flex items-center gap-1.5 text-[hsl(var(--color-warning))]">
+                  <TriangleAlert className="size-3.5 shrink-0" />
+                  提示词里用了但未关联:{compiled.warnings.unknownTokens.join(', ')}
                 </p>
               )}
               {compiled.warnings.unusedReferences.length > 0 && (
-                <p className="text-[hsl(var(--color-muted-foreground))]">
-                  ℹ️ 关联了但未在提示词中引用:slot{' '}
+                <p className="flex items-center gap-1.5 text-[hsl(var(--color-muted-foreground))]">
+                  <Info className="size-3.5 shrink-0" />
+                  关联了但未在提示词中引用:slot{' '}
                   {compiled.warnings.unusedReferences.join(', ')}
                 </p>
               )}
@@ -465,8 +483,9 @@ export function GroupDetail({
             compiled.characterImageRefs.length > 0) && (
             <div className="mt-2 space-y-1 text-xs">
               {compiled.characterImageRefs.length > 0 && (
-                <p className="text-emerald-600 dark:text-emerald-400">
-                  🖼 生成时自动附带人物图参考:
+                <p className="flex items-center gap-1.5 text-[hsl(var(--color-success))]">
+                  <ImageIcon className="size-3.5 shrink-0" />
+                  生成时自动附带人物图参考:
                   {Object.entries(
                     compiled.characterImageRefs.reduce<Record<string, string[]>>(
                       (acc, r) => {
@@ -483,14 +502,16 @@ export function GroupDetail({
                 </p>
               )}
               {compiled.voiceRefs.length > 0 && (
-                <p className="text-emerald-600 dark:text-emerald-400">
-                  🔊 生成时自动附带参考声线:
+                <p className="flex items-center gap-1.5 text-[hsl(var(--color-success))]">
+                  <Volume2 className="size-3.5 shrink-0" />
+                  生成时自动附带参考声线:
                   {compiled.voiceRefs.map((v) => v.name).join('、')}
                 </p>
               )}
               {compiled.voiceMissing.length > 0 && (
-                <p className="text-amber-600 dark:text-amber-400">
-                  ⚠️ 人物缺参考声线(去美术工坊生成,否则视频不带其声音参考):
+                <p className="flex items-center gap-1.5 text-[hsl(var(--color-warning))]">
+                  <TriangleAlert className="size-3.5 shrink-0" />
+                  人物缺参考声线(去美术工坊生成,否则视频不带其声音参考):
                   {compiled.voiceMissing.map((v) => v.name).join('、')}
                 </p>
               )}
@@ -499,12 +520,13 @@ export function GroupDetail({
         {/* H0(docs/07):编译预览 — 送模型的完整 prompt(含【时间轴】结构段 +【画质/稳定】强化词) */}
         {compiled && (
           <details className="mt-2 text-xs">
-            <summary className="cursor-pointer select-none text-[hsl(var(--color-muted-foreground))] hover:text-[hsl(var(--color-foreground))]">
-              🧩 编译预览(送模型的完整 prompt
+            <summary className="flex cursor-pointer select-none items-center gap-1.5 text-[hsl(var(--color-muted-foreground))] hover:text-[hsl(var(--color-foreground))]">
+              <Puzzle className="size-3.5 shrink-0" />
+              编译预览(送模型的完整 prompt
               {compiled.parts.timelinePart ? ' · 含时间轴' : ''}
               {compiled.parts.enhancerPart ? ' · 含强化词' : ''})
             </summary>
-            <div className="mt-1 max-h-[40vh] overflow-y-auto rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] p-2 whitespace-pre-wrap leading-relaxed">
+            <div className="mt-1 max-h-[40vh] overflow-y-auto rounded-md bg-[hsl(var(--color-secondary)/0.3)] p-2 whitespace-pre-wrap leading-relaxed">
               {compiled.positive}
               {compiled.negative ? `\n\n— 负面:${compiled.negative}` : ''}
             </div>
@@ -512,14 +534,23 @@ export function GroupDetail({
         )}
         {/* H2(docs/07):八维体检卡 — 最近一次优化 run 的判官评分/轮数/费用 */}
         {latestRun && (
-          <div className="mt-2 rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] p-2 text-xs">
+          <div className="mt-2 rounded-md bg-[hsl(var(--color-secondary)/0.3)] p-2 text-xs">
             <div className="mb-1 flex items-center gap-2 text-[hsl(var(--color-muted-foreground))]">
-              <span>🩺 提示词体检</span>
-              <span>
-                {latestRun.applied
-                  ? '✅ 已写回'
-                  : `⛔ 未写回(${latestRun.denyCode ?? '未知'})`}
+              <span className="flex items-center gap-1.5">
+                <Stethoscope className="size-3.5 shrink-0" />
+                提示词体检
               </span>
+              {latestRun.applied ? (
+                <span className="flex items-center gap-1 text-[hsl(var(--color-success))]">
+                  <Check className="size-3.5 shrink-0" />
+                  已写回
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-[hsl(var(--color-danger))]">
+                  <Ban className="size-3.5 shrink-0" />
+                  未写回({latestRun.denyCode ?? '未知'})
+                </span>
+              )}
               {latestRun.iterations > 0 && <span>修复 {latestRun.iterations} 轮</span>}
               <span>¥{latestRun.totalCostCny.toFixed(3)}</span>
               <span>{new Date(latestRun.createdAt).toLocaleString()}</span>
@@ -544,10 +575,10 @@ export function GroupDetail({
                     )[dim] ?? dim;
                   const tone =
                     v.score >= 80
-                      ? 'text-emerald-600 dark:text-emerald-400 border-emerald-600/40'
+                      ? 'text-[hsl(var(--color-success))] border-[hsl(var(--color-success)/0.4)]'
                       : v.score >= 60
-                        ? 'text-amber-600 dark:text-amber-400 border-amber-600/40'
-                        : 'text-red-600 dark:text-red-400 border-red-600/40';
+                        ? 'text-[hsl(var(--color-warning))] border-[hsl(var(--color-warning)/0.4)]'
+                        : 'text-[hsl(var(--color-danger))] border-[hsl(var(--color-danger)/0.4)]';
                   return (
                     <span
                       key={dim}
@@ -617,11 +648,13 @@ function BindingCard({
       : '(未编号)';
 
   return (
-    <div className="group overflow-hidden rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))]">
+    <div className="group overflow-hidden rounded-md bg-[hsl(var(--color-secondary)/0.3)]">
       <div className="relative aspect-square bg-[hsl(var(--color-muted))]">
         {binding.mediaUrl ? (
           binding.kind === 'AUDIO' ? (
-            <div className="flex h-full items-center justify-center text-2xl">🔊</div>
+            <div className="flex h-full items-center justify-center">
+              <Volume2 className="size-8" />
+            </div>
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -638,7 +671,7 @@ function BindingCard({
             {binding.kind === 'AUDIO' ? '无音频' : '无主图'}
           </div>
         )}
-        <span className="absolute left-1 top-1 rounded bg-blue-500/80 px-1.5 py-0.5 text-[10px] font-medium text-white">
+        <span className="absolute left-1 top-1 rounded bg-[hsl(var(--color-info)/0.8)] px-1.5 py-0.5 text-[10px] font-medium text-white">
           {token}
         </span>
         {/* W5 P2 a11y:opacity 替代 hidden,触屏 / 键盘可访问;hover/focus 时变红凸显 */}
@@ -647,9 +680,9 @@ function BindingCard({
           disabled={unbindPending}
           aria-label={`移除资产 ${binding.asset.name} 的关联`}
           title="移除关联"
-          className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/40 text-xs text-white opacity-60 transition-opacity hover:bg-red-600 hover:opacity-100 focus-visible:bg-red-600 focus-visible:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-white group-hover:opacity-100 disabled:opacity-30"
+          className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/40 text-white opacity-60 transition-opacity hover:bg-[hsl(var(--color-danger))] hover:opacity-100 focus-visible:bg-[hsl(var(--color-danger))] focus-visible:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-white group-hover:opacity-100 disabled:opacity-30"
         >
-          ×
+          <X className="size-3" />
         </button>
       </div>
       <div className="p-2">
@@ -664,25 +697,28 @@ function BindingCard({
             {binding.files.portrait && (
               <span
                 title="形象图将自动作为图参考投喂"
-                className="rounded bg-emerald-500/15 px-1 py-0.5 text-[9px] font-medium text-emerald-600 dark:text-emerald-400"
+                className="flex items-center gap-0.5 rounded bg-[hsl(var(--color-success-bg))] px-1 py-0.5 text-[9px] font-medium text-[hsl(var(--color-success))]"
               >
-                🖼 形象
+                <ImageIcon className="size-3" />
+                形象
               </span>
             )}
             {binding.files.threeView && (
               <span
                 title="三视图将自动作为图参考投喂"
-                className="rounded bg-emerald-500/15 px-1 py-0.5 text-[9px] font-medium text-emerald-600 dark:text-emerald-400"
+                className="flex items-center gap-0.5 rounded bg-[hsl(var(--color-success-bg))] px-1 py-0.5 text-[9px] font-medium text-[hsl(var(--color-success))]"
               >
-                🖼 三视图
+                <ImageIcon className="size-3" />
+                三视图
               </span>
             )}
             {binding.files.voice && (
               <span
                 title="参考声音将自动作为音频参考投喂"
-                className="rounded bg-emerald-500/15 px-1 py-0.5 text-[9px] font-medium text-emerald-600 dark:text-emerald-400"
+                className="flex items-center gap-0.5 rounded bg-[hsl(var(--color-success-bg))] px-1 py-0.5 text-[9px] font-medium text-[hsl(var(--color-success))]"
               >
-                🔊 声音
+                <Volume2 className="size-3" />
+                声音
               </span>
             )}
           </div>
@@ -777,16 +813,17 @@ function KeyframeSection({ groupId }: { groupId: string }): React.ReactElement {
               alt="已确认首帧"
               className="max-h-40 w-full object-cover"
             />
-            <span className="absolute left-1 top-1 rounded bg-[hsl(var(--color-accent))] px-1.5 py-0.5 text-[10px] font-medium text-white">
-              ✓ 首帧约束
+            <span className="absolute left-1 top-1 flex items-center gap-0.5 rounded bg-[hsl(var(--color-accent))] px-1.5 py-0.5 text-[10px] font-medium text-white">
+              <Check className="size-3" />
+              首帧约束
             </span>
             <button
               onClick={() => confirmMut.mutate({ groupId, mediaId: null })}
               disabled={confirmMut.isPending}
               title="清除首帧约束"
-              className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/40 text-xs text-white hover:bg-red-600"
+              className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/40 text-white hover:bg-[hsl(var(--color-danger))]"
             >
-              ×
+              <X className="size-3" />
             </button>
           </div>
         </div>
