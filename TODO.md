@@ -1,7 +1,7 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-06-12(**七二第八波 · mac-studio**:场景工作流改造 — 下线主视角、九宫格(16:9)为场景主资产一次性直生、360°参考九宫格、总览同步生图改九宫格;9 文件 + 浏览器实证 · 详见 [PROGRESS](PROGRESS.md))
-> 上一版:2026-06-12(七二第七波:relay 素材同步 + UI 方案执行(三大面状态色清零)+ UI 代码三遍复审)
+> 最后更新:2026-06-12(**win-laptop 开工**:完整环境拉起(Prisma 7 / 19 migration / db:sync / preflight 全绿)+ embedded-pg Windows 白名单修 + 全量依赖升级审计 → 暂缓回退基线 · 详见 [PROGRESS](PROGRESS.md))
+> 上一版:2026-06-12(七二第九波 · mac-studio:视频尺寸根因 + 换衣/关键帧 + lightbox 全覆盖 + DMG)
 > 仓库:https://github.com/henrywei2030/SS
 > **🚀 一键启动**:`pnpm start`(详见 [README.md](README.md#快速启动) / [CLAUDE.md](CLAUDE.md#设备登记))
 > **📖 主线蓝图**:[docs/06-feature-plan-2026H2.md](docs/06-feature-plan-2026H2.md)(M0–M6 可直接 coding;2026-06-10 mac-mini 逐项核对与代码一致)
@@ -55,8 +55,18 @@
 - [ ] **P1(3-4 天)**:字号 9 种→5 级 token + lint 禁任意值 / 手写按钮~40 处→Button 组件 / emoji 图标→lucide(保留 ✨系)/ 硬编码状态色~50→语义五族变量(并清工程卫生既有色债)/ AIGC 右栏边框预算整改
 - [ ] P2 塞缝:相对时间/tabular-nums/滚动渐隐/统一空态组件(与 a11y 债合并)
 
+### 📦 依赖升级审计(2026-06-12 win-laptop · 全量审计 → 暂缓,停基线)
+
+> 用户要求全量升级;审计后**除已验证的 windows-x64 白名单修复外全部回退/暂缓**,保持 typecheck 16/16 绿。下次专门排期、分批验证再升。
+
+- ⚠️ **关键雷(必读)**:`ioredis` 哪怕只升 minor(5.10.1→5.11.1)也会与 `bullmq` 内部 ioredis 撞成**双版本共存** → TS 类型身份不一致,`@ss/queue` 把 `Redis` 传给 bullmq `Queue` 编译失败。**ioredis 与 bullmq 必须成对同步升 + 跑 typecheck**,不可单独 bump。
+- [ ] **🔴 破坏性 major(19 个,逐个验证)**:zod 3→4(7 包都用,最毒)/ next 15→16 / typescript 5→6 / vitest 2→4 / next-intl 3→4 · @formatjs/intl 2→4 · intl-messageformat 10→11(i18n 栈)/ jose 5→6(JWT 安全)/ bcryptjs 2→3(密码哈希 安全)/ recharts 2→3 / lucide-react 0.453→1.x(图标名可能变)/ undici 6→8 / tailwind-merge 2→3 / mime-types 2→3 / @types/{node(跟 node v24),bcryptjs,mime-types} / embedded-postgres beta16→18
+- [ ] **🟢 安全档(in-range minor/patch)**:9 Radix UI / react·react-dom 19.2.6→.7 / @tanstack-query / zustand / turbo / prettier / tsx / @aws-sdk / @radix-select(minor)/ **bullmq+ioredis(成对,见上雷)**。⚠️ 即便 in-range 也须逐项 typecheck —— 本次实测 ioredis 就炸了
+- [x] ✅ **windows-x64 白名单修复**(独立,已保留进工作树):`@embedded-postgres/win32-x64`→`windows-x64` + rebuild 验证 postinstall 通过
+
 ### 🧹 工程卫生(塞缝做 · 2026-06-10 六七核对收拢 — 碰到相关代码顺手清,不单独排期)
 
+- [ ] **服务端 timeout/Retrying 刷屏排查**(2026-06-12 win-laptop 启动时见):web SSR 持续 `Request timed out after 3000ms / Retrying X/3`(登录页不受影响、200+connected)。grep *.ts/tsx 源码无匹配 → 疑依赖库或 worker 探测外部服务(win 无 API key)。查根源 + 收敛日志噪音
 - [ ] Insight 补 2 卡片:项目费用 Top5 / API 用量明细(30天趋势/模型分布/抽卡率Top10 已有)
 - [ ] PromptEdit 补 Project/Episode/Script `@@index` 反向索引
 - [ ] storyboardRouter/assetRouter 集成测试(mergeShots/splitGroup/confirmCandidate 并发场景 — generate 已覆盖)

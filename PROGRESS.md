@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-06-12(周五,win-laptop · 开工同步 + 完整环境拉起 + embedded-pg白名单修 + 依赖升级审计暂缓)
+
+**完成**
+- ✅ **开工强同步**:本地落后 91 commit(f0a0760→2d07fa1)、工作树干净 → `git reset --hard origin/main` 同步(mac-mini/mac-studio 七二全波次)
+- ✅ **完整环境拉起**(新版 CLAUDE.md Step 2.5/3.5 全套):`pnpm install`(Prisma 6→7.8 + embedded-postgres/onnxruntime/ffmpeg 原生包,2m)→ `db:generate`(Prisma 7 client)→ `setup:env`(补 web+worker 子目录 .env.local,Win copy 模式,根密钥保留)→ infra 容器在跑 → `migrate deploy`(**19 migration 全应用**)→ `db:sync`(3 风格+moyu relay+10 模板+45 设置+83 知识库)→ `preflight` 10 项全绿
+- ✅ **embedded-postgres Windows 白名单笔误修**:`onlyBuiltDependencies` 的 `@embedded-postgres/win32-x64`→`windows-x64`(双源核实真名;darwin/linux 三项拼写正确未动)。`pnpm rebuild` 验证 postinstall(hydrate-symlinks)通过、native pg_ctl/postgres.exe 在位。注:改白名单同机不重跑已忽略 build(需 rebuild/全新装才生效);Win 无 dev mode 时 symlink 静默吞错(桌面打包真打时验)
+- ✅ **全量依赖升级审计 → 暂缓回退**:`pnpm outdated -r` 查 ~40 待升,分安全档 vs **19 major**(zod3→4/next15→16/ts5→6/vitest2→4/i18n栈/jose/bcryptjs…)。试升安全档 → **typecheck 炸**:ioredis minor(5.10→5.11)与 bullmq 内部 ioredis 撞双版本、@ss/queue 类型不兼容。用户决策**全回退绿色基线**(`git checkout HEAD -- .` + `pnpm install`,仅留 windows-x64 修复)→ **typecheck 恢复 16/16**。审计入 TODO「依赖升级审计」+ 记忆
+- ✅ **启动系统实证**:preview dev(turbo web+worker :3000)→ `/zh-CN/login` 渲染正常(品牌/表单/footer ● connected)、客户端 console 零错误、screenshot 实证
+
+**问题/待决策**
+- ❓ **服务端 `Request timed out 3000ms / Retrying` 刷屏**:web SSR 持续超时重试(登录页不受影响、200+connected)。grep *.ts/tsx 无匹配 → 疑依赖库/worker 探外部服务(win-laptop 无 API key)。下次查根源
+- ❓ 19 major 暂缓(见 TODO);**关键雷:ioredis 与 bullmq 必须成对升**
+- ❓ pnpm 9.12→11.5 可升(跨设备 corepack pin 决策)
+- ❓ next-env.d.ts 在 `.next`(dev)↔`.next-desktop`(桌面构建)间 churn(本次 dev 触发,已 revert 未纳入提交)
+
+**下次接着做**
+- 📌 查清服务端 timeout/Retrying 根源
+- 📌 win-laptop 专属:TTS onnxruntime 真跑 / 桌面 CI artifact 真装真跑(出差时)
+- 📌 既有主线:真打验证 4 项 · UI 批④ admin · relay 填 group_id
+
+---
+
 ## 2026-06-12(周五,mac-studio · 七二第九波:视频尺寸根因 + 4 任务 + 换衣/关键帧 + 变装bug + DMG)
 
 **完成**(开工 a 同步:本地=origin/main · 当日多轮)
