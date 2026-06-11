@@ -584,3 +584,135 @@ describe('compileShotGroupVideoPrompt — 【声线】段(六八)', () => {
     expect(result.parts.voicePart).toBe('【声线】陆乘:低沉');
   });
 });
+
+// ---------------------------------------------------------------------------
+// H0(docs/07):【时间轴】段
+// ---------------------------------------------------------------------------
+
+describe('compileShotGroupVideoPrompt — 【时间轴】段(H0)', () => {
+  const baseInput = {
+    text: '林凡在天台边缘回头。',
+    durationS: 9,
+    references: [],
+  };
+
+  it('多镜:durationS 累加生成边界,维度 · 连接', () => {
+    const result = compileShotGroupVideoPrompt({
+      ...baseInput,
+      timelineShots: [
+        { durationS: 2, framing: '全景', angle: '俯视30°', movement: '固定', lighting: '低调侧光' },
+        { durationS: 3, framing: '中景', movement: '跟' },
+        { durationS: 4, framing: '特写' },
+      ],
+    });
+    expect(result.parts.timelinePart).toBe(
+      '【时间轴】0-2s 全景·俯视30°·固定·低调侧光 | 2-5s 中景·跟 | 5-9s 特写',
+    );
+    // 位置:正文后、参数前
+    const idx = result.positive.indexOf('【时间轴】');
+    expect(idx).toBeGreaterThan(result.positive.indexOf('回头'));
+    expect(idx).toBeLessThan(result.positive.indexOf('【参数】'));
+  });
+
+  it('目标总长 ≠ 镜表总和 → 按比例缩放,末段对齐目标(防浮点漂移)', () => {
+    const result = compileShotGroupVideoPrompt({
+      ...baseInput,
+      durationS: 15,
+      timelineShots: [
+        { durationS: 3, framing: '全景' },
+        { durationS: 3, framing: '中景' },
+        { durationS: 3, framing: '特写' },
+      ],
+    });
+    expect(result.parts.timelinePart).toBe('【时间轴】0-5s 全景 | 5-10s 中景 | 10-15s 特写');
+  });
+
+  it('小数边界保留 1 位(7.5s 组两镜)', () => {
+    const result = compileShotGroupVideoPrompt({
+      ...baseInput,
+      durationS: 7.5,
+      timelineShots: [
+        { durationS: 2.5, framing: '近景' },
+        { durationS: 5, framing: '全景' },
+      ],
+    });
+    expect(result.parts.timelinePart).toBe('【时间轴】0-2.5s 近景 | 2.5-7.5s 全景');
+  });
+
+  it('维度全空的镜回退「镜N」标签', () => {
+    const result = compileShotGroupVideoPrompt({
+      ...baseInput,
+      durationS: 4,
+      timelineShots: [
+        { durationS: 2, framing: '全景' },
+        { durationS: 2 },
+      ],
+    });
+    expect(result.parts.timelinePart).toBe('【时间轴】0-2s 全景 | 2-4s 镜2');
+  });
+
+  it('单镜且无任何维度 → 省略(纯噪音);单镜有维度 → 保留', () => {
+    const noDims = compileShotGroupVideoPrompt({
+      ...baseInput,
+      timelineShots: [{ durationS: 9 }],
+    });
+    expect(noDims.parts.timelinePart).toBe('');
+    expect(noDims.positive).not.toContain('【时间轴】');
+
+    const withDims = compileShotGroupVideoPrompt({
+      ...baseInput,
+      timelineShots: [{ durationS: 9, framing: '全景', movement: '推' }],
+    });
+    expect(withDims.parts.timelinePart).toBe('【时间轴】0-9s 全景·推');
+  });
+
+  it('不传 / 空数组 / 全零时长 → 无段(向后兼容)', () => {
+    for (const timelineShots of [undefined, [], [{ durationS: 0 }]]) {
+      const result = compileShotGroupVideoPrompt({ ...baseInput, timelineShots });
+      expect(result.parts.timelinePart).toBe('');
+      expect(result.positive).not.toContain('【时间轴】');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// H0(docs/07):【画质】/【稳定】强化词段
+// ---------------------------------------------------------------------------
+
+describe('compileShotGroupVideoPrompt — 强化词段(H0)', () => {
+  const baseInput = {
+    text: '正文。',
+    durationS: 5,
+    references: [],
+  };
+
+  it('两行齐:【画质】+【稳定】各占一行,位置在参数前', () => {
+    const result = compileShotGroupVideoPrompt({
+      ...baseInput,
+      enhancers: {
+        quality: '4K超高清、电影质感、细节丰富',
+        stability: '面部清晰不变形、五官一致',
+      },
+    });
+    expect(result.parts.enhancerPart).toBe(
+      '【画质】4K超高清、电影质感、细节丰富\n【稳定】面部清晰不变形、五官一致',
+    );
+    expect(result.positive.indexOf('【画质】')).toBeLessThan(result.positive.indexOf('【参数】'));
+  });
+
+  it('单行关闭:空串行不出现', () => {
+    const result = compileShotGroupVideoPrompt({
+      ...baseInput,
+      enhancers: { quality: '', stability: '动作流畅' },
+    });
+    expect(result.parts.enhancerPart).toBe('【稳定】动作流畅');
+    expect(result.positive).not.toContain('【画质】');
+  });
+
+  it('不传 / 两行全空 → 无段(向后兼容,positive 与旧版一致)', () => {
+    const off = compileShotGroupVideoPrompt({ ...baseInput, enhancers: { quality: ' ', stability: '' } });
+    const legacy = compileShotGroupVideoPrompt(baseInput);
+    expect(off.parts.enhancerPart).toBe('');
+    expect(off.positive).toBe(legacy.positive);
+  });
+});

@@ -18,6 +18,10 @@ export interface MergeableShot {
   durationS: number;
   framing?: string;
   angle?: string;
+  // H0 捡漏(docs/07 §4.2):四维分镜的 movement/lighting/sound 此前从未进组 prompt 正文
+  movement?: string;
+  lighting?: string;
+  sound?: string;
   content: string;
   prompt: string;
   positionIdx: number;
@@ -165,14 +169,42 @@ function extractLast(num: string): string {
   return parts[parts.length - 1] ?? num;
 }
 
+/**
+ * 组内单镜默认拼接行(H0 捡漏,docs/07 §4.2)— mergeShots 路由与 autoMerge 共用的单一真相源。
+ *
+ * 格式(用户反馈 r3:标题 + prompt 同一行空格分隔):
+ *   `[1/3] 全景 俯视30° 固定 低调侧光 3s {prompt}(音效:{sound})`
+ *
+ * 此前只带 framing/angle — movement/lighting/sound/durationS 从未进组 prompt 正文,
+ * 未优化组的信息密度在此抬升;sound 是自由文本,放行尾括注不挤标题。
+ * `[i/N]` 只是显示约定(手编/AI 优化都可能破坏)— 结构化时间轴由编译期 timelinePart
+ * 从 Shot 表另行生成,不依赖此处。
+ */
+export function buildGroupShotLine(
+  s: Pick<MergeableShot, 'framing' | 'angle' | 'movement' | 'lighting' | 'sound' | 'durationS' | 'prompt'>,
+  i: number,
+  total: number,
+): string {
+  const dims = [s.framing, s.angle, s.movement, s.lighting]
+    .map((v) => (v ?? '').trim())
+    .filter((v) => v.length > 0)
+    .join(' ');
+  const dur =
+    Number.isFinite(s.durationS) && s.durationS > 0 ? `${formatDurationShort(s.durationS)}s` : '';
+  const title = `[${i + 1}/${total}] ${dims} ${dur}`.replace(/\s+/g, ' ').trim();
+  const sound = (s.sound ?? '').trim();
+  return `${title} ${s.prompt}${sound ? `(音效:${sound})` : ''}`;
+}
+
+/** 7.5 → "7.5",5 → "5"(整数不带小数点) */
+function formatDurationShort(n: number): string {
+  return Number.isInteger(n) ? String(n) : String(Math.round(n * 10) / 10);
+}
+
 function mergePrompts(shots: MergeableShot[]): string {
-  // 需求(2026-06):段落之间只留空行,不要 `---` 分隔符(分镜工坊提示词更干净)。
-  return shots
-    .map((s, i) => {
-      const header = `[${i + 1}/${shots.length}] ${s.framing ?? ''} ${s.angle ?? ''}`.trim();
-      return `${header}\n${s.prompt}`;
-    })
-    .join('\n\n');
+  // 需求(2026-06):段落之间不要 `---` 分隔符;r3:标题+prompt 同一行,段间 \n 隔开
+  //(原是 header\nprompt + 空行分段,与 mergeShots 路由的 r3 格式不一致 — H0 统一为共享行构造)
+  return shots.map((s, i) => buildGroupShotLine(s, i, shots.length)).join('\n');
 }
 
 function hasOverlap(a: Set<string>, b: Set<string>): boolean {

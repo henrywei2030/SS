@@ -17,9 +17,24 @@ import {
 } from './guards.js';
 import type { OptimizeContext } from './types.js';
 
+/**
+ * H1:knowledge contributor 走 prisma(promptKnowledge/systemSetting)— fixture 给最小 stub:
+ * 知识库空(render null)+ 无 embedding binding。需要正向命中的用例自行覆盖 findMany。
+ */
+function stubPrisma(knowledgeRows: unknown[] = []): PrismaClient {
+  return {
+    promptKnowledge: {
+      findMany: async () => knowledgeRows,
+      updateMany: async () => ({ count: knowledgeRows.length }),
+    },
+    systemSetting: { findUnique: async () => null },
+  } as unknown as PrismaClient;
+}
+
 function fixtureCtx(partial?: Partial<OptimizeContext>): OptimizeContext {
   return {
-    prisma: null as unknown as PrismaClient,
+    prisma: stubPrisma(),
+    userId: 'u1',
     group: {
       id: 'g1',
       number: '1-8',
@@ -123,7 +138,7 @@ describe('detectProviderFamily', () => {
 });
 
 describe('buildOptimizerUserPrompt(装配)', () => {
-  it('默认四件套:四段齐 + 风格指令 + 当前提示词压底;contributorsUsed 记实际产出', async () => {
+  it('默认五件套(H1):四段齐 + 风格指令 + 当前提示词压底;知识库空时 knowledge 自动消失', async () => {
     const { prompt, contributorsUsed } = await buildOptimizerUserPrompt(fixtureCtx(), [
       ...DEFAULT_CONTRIBUTORS,
     ]);
@@ -139,7 +154,34 @@ describe('buildOptimizerUserPrompt(装配)', () => {
     expect(prompt).toContain('【当前提示词】');
     // 当前提示词在最后一个 section(优化对象压底,贴近输出指令)
     expect(prompt.indexOf('【当前提示词】')).toBeGreaterThan(prompt.indexOf('【上组衔接】'));
+    // fixture 知识库空 → knowledge render null,不进 used(无内容维度自动消失语义)
     expect(contributorsUsed).toEqual(['shot', 'assets', 'style', 'continuity']);
+    expect(prompt).not.toContain('【创作知识】');
+  });
+
+  it('H1 knowledge:库有命中条目 → 渲染【创作知识】段(在衔接后、目标风格前)', async () => {
+    const ctx = fixtureCtx({
+      prisma: stubPrisma([
+        {
+          id: 'k1',
+          dimension: 'QUALITY',
+          title: '电影质感基础三件套',
+          content: '4K超高清、电影质感、细节丰富',
+          tagsJson: {},
+          embedding: null,
+          embeddingModel: null,
+          hitCount: 0,
+        },
+      ]),
+    });
+    const { prompt, contributorsUsed } = await buildOptimizerUserPrompt(ctx, [
+      ...DEFAULT_CONTRIBUTORS,
+    ]);
+    expect(prompt).toContain('【创作知识】');
+    expect(prompt).toContain('- [画质] 电影质感基础三件套:4K超高清、电影质感、细节丰富');
+    expect(contributorsUsed).toEqual(['shot', 'assets', 'style', 'continuity', 'knowledge']);
+    expect(prompt.indexOf('【创作知识】')).toBeGreaterThan(prompt.indexOf('【上组衔接】'));
+    expect(prompt.indexOf('【创作知识】')).toBeLessThan(prompt.indexOf('【目标模型风格】'));
   });
 
   it('开关收窄 + 无内容维度自动消失(style=null 不产段)', async () => {

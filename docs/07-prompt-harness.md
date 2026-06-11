@@ -1,6 +1,7 @@
 # 07 · Prompt Mini-Harness:八维知识库 × 提示词装配流水线
 
-> 状态:**方案定稿,待 H0 开工**(2026-06-11 七十 mac-studio,用户两轮迭代拍板)
+> 状态:**H0–H3 代码全部落地**(2026-06-11 七一 mac-studio 单日四期连推;方案定稿同日 七十)
+> 留:真打 gate 顺验(✨硬门/✨✨判官修复/体检卡/知识痕迹/±强化词 A/B/分镜 v3 对照)+ H3 飞轮持续运营(权重随真打数据演化)
 > 前置阅读:[docs/06-feature-plan-2026H2.md](06-feature-plan-2026H2.md) §5(M6 动态 Prompt,已落地 M6a/b)
 > 本文档取代 06 蓝图中的 **M6c**(embedding 飞轮并入本文 H3,作其超集)
 
@@ -49,13 +50,13 @@
 
 ## 3. 数据模型(新表 ×2,migration 逐个点头)
 
-**PromptKnowledge**(八维知识库,单表多维):
-`id / dimension(八维枚举) / slug(@unique,种子条目用) / title / content / tagsJson(family/style/mood/era) / embedding Json?(懒回填) / projectId?(null=全局,非空=项目私有 — 世界观年代设定即项目级场景维条目) / source(SEED|MANUAL|MINED) / enabled / hitCount / lastUsedAt / createdBy`
+**PromptKnowledge**(八维知识库,单表多维)— **已落地(七一),实际字段**:
+`id / dimension(八维枚举) / slug?(@unique,种子条目锚) / title / content / tagsJson(family/style/mood/era/keywords) / embedding Json?(懒回填) / embeddingModel?(换模型识别旧向量重算) / projectId?(null=全局,非空=项目私有世界观) / source(SEED|MANUAL|MINED) / enabled / hitCount / lastUsedAt / weight(H3 飞轮权重,clamp 0.2-2) / createdBy`
 
-**PromptOptimizeRun**(体检报告/审计/飞轮数据源):
-`id / groupId / episodeId / projectId / userId / stage 明细 Json(planner/composer/judge/repair 各自 model+tokens+cost) / dimScores Json(八维分+缺失) / fragmentIds String[](飞轮相关性用) / iterations / applied / totalCostCny / createdAt`
+**PromptOptimizeRun**(体检报告/审计/飞轮数据源)— **已落地(七一),实际字段**:
+`id / groupId / episodeId / projectId / userId / stagesJson(composer/judge/repair 各自 model+tokens+cost+targets) / dimScoresJson?(八维分+issue,判官缺席 null) / fragmentIds String[] / iterations / applied / denyCode? / totalCostCny / createdAt`(纯 id 关联无 FK,同 PromptEdit 模式)
 
-种子语料 v1 ≈ 80 条:文章强化词五类(按模型家族打 tag — seedance/kling 雷点不同)、抽象词翻译对(动作维)、运镜语法/轴线规则(镜头语言维,自 v2 模板蒸馏)。
+种子语料 v1 = **83 条已落库**:文章强化词五类(QUALITY 8/CONSTRAINT 10/LIGHTING 12/SCENE 10/STYLE 8)、抽象词翻译对(ACTION 15)、运镜语法/轴线规则自 v2 模板蒸馏(CAMERA 14)、主体锚定纪律(SUBJECT 6);db:sync 按 slug 增量,admin 改过的不覆盖。
 
 ## 4. 真实代码走查修正点(2026-06-11 第二轮,地基事实)
 
@@ -68,12 +69,14 @@
 
 ## 5. 分期(每期独立可验,与真打 gate 并行 — 不碰资金路径)
 
+> **落地记录(2026-06-11 七一,单日四期)**:全部 ✅;各期"真打"类验收项移交 gate 顺验。
+
 | 期 | 内容 | 量 | 验收 |
 |---|---|---|---|
-| **H0 基座** | ① timelinePart + enhancerPart(`prompt.enhancer.quality`/`prompt.enhancer.stability` 设置,默认=文章模板,留空关闭) ② mergeShots 默认拼接补全维 ③ PromptKnowledge 表 + 种子 ~80 条 ④ ITextEmbeddingProvider + 懒回填 + 检索纯函数(余弦/tags 降级链,单测) | 1 会话 · migration ×1 | 编译预览见时间轴+强化词;检索单测绿;真打 A/B(±强化词 qcScore 对比) |
-| **H1 检索进流水线** | knowledge contributor ×1 + 确定性 Planner(结构化字段推维度权重,零成本;LLM Planner 留 `harness.planner.enabled` 升级位) + 分镜侧轻量注入(storyboard-generate block 拼接处) + **storyboard_main v3**(主体锚定/微观动作纪律/场景具体化三章,版本化更新) | 1 会话 | 优化产物含检索语料痕迹;分镜 v3 真打一场对照 |
-| **H2 判官+修复闭环** | 八维判官(`binding.prompt.judge.modelId` 独立,便宜文本模型) + 定向 Repair ≤2 轮 + 硬门 checkers + PromptOptimizeRun 表 + 工坊八维体检卡。**延迟分档**:单组✨同步=Composer+硬门(秒级);判官+修复仅整集后台 job 与「✨✨深度优化」(job+铃铛) | 1-1.5 会话 · migration ×1 | 体检卡可见;故意喂缺维 prompt → 判官命中 → repair 补齐 |
-| **H3 飞轮** | PromptEdit「AI 原文→人改后」蒸馏→候选条目(admin 审核入库,`[AI优化]` 标记已埋) / run.fragmentIds × 后续 qcScore 相关性 → 条目权重升降 / 家族失败模式(QC 漂移)自动沉淀约束维条目 | 1 会话起,持续 | 候选条目出现在 admin;权重随真打数据变化 |
+| **H0 基座** ✅ | ① timelinePart + enhancerPart(`prompt.enhancer.quality`/`prompt.enhancer.stability` 设置,默认=文章模板,留空关闭) ② mergeShots 默认拼接补全维(共享 `buildGroupShotLine`,手动/autoMerge 统一) ③ PromptKnowledge 表 + 种子 83 条 ④ ITextEmbeddingProvider(openai-compat /embeddings)+ 懒回填 + 检索纯函数(余弦/keyword/tag 三档降级链,单测) | 1 会话 · migration ×1 ✅ | 编译预览见时间轴+强化词 ✅(真实组实测);检索单测绿 ✅;真打 A/B(±强化词 qcScore)→ gate |
+| **H1 检索进流水线** ✅ | knowledge contributor ×1(CSV 默认五件套)+ 确定性 Planner(`allowTagFallback` 闸:通用维 tag 兜底/对症维宁缺毋滥;LLM Planner 留 `harness.planner.enabled` 升级位)+ 分镜侧轻量注入(`buildSceneKnowledgeBlock`:项目世界观无条件 + 全局对症,零 embedding 外呼)+ **storyboard_main v3**(写作三纪律三章 + 自查⑥,版本化 db:sync 自动生效) | 1 会话 | 优化产物含检索语料痕迹 ✅(contributor 真实组实测对症命中);分镜 v3 真打一场对照 → gate |
+| **H2 判官+修复闭环** ✅ | 硬门五门 checkers(token/时长加总/禁用词/抽象词黑名单/长度,一票否决,违规全收集)+ 八维判官(`binding.prompt.judge.modelId` 独立;输出消毒:known dims/clamp/repairDims 自推不信模型自报)+ 定向 Repair ≤2 轮(只喂不及格维+片段;软门修复过不了硬门即丢弃保上一版)+ PromptOptimizeRun 表 + 工坊八维体检卡 + 「✨✨深度优化」入口。**延迟分档**:单组✨同步=Composer+硬门(秒级);判官+修复仅整集✨ job 与单组✨✨(同 kind,payload.groupId 区分) | 1 会话 · migration ×1 ✅(与 weight 合并) | 体检卡可见 ✅(UI 落地);故意喂缺维 → 判官命中 → repair 补齐 → gate(需 LLM) |
+| **H3 飞轮** ✅(机制) | 回路① PromptEdit「AI→人改」配对 → LLM 蒸馏候选(`minePromptEditCandidates`,admin /admin/knowledge「⛏️蒸馏」触发,enabled=false 待审)/ 回路② run.fragmentIds × qcScore 权重 ±0.05 clamp[0.2,2](qc 落分钩子,7 天归因窗)/ 回路③ QC 漂移按模型家族沉淀 CONSTRAINT 候选(幂等 upsert,hitCount=证据数)。admin 知识库管理页(筛选/启停/编辑/删除/候选审核) | 1 会话起,持续 | 候选条目出现在 admin ✅(漂移沉淀实测);权重随真打数据变化 ✅(机制实测 ±0.05,长期演化靠真打累积) |
 
 成本预报备:全流程 ≈ ¥0.03-0.12/组(Planner≈0 确定性 + embedding ¥0.0005 + Composer ¥0.02-0.05 + 判官 ¥0.005 + 修复 0-2 轮),整集 30 组 ¥1-4,走文本日预算池,整集照旧后台 job+铃铛。
 

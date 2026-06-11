@@ -157,6 +157,30 @@ export interface ITextProvider {
   estimateCost(req: TextRequest): number;
 }
 
+// ---------- 文本向量(embedding,H0 docs/07) ----------
+export interface EmbeddingRequest {
+  /** 待向量化文本(批量;OpenAI /embeddings 的 input 数组) */
+  texts: string[];
+  model?: string;
+  extra?: Record<string, unknown>;
+}
+
+export interface EmbeddingResult {
+  /** 与输入 texts 等长且同序(适配器按 index 重排过) */
+  embeddings: number[][];
+  /** 向量维数(embeddings[0].length;空输入 0) */
+  dimensions: number;
+  inputTokens: number;
+  costCny: number;
+  rawResponse?: unknown;
+}
+
+export interface ITextEmbeddingProvider {
+  readonly info: ProviderInfo;
+  embed(req: EmbeddingRequest, ctx: CallContext): Promise<EmbeddingResult>;
+  estimateCost(req: EmbeddingRequest): number;
+}
+
 // ---------- 合规 ----------
 export interface ComplianceRequest {
   /** 图片 URL 或 Buffer */

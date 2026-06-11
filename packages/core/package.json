@@ -18,7 +18,8 @@
     "./compose": "./compose/index.ts",
     "./voice": "./voice/index.ts",
     "./qc": "./qc/index.ts",
-    "./prompt-optimizer": "./prompt-optimizer/index.ts"
+    "./prompt-optimizer": "./prompt-optimizer/index.ts",
+    "./prompt-knowledge": "./prompt-knowledge/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

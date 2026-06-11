@@ -13,6 +13,8 @@ export type ProviderFamily = 'seedance' | 'kling' | 'happyhorse' | 'generic';
 /** 预装配好的优化上下文 — contributor 只读,不再各自查库(一次装配多处消费) */
 export interface OptimizeContext {
   prisma: PrismaClient;
+  /** H1:发起人(knowledge contributor 的 embedding 调用记账归属) */
+  userId: string;
   group: {
     id: string;
     number: string;
@@ -57,6 +59,11 @@ export interface OptimizeContext {
     sameScene: boolean;
   } | null;
   providerFamily: ProviderFamily;
+  /**
+   * H2(docs/07):knowledge contributor 渲染时回填的命中片段 id(run.fragmentIds 飞轮数据源)。
+   * contributor render 内赋值(本对象唯一的可变字段,装配后读取)。
+   */
+  usedKnowledgeFragmentIds?: string[];
 }
 
 /**
@@ -86,11 +93,13 @@ export interface OptimizeResult {
 
 export interface OptimizeDeny {
   ok: false;
-  code: 'NO_BINDING' | 'EMPTY_PROMPT' | 'TOKEN_LOST' | 'EMPTY_OUTPUT';
+  code: 'NO_BINDING' | 'EMPTY_PROMPT' | 'TOKEN_LOST' | 'EMPTY_OUTPUT' | 'HARD_GATE';
   message: string;
-  /** TOKEN_LOST 时:LLM 原始输出(供人工查看为什么丢 token) */
+  /** TOKEN_LOST / HARD_GATE 时:LLM 原始输出(人工排查 + 深度路 Repair 的修复对象) */
   rawOutput?: string;
   costCny?: number;
+  /** HARD_GATE 时:违规明细(深度路 Repair 的定向修复清单) */
+  violations?: Array<{ gate: string; message: string }>;
 }
 
 export type OptimizeOutcome = OptimizeResult | OptimizeDeny;

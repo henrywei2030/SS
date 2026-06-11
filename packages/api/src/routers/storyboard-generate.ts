@@ -9,6 +9,7 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
 import { generateStoryboard } from '@ss/core/storyboard';
+import { buildSceneKnowledgeBlock } from '@ss/core/prompt-knowledge';
 import { parseScriptText } from '@ss/core/script';
 import { EVENTS } from '@ss/shared/events';
 import { getEventBus } from '@ss/adapters/eventbus';
@@ -418,6 +419,16 @@ export const generateProcedures = {
               },
             });
 
+            // H1(docs/07):分镜侧轻量知识注入 — 项目世界观条目 + 按场原文对症检索
+            //(keyword/tag 零外呼;失败静默跳过,绝不阻塞分镜生成)
+            const knowledgeBlock = await buildSceneKnowledgeBlock(ctx.prisma, {
+              projectId: ep.projectId,
+              sceneText: dbScene.content,
+            }).catch((e) => {
+              console.warn('[storyboard.generate] 知识注入失败(跳过):', e);
+              return null;
+            });
+
             try {
               const gen = await generateStoryboard({
                 scene: parsedScene,
@@ -426,6 +437,7 @@ export const generateProcedures = {
                 stylePrompt,
                 knownCharacters,
                 presets,
+                knowledgeBlock,
                 defaultShotDurationS: bindings.defaultShotDurationS,
                 maxShotDurationS: bindings.maxDurationS,
                 ctx: {

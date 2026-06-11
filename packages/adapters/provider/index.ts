@@ -19,6 +19,8 @@ export { ClaudeTextProvider } from './claude.js';
 export { MockVideoProvider } from './mock-video.js';
 export { OpenAICompatTextProvider } from './openai-compat.js';
 export { OpenAICompatImageProvider } from './openai-compat-image.js';
+// H0(docs/07):embedding 适配器(八维知识库语义检索)
+export { OpenAICompatEmbeddingProvider, parseEmbeddingsResponse } from './openai-compat-embedding.js';
 // Phase 1.5 P0-5:OpenAI 兼容中转站素材库 asset:// 引用机制
 export { RelayAssetProvider, getRelayAssetProvider, getRelayDefaultGroupId } from './relay-asset.js';
 export type { RelayAsset, RelayAssetType, RelayAssetStatus, RelayCreateAssetOpts } from './relay-asset.js';
@@ -31,10 +33,12 @@ import { ClaudeTextProvider } from './claude.js';
 import { MockVideoProvider } from './mock-video.js';
 import { OpenAICompatTextProvider } from './openai-compat.js';
 import { OpenAICompatImageProvider } from './openai-compat-image.js';
+import { OpenAICompatEmbeddingProvider } from './openai-compat-embedding.js';
 import type {
   IVideoProvider,
   IImageProvider,
   ITextProvider,
+  ITextEmbeddingProvider,
   IComplianceProvider,
 } from './types.js';
 
@@ -47,6 +51,7 @@ const cache = {
   video: new Map<string, CacheEntry<IVideoProvider>>(),
   image: new Map<string, CacheEntry<IImageProvider>>(),
   text: new Map<string, CacheEntry<ITextProvider>>(),
+  embedding: new Map<string, CacheEntry<ITextEmbeddingProvider>>(),
   compliance: new Map<string, CacheEntry<IComplianceProvider>>(),
 };
 
@@ -311,6 +316,40 @@ function constructTextProvider(cfg: ResolvedConfig): ITextProvider {
   throw new Error(`No text provider class for: ${cfg.providerId}`);
 }
 
+/**
+ * H0(docs/07):获取 embedding Provider — 八维知识库语义检索用。
+ *
+ * 仅支持 protocol='openai-compat'(任意 OpenAI 兼容中转站 /embeddings)。
+ * 不做 Mock 兜底:embedding 缺位时调用方按退化阶梯降级 tags+关键词检索
+ * (docs/07 §5 — "有库无向量"档),抛错由调用方捕获降级,不静默假向量。
+ */
+export async function getEmbeddingProvider(id: string): Promise<ITextEmbeddingProvider> {
+  const cfg = await loadConfig(id);
+  const hit = cache.embedding.get(id);
+  if (hit && hit.cacheKey === cfg.cacheKey) return hit.instance;
+
+  const protocol = cfg.defaultParams.protocol as string | undefined;
+  if (protocol !== 'openai-compat') {
+    throw new Error(
+      `Embedding Provider "${id}" 仅支持 protocol='openai-compat' — 去 /admin/providers 在 defaultParams 配 { protocol: 'openai-compat', defaultModel: 'text-embedding-v4' }`,
+    );
+  }
+  const defaultModel =
+    (cfg.defaultParams.defaultModel as string | undefined) ?? cfg.providerId;
+  const instance = new OpenAICompatEmbeddingProvider({
+    apiUrl: cfg.apiUrl,
+    apiKey: cfg.apiKey,
+    defaultModel,
+    unitPriceCny: cfg.unitPriceCny,
+    displayName: cfg.defaultParams.displayName as string | undefined,
+    maxConcurrent: cfg.maxConcurrent,
+    modelRate: cfg.modelRate,
+    outputRate: cfg.outputRate,
+  });
+  cache.embedding.set(id, { instance, cacheKey: cfg.cacheKey });
+  return instance;
+}
+
 export async function getComplianceProvider(id: string): Promise<IComplianceProvider> {
   // Phase 1: 未实现，留待 W4 人物合规接入火山引擎
   void id;
@@ -527,6 +566,7 @@ export async function setProviderApiKey(
   cache.video.delete(providerId);
   cache.image.delete(providerId);
   cache.text.delete(providerId);
+  cache.embedding.delete(providerId);
   cache.compliance.delete(providerId);
 }
 
@@ -544,6 +584,7 @@ export async function clearProviderApiKey(providerId: string, updatedBy: string)
   cache.video.delete(providerId);
   cache.image.delete(providerId);
   cache.text.delete(providerId);
+  cache.embedding.delete(providerId);
   cache.compliance.delete(providerId);
 }
 
@@ -562,6 +603,7 @@ export async function setProviderActive(
   cache.video.delete(providerId);
   cache.image.delete(providerId);
   cache.text.delete(providerId);
+  cache.embedding.delete(providerId);
   cache.compliance.delete(providerId);
 }
 
@@ -599,6 +641,7 @@ function invalidateRelayProviderCache(relayProviderId: string): void {
   cache.video.clear();
   cache.image.clear();
   cache.text.clear();
+  cache.embedding.clear();
   cache.compliance.clear();
   void relayProviderId;
 }
@@ -775,6 +818,7 @@ export function debugProviders(): { kind: string; id: string; cached: boolean }[
   for (const [id] of cache.video) out.push({ kind: 'video', id, cached: true });
   for (const [id] of cache.image) out.push({ kind: 'image', id, cached: true });
   for (const [id] of cache.text) out.push({ kind: 'text', id, cached: true });
+  for (const [id] of cache.embedding) out.push({ kind: 'embedding', id, cached: true });
   for (const [id] of cache.compliance) out.push({ kind: 'compliance', id, cached: true });
   return out;
 }
@@ -784,5 +828,6 @@ export function resetProviderCache(): void {
   cache.video.clear();
   cache.image.clear();
   cache.text.clear();
+  cache.embedding.clear();
   cache.compliance.clear();
 }

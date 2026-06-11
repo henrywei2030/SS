@@ -25,6 +25,8 @@ import { billingCycle, sanitizeErrorMsg } from '@ss/shared';
 import { z } from 'zod';
 
 import { extractFrame, probeMedia, resolveMediaFetchUrl } from '../media/index.js';
+import { applyQcFeedbackToKnowledge } from '../prompt-knowledge/index.js';
+import { detectProviderFamily } from '../prompt-optimizer/fallback-template.js';
 
 import { buildQcPrompt, parseQcVerdict } from './evaluate.js';
 
@@ -79,7 +81,8 @@ async function runQc(payload: QcJobData, reqTag: string): Promise<void> {
   // 幂等 + 状态门:仅未评分的成功未拒 take 才值得花判官钱
   const attempt = await prisma.generationAttempt.findUnique({
     where: { id: attemptId },
-    select: { status: true, outputMediaId: true, qcScore: true, rejected: true },
+    // providerId:H3 飞轮按模型家族沉淀漂移雷点用
+    select: { status: true, outputMediaId: true, qcScore: true, rejected: true, providerId: true },
   });
   if (!attempt || attempt.status !== 'SUCCESS' || !attempt.outputMediaId || attempt.rejected) {
     console.log(`[qc]${reqTag} attempt=${attemptId} 非可评状态,跳过`);
@@ -251,6 +254,17 @@ async function runQc(payload: QcJobData, reqTag: string): Promise<void> {
     console.log(
       `[qc]${reqTag} attempt=${attemptId} 评分完成 score=${verdict?.score ?? 'unparsed'} drift=${verdict?.drift ?? '-'} cost=¥${result.costCny.toFixed(4)}`,
     );
+
+    // H3 飞轮(docs/07 回路②③):QC 分反馈知识片段权重 + 漂移按家族沉淀约束维候选。
+    // 增强项:任何失败已在函数内吞掉,不影响 QC 主流程。
+    if (verdict && shotGroupId) {
+      await applyQcFeedbackToKnowledge(prisma, {
+        groupId: shotGroupId,
+        qcScore: verdict.score,
+        drift: verdict.drift,
+        providerFamily: detectProviderFamily(attempt.providerId),
+      });
+    }
   } finally {
     try {
       rmSync(tmp, { recursive: true, force: true });

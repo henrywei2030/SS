@@ -28,12 +28,13 @@ export function findLostTokens(original: string, optimized: string): string[] {
   return need.filter((t) => !have.has(t));
 }
 
-/** 默认启用的 contributor 集(与 seed.ts prompt.optimizer.contributors 默认值一致) */
-export const DEFAULT_CONTRIBUTORS = ['shot', 'assets', 'style', 'continuity'] as const;
+/** 默认启用的 contributor 集(与 seed.ts prompt.optimizer.contributors 默认值一致)
+ *  H1 增 knowledge:未配 embedding binding 时走 tags/keyword 检索,零成本零外呼 */
+export const DEFAULT_CONTRIBUTORS = ['shot', 'assets', 'style', 'continuity', 'knowledge'] as const;
 
 /**
  * 解析 SystemSetting prompt.optimizer.contributors(CSV)→ 去重小写 key 列表。
- * 空/缺省 → 默认四件套;全非法(解析后为空)同样回默认 — 开关写错不至于把优化器喂空。
+ * 空/缺省 → 默认五件套;全非法(解析后为空)同样回默认 — 开关写错不至于把优化器喂空。
  */
 export function parseEnabledContributors(raw: string | null | undefined): string[] {
   const parsed = (raw ?? '')

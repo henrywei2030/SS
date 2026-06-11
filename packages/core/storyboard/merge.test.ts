@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mergeShots, type MergeableShot } from './merge.js';
+import { buildGroupShotLine, mergeShots, type MergeableShot } from './merge.js';
 
 const shot = (
   id: string,
@@ -152,5 +152,54 @@ describe('storyboard/merge', () => {
     expect(groups[0]?.mergedPrompt).not.toContain('---');
     expect(groups[0]?.mergedPrompt).toContain('prompt a');
     expect(groups[0]?.mergedPrompt).toContain('prompt b');
+  });
+
+  // ----- H0 捡漏(docs/07 §4.2):buildGroupShotLine 全维拼接 -----
+  describe('buildGroupShotLine', () => {
+    it('全维齐:framing/angle/movement/lighting/durationS 进标题,sound 行尾括注', () => {
+      const line = buildGroupShotLine(
+        {
+          framing: '全景',
+          angle: '俯视30°',
+          movement: '固定',
+          lighting: '低调侧光',
+          sound: '雨声渐强',
+          durationS: 3,
+          prompt: '林凡站在天台边缘',
+        },
+        0,
+        3,
+      );
+      expect(line).toBe('[1/3] 全景 俯视30° 固定 低调侧光 3s 林凡站在天台边缘(音效:雨声渐强)');
+    });
+
+    it('缺维不留空洞:只有 framing 时与旧格式兼容', () => {
+      const line = buildGroupShotLine(
+        { framing: '特写', durationS: 2, prompt: '手在颤抖' },
+        1,
+        2,
+      );
+      expect(line).toBe('[2/2] 特写 2s 手在颤抖');
+    });
+
+    it('小数时长保留一位,无 sound 不出现括注', () => {
+      const line = buildGroupShotLine(
+        { movement: '推', durationS: 7.5, prompt: 'p' },
+        0,
+        1,
+      );
+      expect(line).toBe('[1/1] 推 7.5s p');
+      expect(line).not.toContain('音效');
+    });
+
+    it('mergePrompts 经由共享行构造:四维 + 音效进 mergedPrompt', () => {
+      const shots = [
+        shot('a', '1', 2, 0, { movement: '跟', lighting: '逆光', sound: '脚步声' }),
+        shot('b', '2', 2, 1),
+      ];
+      const { groups } = mergeShots(shots, { maxDurationS: 10 });
+      expect(groups[0]?.mergedPrompt).toContain('跟 逆光 2s');
+      expect(groups[0]?.mergedPrompt).toContain('(音效:脚步声)');
+    });
   });
 });

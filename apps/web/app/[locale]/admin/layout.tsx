@@ -14,6 +14,7 @@ import {
   ArrowLeft,
   Activity,
   Plug,
+  BookOpen,
 } from 'lucide-react';
 
 import { requireAdminSession } from '@/lib/auth/session';
@@ -54,6 +55,8 @@ export default async function AdminLayout({
           label: '模型绑定',
         },
         { href: `/${locale}/admin/prompts`, icon: FileText, label: t('promptTemplates') },
+        // H3(docs/07):八维知识库(候选审核/启停/蒸馏)— 硬编码中文 label,同「模型绑定」先例
+        { href: `/${locale}/admin/knowledge`, icon: BookOpen, label: '知识库' },
         { href: `/${locale}/admin/styles`, icon: Palette, label: t('styleProfiles') },
         { href: `/${locale}/admin/presets`, icon: Brush, label: t('presetTemplates') },
       ],

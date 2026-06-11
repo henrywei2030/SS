@@ -1,6 +1,6 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-06-11(**七十 · mac-studio:M6a/b 动态 Prompt 优化落地(优化器+ContextContributor+整集后台 job)+ 八要素文章研读 + 八维 Prompt Mini-Harness 方案定稿落盘 [docs/07](docs/07-prompt-harness.md)**· 详见 [PROGRESS](PROGRESS.md))
+> 最后更新:2026-06-11(**七一 · mac-studio:Prompt Mini-Harness H0–H3 单日四期全落地**(时间轴/强化词编译段 + 83 条八维知识库 + 检索/Planner/contributor + 硬门/判官/修复闭环 + 飞轮三回路 + admin 知识库页;migration ×2 点头)· 详见 [PROGRESS](PROGRESS.md))
 > 仓库:https://github.com/henrywei2030/SS
 > **🚀 一键启动**:`pnpm start`(详见 [README.md](README.md#快速启动) / [CLAUDE.md](CLAUDE.md#设备登记))
 > **📖 主线蓝图**:[docs/06-feature-plan-2026H2.md](docs/06-feature-plan-2026H2.md)(M0–M6 可直接 coding;2026-06-10 mac-mini 逐项核对与代码一致)
@@ -11,7 +11,7 @@
 ## 🚧 进行中
 
 - [ ] **🎬 七功能 AIGC 增强路线图(M0–M6)**(蓝图 [docs/06](docs/06-feature-plan-2026H2.md))— ✅ M0 基建 / ✅ M1 成片 / ✅ M2′ 配音补强(均六七)/ ✅ **M3 全清**(3a/3b 六八真打通 + 3c QC 六九)/ ✅ **M4 先决重构 + F4 整集批量**(六九)/ ✅ F5a relay 泛化(六九)/ ✅ **M6a/b 动态 Prompt 优化**(七十:优化器层+ContextContributor 四件套+单组✨/整集后台 job;M6c 并入 docs/07 H3)。**剩:真打回归 gate**(见真打债置顶)→ gate 后 **F5b 并抽/failover**
-- [ ] **🧠 Prompt Mini-Harness(八维知识库 × 装配流水线)**(方案定稿 七十,完整蓝图 [docs/07-prompt-harness.md](docs/07-prompt-harness.md) — 八要素方法论 × 系统对账 + 6 个真实代码修正点 + ADR D-A~D-F)— **下一步 H0 基座**(timelinePart/enhancerPart 编译段 + mergeShots 默认拼接补全维 + PromptKnowledge 表&种子语料&懒 embedding + 检索纯函数;1 会话,migration ×1,不碰资金路径可与真打 gate 并行)→ H1 检索进流水线+storyboard v3 → H2 判官+修复闭环 → H3 飞轮
+- [ ] **🧠 Prompt Mini-Harness(八维知识库 × 装配流水线)**(蓝图 [docs/07](docs/07-prompt-harness.md))— ✅ **H0 基座** / ✅ **H1 检索进流水线 + storyboard v3** / ✅ **H2 硬门+判官+修复闭环(✨✨深度/体检卡)** / ✅ **H3 飞轮三回路 + admin 知识库页**(全部 七一 单日落地,migration ×2;83 条种子语料/检索三档降级链/判官 advisory 纪律/权重±0.05 飞轮均端到端实测)。**剩**:① gate 顺验(见真打债置顶 ⑤-⑧)② 飞轮持续运营(真打数据累积 → 权重演化/候选审核,/admin/knowledge)③ 可选:配 `binding.prompt.embedding.modelId` 解锁语义检索(tags 降级已可用)
 - [ ] **🔊 本地 TTS 声线生成(MOSS-TTS-Nano)**— 六七闭环,**六八三需求加固**:声音设定→推荐种子声线(manifest 真元数据表)/ 人到声必到(voiceRefs 绕 token 闸,旧五七-3 链实为双重失效)/ 批量按设定生成(主演配角 27 人 3.5min 零扣费,群演按用户定调排除)/ relay 同步开关(默认关防死资产)。**留**:桌面包权重首跑 ModelScope 下载验证(.dmg 依赖已修齐,见六八)/ win-laptop onnxruntime 真跑 /「从有声视频抽音轨反向采纳声线」
 - [ ] **🖥️ 桌面程序化遗留**(ADR-35;六八:**dmg 缺四原生依赖的六七债已修**(依赖闭包补包+darwin-arm64 裁剪,238M 残→300M 全)+ 构建隔离 .next-desktop(打包不再打断 dev server))— 剩:① win-laptop CI artifact 真装真跑(出差时)② 桌面包 Mock 视频端到端 + TTS 权重首跑真打 ③ 退出钩子加固 ④ .dmg Finder 美化/自动更新(低优)⑤ Developer ID + 公证(分发才需要)
 
@@ -32,7 +32,7 @@
 
 ### 🔥 真打验证债(贯穿,各里程碑结尾消化)
 
-- [ ] **🎯 六九真打回归 gate 三连+一(置顶,一次整集批量可全验;过 gate 才叠 F5b)**:① 单点抽卡 1 次(验 M4 submit 下沉:出片+扣费/退差正常)→ ② `/admin/bindings` 配 `binding.shot.qc.modelId`(视觉模型如 relay-gemini-3-flash)+ 系统设置开 `take.qc.enabled` → 看 takes QC 徽章出分(验 M3c;验收口径:黑帧/跑题低分、换脸标漂移;费用 ≈¥0.01-0.05/take)→ ③ 工作台「批量生成」走确认弹窗整集跑(验 F4:S>A>B>C 顺序 / 预估 vs 实扣偏差 <10% / 完成推送(需配 notify.webhook.url)/ 取消排队退费)→ ④(可选顺验)`/admin/bindings` 配 `binding.storyboard.prompt.modelId` 后点单组「✨AI 优化」(验 M6:token 保全/写回/乐观锁;¥0.02-0.05/次)
+- [ ] **🎯 真打回归 gate 三连+Harness 五验(置顶,一次整集批量可全验;过 gate 才叠 F5b)**:① 单点抽卡 1 次(验 M4 submit 下沉:出片+扣费/退差正常;**顺带看编译预览的【时间轴】【画质/稳定】段真送到模型** — H0)→ ② `/admin/bindings` 配 `binding.shot.qc.modelId` + 开 `take.qc.enabled` → takes QC 徽章出分(验 M3c;**QC 落分后看 /admin/knowledge 权重是否 ±0.05 — H3 回路②**)→ ③ 工作台「批量生成」整集跑(验 F4:优先级顺序/预估偏差<10%/推送/取消退费)→ ④ 配 `binding.storyboard.prompt.modelId` 点「✨AI 优化」(验 M6+H1:token 保全/写回/乐观锁/**【创作知识】检索痕迹进产物**/硬门拒绝路径;¥0.02-0.05/次)→ ⑤ 配 `binding.prompt.judge.modelId` 点「✨✨深度」(验 H2:判官八维出分→体检卡/故意喂缺维 prompt 看定向修复;¥0.03-0.1/组)→ ⑥ 分镜 v3 真打一场对照(写作三纪律是否生效)→ ⑦ ±强化词 A/B(qcScore 对比,验文章"质量保险丝"声称)→ ⑧(可选)配 `binding.prompt.embedding.modelId` 验语义检索+懒回填(首次 ≈¥0.04)
 - [ ] **moyu /images/edits ~300s 服务端硬限(六八实证)**:img2img(三视图/九宫格/关键帧带参考)4 次真打全在 284-305s 被掐(EPIPE,gpt-image-2 与 seedream 都一样;文生图通道正常)。临时路:用「从设定生成」(文生图)/错峰重试;根治候选:问 moyu edits 限时 / 火山直连异步任务式 API。客户端三层已修(尺寸/16、超时 600s、per-model 尺寸分档)
 - [ ] docx 上传多集切分真打(六五修复后用户未回报;若集号写法非「第N集」需调 parseEpisodeBoundaries 规则)
 - [ ] 视频生成端到端真打(Seedance 扣费,六四起留;六八已有 1 条真 take 并验通 cache-video 落地缓存)+ 桌面包 Mock 视频端到端

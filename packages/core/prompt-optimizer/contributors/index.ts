@@ -7,6 +7,8 @@
  */
 import type { OptimizeContext, PromptContextContributor } from '../types.js';
 
+import { knowledgeContributor } from './knowledge.js';
+
 /** 镜头四维设计:优化器的画面骨架真相源(分镜表数据,非自由文本) */
 const shotContributor: PromptContextContributor = {
   key: 'shot',
@@ -83,4 +85,6 @@ export const ALL_CONTRIBUTORS: PromptContextContributor[] = [
   assetsContributor,
   styleContributor,
   continuityContributor,
+  // H1(docs/07):八维知识库检索(独立文件 contributors/knowledge.ts,Planner 确定性规划)
+  knowledgeContributor,
 ];

@@ -24,6 +24,8 @@ export async function loadOptimizeContext(
       projectId: string;
       positionIdx: number;
     };
+    /** H1:发起人(knowledge contributor 的 embedding 调用记账归属) */
+    userId: string;
     /** 目标视频 provider(binding.shot.video.providerId)— 缺省按 generic 风格优化 */
     targetProviderId?: string | null;
     providerFamilyOverride?: ProviderFamily;
@@ -116,6 +118,7 @@ export async function loadOptimizeContext(
 
   return {
     prisma,
+    userId: args.userId,
     group: {
       id: group.id,
       number: group.number,

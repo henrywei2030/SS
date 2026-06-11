@@ -31,6 +31,15 @@ export interface CharacterImageRef {
 }
 
 /**
+ * H0(docs/07):强化词默认值 — 八要素文章模板("质量保险丝"五类中的画质/稳定两类)。
+ * ⚠️ 与 packages/db/prisma/seed.ts 的 prompt.enhancer.* 设置默认值**双写**,改一处须同步另一处。
+ * 语义:SystemSetting 行缺失(老库未 db:sync)= 用这里的默认;行存在但值为空 = 用户显式关闭。
+ */
+export const DEFAULT_ENHANCER_QUALITY = '4K超高清、电影质感、细节丰富';
+export const DEFAULT_ENHANCER_STABILITY =
+  '面部清晰不变形、人体比例自然、动作流畅连贯无跳帧、五官一致';
+
+/**
  * 六八(人到声必到):从 group 绑定里收集人物参考声线 — 纯函数,单测覆盖。
  *
  * 规则:**只要人物绑定在该生成段(不论 usageType / 是否被 @token 引用),其 voiceMediaId
@@ -288,6 +297,25 @@ export async function compileVideoPromptForGroup(
     }
   }
 
+  // H0(docs/07 §4.1):【时间轴】结构段数据 — 组内 shots 按 positionIdx 升序(从 Shot 表读,
+  // 正文零接触 → 默认拼接/手编/AI 优化三态统一生效;submit/preview/keyframe 复用本真相源自动受益)
+  const timelineShots = await tx.shot.findMany({
+    where: { groupId: args.group.id, deletedAt: null },
+    orderBy: { positionIdx: 'asc' },
+    select: { durationS: true, framing: true, angle: true, movement: true, lighting: true },
+  });
+
+  // H0:强化词设置(八要素 #7 画质 / #8 稳定)— 行缺失用默认(文章模板),行存在但空 = 显式关闭
+  const enhancerRows = await tx.systemSetting.findMany({
+    where: { key: { in: ['prompt.enhancer.quality', 'prompt.enhancer.stability'] } },
+    select: { key: true, value: true },
+  });
+  const enhancerMap = new Map(enhancerRows.map((r) => [r.key, r.value]));
+  const enhancers = {
+    quality: enhancerMap.get('prompt.enhancer.quality') ?? DEFAULT_ENHANCER_QUALITY,
+    stability: enhancerMap.get('prompt.enhancer.stability') ?? DEFAULT_ENHANCER_STABILITY,
+  };
+
   const compiled = compileShotGroupVideoPrompt({
     text: args.group.prompt,
     durationS: args.durationS,
@@ -304,6 +332,8 @@ export async function compileVideoPromptForGroup(
     extraInstruction: args.extraInstruction,
     extraNegative: args.extraNegative,
     voiceDescriptions,
+    timelineShots,
+    enhancers,
   });
 
   return {

@@ -12,6 +12,7 @@
  *   - admin.style         风格管理
  *   - admin.prompt        提示词模板
  *   - admin.preset        景别/机位/运镜/光线 预设
+ *   - admin.knowledge     八维提示词知识库(H3:候选审核/启停/蒸馏)
  *   - admin.system        系统设置(SystemSetting CRUD)
  *   - admin.binding       业务 binding(model/parser/style 绑定)
  *   - admin.episode       Episode 管理
@@ -39,6 +40,7 @@ import { userRouter } from './admin/user.js';
 import { reportsRouter } from './admin/reports.js';
 import { dbExplorerRouter } from './admin/db-explorer.js';
 import { dashboardRouter } from './admin/dashboard.js';
+import { knowledgeRouter } from './admin/knowledge.js';
 
 export const adminRouter = router({
   relay: relayRouter,
@@ -48,6 +50,7 @@ export const adminRouter = router({
   style: styleRouter,
   prompt: promptRouter,
   preset: presetRouter,
+  knowledge: knowledgeRouter,
   system: systemRouter,
   binding: bindingRouter,
   episode: episodeRouter,

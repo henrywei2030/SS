@@ -33,6 +33,33 @@ export {
   DEFAULT_CONTRIBUTORS,
 } from './guards.js';
 export { ALL_CONTRIBUTORS } from './contributors/index.js';
+// H2(docs/07):硬门 / 判官 / 深度编排
+export {
+  runHardGates,
+  parseAbstractBlacklist,
+  DEFAULT_ABSTRACT_BLACKLIST,
+  type HardGateViolation,
+} from './checkers.js';
+export {
+  runJudge,
+  sanitizeJudgeVerdict,
+  buildJudgeUserPrompt,
+  JUDGE_BINDING_KEY,
+  JUDGE_REPAIR_THRESHOLD,
+  PROMPT_JUDGE_SLUG,
+  PROMPT_JUDGE_FALLBACK,
+  type JudgeVerdict,
+} from './judge.js';
+export {
+  deepOptimizeGroupPrompt,
+  MAX_REPAIR_ITERATIONS,
+  type DeepOptimizeOutcome,
+  type DeepOptimizeOk,
+  type DeepOptimizeDeny,
+  type OptimizeStage,
+} from './deep-optimize.js';
+export { recordOptimizeRun, type RecordOptimizeRunArgs } from './run-record.js';
+export { runSyncHardGates } from './optimize.js';
 export type {
   OptimizeContext,
   OptimizeOutcome,

@@ -1,9 +1,11 @@
 /**
- * M6 整集提示词优化 job handler(queue kind `optimize-prompts`)。
+ * M6/H2 提示词优化 job handler(queue kind `optimize-prompts`)。
  *
- * 整集 = N 组 × LLM 数秒,不能同步 mutation — 走 ss-jobs 后台串行跑,完成后
- * 铃铛+webhook 通知(M0 notify)。每组独立:单组失败/被拒不连坐;循环内逐组过
- * 文本日预算,打满即止(剩余组记 skipped)。
+ * H2 升级(docs/07 延迟分档):后台 job 一律走**深度管线**(Composer→硬门→判官→Repair≤2)—
+ *   - 整集✨:全部候选组逐组深度优化
+ *   - 单组✨✨深度优化:payload.groupId 锁定一组(同 kind 复用,入队侧 jobId 区分)
+ * 判官 binding 未配时深度管线自动降级 = Composer+硬门(advisory 语义,行为兼容 M6)。
+ * 每组落 PromptOptimizeRun 体检报告(八维分/阶段明细/片段命中 — H3 飞轮数据源)。
  *
  * 失败语义(增强项纪律,同 cache-video/qc):handler 不抛 — 全部结果进通知正文。
  */
@@ -16,7 +18,8 @@ import { notify } from '../notify/index.js';
 
 import { applyOptimizedPrompt, checkTextBudgetForOptimize } from './apply.js';
 import { loadOptimizeContext } from './context.js';
-import { optimizeGroupPrompt } from './optimize.js';
+import { deepOptimizeGroupPrompt } from './deep-optimize.js';
+import { recordOptimizeRun } from './run-record.js';
 
 export const OPTIMIZE_EPISODE_JOB_KIND = 'optimize-prompts' as const;
 
@@ -24,6 +27,8 @@ export const OptimizeEpisodeJobDataSchema = z.object({
   episodeId: z.string().cuid(),
   projectId: z.string().cuid(),
   userId: z.string().cuid(),
+  /** H2:✨✨单组深度优化 — 只跑这一组(缺省 = 整集) */
+  groupId: z.string().cuid().optional(),
   requestId: z.string().optional(),
 });
 export type OptimizeEpisodeJobData = z.infer<typeof OptimizeEpisodeJobDataSchema>;
@@ -36,11 +41,11 @@ export async function processOptimizeEpisodeJob(data: unknown): Promise<void> {
   } catch (e) {
     // 兜底:整集级意外(DB 不可达等)— 落通知让用户知道这单没跑完
     const msg = sanitizeErrorMsg(e, 300);
-    console.warn(`[optimize-prompts]${reqTag} 整集优化中断:`, msg);
+    console.warn(`[optimize-prompts]${reqTag} 优化中断:`, msg);
     await notify(prisma, {
       userId: payload.userId,
       type: 'optimize_failed',
-      title: '整集提示词优化中断',
+      title: payload.groupId ? '单组深度优化中断' : '整集提示词优化中断',
       body: msg,
       payload: { episodeId: payload.episodeId, projectId: payload.projectId },
     }).catch(() => {});
@@ -61,7 +66,11 @@ async function runEpisodeOptimize(
   )?.value;
 
   const groups = await db.shotGroup.findMany({
-    where: { episodeId, deletedAt: null },
+    where: {
+      episodeId,
+      deletedAt: null,
+      ...(payload.groupId ? { id: payload.groupId } : {}),
+    },
     orderBy: { positionIdx: 'asc' },
     select: {
       id: true,
@@ -98,17 +107,29 @@ async function runEpisodeOptimize(
           projectId,
           positionIdx: g.positionIdx,
         },
+        userId,
         targetProviderId,
       });
-      const outcome = await optimizeGroupPrompt(db, { ctx, userId, projectId, episodeId });
+      // H2:深度管线(判官未配自动降级 Composer+硬门)
+      const outcome = await deepOptimizeGroupPrompt(db, { ctx, userId, projectId, episodeId });
       if (!outcome.ok) {
-        // NO_BINDING 是全局配置缺失 — 后续组必然同拒,直接中止
-        if (outcome.code === 'NO_BINDING') {
-          failed.push(`组 ${g.number}:${outcome.message}`);
-          break;
-        }
+        totalCost += outcome.totalCostCny;
+        await recordOptimizeRun(db, {
+          groupId: g.id,
+          episodeId,
+          projectId,
+          userId,
+          stages: outcome.stages,
+          dimScores: outcome.dimScores,
+          fragmentIds: outcome.fragmentIds,
+          iterations: outcome.iterations,
+          applied: false,
+          denyCode: outcome.code,
+          totalCostCny: outcome.totalCostCny,
+        });
         failed.push(`组 ${g.number}:${outcome.message}`);
-        totalCost += outcome.costCny ?? 0;
+        // NO_BINDING 是全局配置缺失 — 后续组必然同拒,直接中止
+        if (outcome.code === 'NO_BINDING') break;
         continue;
       }
       const applied = await applyOptimizedPrompt(db, {
@@ -120,11 +141,25 @@ async function runEpisodeOptimize(
         projectId,
         episodeId,
         contributorsUsed: outcome.contributorsUsed,
-        inputTokens: outcome.inputTokens,
-        outputTokens: outcome.outputTokens,
-        costCny: outcome.costCny,
+        // §4.6 收口:composer/judge/repair 全阶段 tokens/费用并入同一条 prompt.optimize 记账
+        inputTokens: outcome.totalInputTokens,
+        outputTokens: outcome.totalOutputTokens,
+        costCny: outcome.totalCostCny,
       });
-      totalCost += outcome.costCny;
+      totalCost += outcome.totalCostCny;
+      await recordOptimizeRun(db, {
+        groupId: g.id,
+        episodeId,
+        projectId,
+        userId,
+        stages: outcome.stages,
+        dimScores: outcome.dimScores,
+        fragmentIds: outcome.fragmentIds,
+        iterations: outcome.iterations,
+        applied: applied.applied,
+        denyCode: applied.applied ? null : 'PROMPT_CHANGED',
+        totalCostCny: outcome.totalCostCny,
+      });
       if (!applied.applied) {
         failed.push(`组 ${g.number}:优化期间提示词被人工修改,已保留人工版本`);
       } else if (applied.changed) {
@@ -137,6 +172,7 @@ async function runEpisodeOptimize(
     }
   }
 
+  const label = payload.groupId ? '单组深度优化' : '整集提示词优化';
   const summary = [
     `优化 ${ok} 组`,
     unchanged > 0 ? `${unchanged} 组无变化` : '',
@@ -146,11 +182,11 @@ async function runEpisodeOptimize(
   ]
     .filter(Boolean)
     .join(' · ');
-  console.log(`[optimize-prompts]${reqTag} 整集完成:${summary}`);
+  console.log(`[optimize-prompts]${reqTag} ${label}完成:${summary}`);
   await notify(prisma, {
     userId,
     type: failed.length > 0 && ok === 0 && unchanged === 0 ? 'optimize_failed' : 'optimize_done',
-    title: `整集提示词优化:${summary}`,
+    title: `${label}:${summary}`,
     body: failed.slice(0, 5).join('\n') || undefined,
     payload: { episodeId, projectId, ok, unchanged, failed: failed.length, skippedBudget, totalCost },
   }).catch(() => {});

@@ -12,12 +12,15 @@
  * 视频提示词写 `陆萌萌@图片2 (颤抖声音):...`,送 Seedance 时 prompt 文本带 token,
  * references = [{ idx:2, mediaUrl: 'https://.../陆萌萌-portrait.png' }, ...]
  *
- * 公式(5+1 段):
+ * 公式(7+1 段,H0 docs/07 增【时间轴】【画质/稳定】):
  *   positive =
  *     [项目风格]           ← StyleProfile.{character|scene|prop}Prompt 三段拼
  *   + [提示词正文]         ← input.text(由 W3 ShotGroup.prompt 而来,可能已含 @图片N 占位)
+ *   + [时间轴](可选)      ← H0:从 Shot 表 durationS 累加生成结构段(正文零接触,
+ *                            默认拼接/手编/AI 优化三态统一生效 — docs/07 §4.1)
  *   + [声线](可选)        ← 六八:绑定人物的声音设定描述(generateAudio=true 时由调用方传入,
  *                            引导 seedance 等同出音频的模型贴角色音色)
+ *   + [画质/稳定](可选)   ← H0:强化词段(八要素 #7/#8,SystemSetting 可改,留空关闭)
  *   + [时长+比例]          ← "时长 {S}s · 宽高比 {AR}"
  *   + [额外指令]
  *   negative = StyleProfile.forbiddenWords ∪ extraNegative
@@ -102,6 +105,28 @@ export interface CompileShotGroupVideoPromptInput {
    * 空数组/undefined 时 positive 不出现【声线】段,完全向后兼容。
    */
   voiceDescriptions?: Array<{ name: string; desc: string }>;
+  /**
+   * H0(docs/07 §4.1):组内逐镜结构数据,**按 positionIdx 升序**(调用方从 Shot 表读)。
+   * 提供时输出【时间轴】段 — durationS 累加生成边界(`0-3s 全景·固定 | 3-7s …`),
+   * prompt 正文零接触;总时长与 durationS 不一致时按比例缩放保持叙事节奏。
+   * undefined / 空数组 = 不输出(向后兼容);单镜且无任何维度信息也省略(纯噪音)。
+   */
+  timelineShots?: TimelineShotInput[];
+  /**
+   * H0:强化词(八要素 #7 画质 / #8 约束-稳定)。调用方从 SystemSetting
+   * `prompt.enhancer.quality` / `prompt.enhancer.stability` 解析后传入;
+   * 空串/undefined = 对应行关闭,整体不出现该段则完全向后兼容。
+   */
+  enhancers?: { quality?: string | null; stability?: string | null };
+}
+
+/** H0:时间轴段的单镜输入(Shot 表字段子集) */
+export interface TimelineShotInput {
+  durationS: number;
+  framing?: string | null;
+  angle?: string | null;
+  movement?: string | null;
+  lighting?: string | null;
 }
 
 export interface CompiledShotGroupVideoPrompt {
@@ -124,7 +149,11 @@ export interface CompiledShotGroupVideoPrompt {
   parts: {
     stylePart: string;
     textPart: string;
+    /** H0:【时间轴】结构段(无 timelineShots 输入时为 '') */
+    timelinePart: string;
     voicePart: string;
+    /** H0:【画质】/【稳定】强化词段(两行都关时为 '') */
+    enhancerPart: string;
     durationPart: string;
     extraPart: string;
   };
@@ -229,11 +258,13 @@ export function compileShotGroupVideoPrompt(
   const durationS = clampDuration(input.durationS);
   const stylePart = compileStylePart(input.style);
   const textPart = input.text.trim();
+  const timelinePart = compileTimelinePart(input.timelineShots, durationS);
   const voicePart = compileVoicePart(input.voiceDescriptions);
+  const enhancerPart = compileEnhancerPart(input.enhancers);
   const durationPart = `【参数】时长 ${durationS}s · 宽高比 ${aspectRatio}`;
   const extraPart = (input.extraInstruction ?? '').trim();
 
-  const positive = [stylePart, textPart, voicePart, durationPart, extraPart]
+  const positive = [stylePart, textPart, timelinePart, voicePart, enhancerPart, durationPart, extraPart]
     .filter((s): s is string => Boolean(s && s.length > 0))
     .join('\n');
 
@@ -317,7 +348,7 @@ export function compileShotGroupVideoPrompt(
     references: outRefs,
     aspectRatio,
     durationS,
-    parts: { stylePart, textPart, voicePart, durationPart, extraPart },
+    parts: { stylePart, textPart, timelinePart, voicePart, enhancerPart, durationPart, extraPart },
     warnings: { unusedReferences, unknownTokens, missingMedia },
   };
 }
@@ -325,6 +356,68 @@ export function compileShotGroupVideoPrompt(
 // ---------------------------------------------------------------------------
 // 内部 helper
 // ---------------------------------------------------------------------------
+
+/**
+ * H0(docs/07 §4.1):【时间轴】结构段 — 八要素文章"最大金矿":每镜 durationS 数据全有,
+ * 此前从未送进 prompt。从 Shot 表数据生成,不解析正文(`[i/N]` 只是显示约定,手编 /
+ * promptOverride / AI 优化都会破坏它 — 结构段对三态统一生效)。
+ *
+ * 输出:`【时间轴】0-3s 全景·俯视30°·固定·低调侧光 | 3-7s 中景·跟 | 7-9s 特写`
+ *   - 边界由 durationS 累加;目标总长(抽卡面板可覆盖)≠ 镜表总和时按比例缩放,保持节奏
+ *   - 末段边界强制对齐目标总长(防浮点漂移出 14.9s 之类)
+ *   - 维度标签 = framing/angle/movement/lighting 非空项 '·' 连接;全空镜回退 `镜N`
+ *   - sound 不进时间轴(自由文本过长,已由默认拼接行/优化器 shot contributor 承载)
+ */
+function compileTimelinePart(
+  shots: TimelineShotInput[] | undefined,
+  targetDurationS: number,
+): string {
+  if (!shots || shots.length === 0) return '';
+  const durations = shots.map((s) =>
+    Number.isFinite(s.durationS) && s.durationS > 0 ? s.durationS : 0,
+  );
+  const total = durations.reduce((a, b) => a + b, 0);
+  if (total <= 0) return '';
+  const dimsOf = (s: TimelineShotInput): string[] =>
+    [s.framing, s.angle, s.movement, s.lighting]
+      .map((v) => (v ?? '').trim())
+      .filter((v) => v.length > 0);
+  // 单镜且无任何维度信息:时间轴只剩 "0-5s 镜1",纯噪音 → 省略
+  if (shots.length === 1 && dimsOf(shots[0]!).length === 0) return '';
+
+  const factor = targetDurationS / total;
+  const segs: string[] = [];
+  let cursor = 0;
+  for (let i = 0; i < shots.length; i++) {
+    const start = cursor;
+    cursor += durations[i]! * factor;
+    const end = i === shots.length - 1 ? targetDurationS : cursor;
+    const label = dimsOf(shots[i]!).join('·') || `镜${i + 1}`;
+    segs.push(`${fmtTimelineS(start)}-${fmtTimelineS(end)}s ${label}`);
+  }
+  return `【时间轴】${segs.join(' | ')}`;
+}
+
+/** 时间轴边界格式化:保留 1 位小数,整数不带小数点(3 → "3",3.33 → "3.3") */
+function fmtTimelineS(n: number): string {
+  return String(Math.round(n * 10) / 10);
+}
+
+/**
+ * H0:【画质】/【稳定】强化词段(八要素 #7/#8,文章"质量保险丝":省掉 ≈ 10 条 7 返工)。
+ * 值由调用方从 SystemSetting 解析(默认=文章模板,用户清空 = 显式关闭该行)。
+ */
+function compileEnhancerPart(
+  enhancers: CompileShotGroupVideoPromptInput['enhancers'],
+): string {
+  if (!enhancers) return '';
+  const quality = (enhancers.quality ?? '').trim();
+  const stability = (enhancers.stability ?? '').trim();
+  const lines: string[] = [];
+  if (quality) lines.push(`【画质】${quality}`);
+  if (stability) lines.push(`【稳定】${stability}`);
+  return lines.join('\n');
+}
 
 /** 六八:【声线】段 — `林小满:低沉沙哑 · 阿野:清脆少年音`(空描述项过滤) */
 function compileVoicePart(

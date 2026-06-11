@@ -7,7 +7,7 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
-import { mergeShots } from '@ss/core/storyboard';
+import { buildGroupShotLine, mergeShots } from '@ss/core/storyboard';
 import { normalizePrompt, asRecord } from '@ss/shared';
 
 import { protectedProcedure } from '../trpc.js';
@@ -109,15 +109,27 @@ export const groupProcedures = {
       const totalDuration = sorted.reduce((s, x) => s + x.durationS, 0);
 
       // 默认提示词：组内 shots 的 prompt 拼接(用户后续可编辑)
-      // 用户反馈 r3:[i/N] 标题 + prompt 同一行空格分隔(原本是 \n 换行)+ 段间用 \n 隔开
-      // 格式:[1/N] framing angle prompt\n[2/N] framing angle prompt\n...
+      // 用户反馈 r3:[i/N] 标题 + prompt 同一行空格分隔 + 段间用 \n 隔开
+      // H0 捡漏(docs/07 §4.2):movement/lighting/sound/durationS 此前从未进组 prompt 正文 —
+      //   改用 core 共享 buildGroupShotLine(与 autoMergeEpisode 的 merge.ts 同一真相源)
       const defaultPrompt =
         input.promptOverride ??
         sorted
-          .map((s, i) => {
-            const title = `[${i + 1}/${sorted.length}] ${s.framing ?? ''} ${s.angle ?? ''}`.replace(/\s+/g, ' ').trim();
-            return `${title} ${s.prompt}`;
-          })
+          .map((s, i) =>
+            buildGroupShotLine(
+              {
+                framing: s.framing ?? undefined,
+                angle: s.angle ?? undefined,
+                movement: s.movement ?? undefined,
+                lighting: s.lighting ?? undefined,
+                sound: s.sound ?? undefined,
+                durationS: s.durationS,
+                prompt: s.prompt,
+              },
+              i,
+              sorted.length,
+            ),
+          )
           .join('\n');
 
       // 记录被选中 shots 当前所属的旧组 — 合并后这些组可能变空,需要清理
@@ -231,6 +243,10 @@ export const groupProcedures = {
           durationS: s.durationS,
           framing: s.framing ?? undefined,
           angle: s.angle ?? undefined,
+          // H0 捡漏:四维 + 音效透传给 merge.ts 默认拼接(此前丢失)
+          movement: s.movement ?? undefined,
+          lighting: s.lighting ?? undefined,
+          sound: s.sound ?? undefined,
           content: s.content,
           prompt: s.prompt,
           positionIdx: s.positionIdx,

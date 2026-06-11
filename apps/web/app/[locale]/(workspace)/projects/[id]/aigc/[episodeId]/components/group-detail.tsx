@@ -85,6 +85,15 @@ export function GroupDetail({
 
   // M6:单组 AI 优化(写回 ShotGroup.prompt,人可审可改;binding 未配时服务端引导去 /admin/bindings)
   const groupUtils = trpc.useUtils();
+  // H2:✨✨深度优化(后台 job)+ 八维体检卡(最近一次 run)
+  const { data: latestRun } = trpc.aigc.getLatestOptimizeRun.useQuery(
+    { groupId },
+    { enabled: !!data },
+  );
+  const deepOptimizeMut = trpc.aigc.deepOptimizeGroupPrompt.useMutation({
+    onSuccess: () => toast.success('深度优化已入队 — 完成后铃铛通知,体检卡随之更新'),
+    onError: (e) => toast.error(`深度优化入队失败:${e.message}`),
+  });
   const optimizeMut = trpc.aigc.optimizeGroupPrompt.useMutation({
     onSuccess: (r) => {
       toast.success(
@@ -94,8 +103,13 @@ export function GroupDetail({
       );
       void groupUtils.aigc.getGroupDetail.invalidate({ groupId });
       void groupUtils.aigc.previewCompiledPrompt.invalidate({ groupId });
+      void groupUtils.aigc.getLatestOptimizeRun.invalidate({ groupId });
     },
-    onError: (e) => toast.error(`优化失败:${e.message}`),
+    onError: (e) => {
+      toast.error(`优化失败:${e.message}`);
+      // 硬门拒绝等也会落体检 run — 刷新卡片让用户看到 denyCode
+      void groupUtils.aigc.getLatestOptimizeRun.invalidate({ groupId });
+    },
   });
 
   if (isLoading || !data) {
@@ -234,6 +248,15 @@ export function GroupDetail({
                 >
                   {optimizeMut.isPending ? '✨ 优化中…' : '✨ AI 优化'}
                 </button>
+                {/* H2:深度优化(后台 job:Composer→硬门→判官→定向修复≤2;完成铃铛通知) */}
+                <button
+                  onClick={() => deepOptimizeMut.mutate({ groupId })}
+                  disabled={deepOptimizeMut.isPending}
+                  className="rounded border border-[hsl(var(--color-border))] px-2 py-1 text-[length:0.78em] hover:bg-[hsl(var(--color-muted))] disabled:opacity-50"
+                  title="深度优化(后台跑判官评分+定向修复,完成后铃铛通知;配 binding.prompt.judge.modelId 才有判官,否则等同 ✨+硬门)"
+                >
+                  ✨✨ 深度
+                </button>
               </>
             )}
           </div>
@@ -317,6 +340,76 @@ export function GroupDetail({
               )}
             </div>
           )}
+        {/* H0(docs/07):编译预览 — 送模型的完整 prompt(含【时间轴】结构段 +【画质/稳定】强化词) */}
+        {compiled && (
+          <details className="mt-2 text-xs">
+            <summary className="cursor-pointer select-none text-[hsl(var(--color-muted-foreground))] hover:text-[hsl(var(--color-foreground))]">
+              🧩 编译预览(送模型的完整 prompt
+              {compiled.parts.timelinePart ? ' · 含时间轴' : ''}
+              {compiled.parts.enhancerPart ? ' · 含强化词' : ''})
+            </summary>
+            <div className="mt-1 max-h-[40vh] overflow-y-auto rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] p-2 whitespace-pre-wrap leading-relaxed">
+              {compiled.positive}
+              {compiled.negative ? `\n\n— 负面:${compiled.negative}` : ''}
+            </div>
+          </details>
+        )}
+        {/* H2(docs/07):八维体检卡 — 最近一次优化 run 的判官评分/轮数/费用 */}
+        {latestRun && (
+          <div className="mt-2 rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] p-2 text-xs">
+            <div className="mb-1 flex items-center gap-2 text-[hsl(var(--color-muted-foreground))]">
+              <span>🩺 提示词体检</span>
+              <span>
+                {latestRun.applied
+                  ? '✅ 已写回'
+                  : `⛔ 未写回(${latestRun.denyCode ?? '未知'})`}
+              </span>
+              {latestRun.iterations > 0 && <span>修复 {latestRun.iterations} 轮</span>}
+              <span>¥{latestRun.totalCostCny.toFixed(3)}</span>
+              <span>{new Date(latestRun.createdAt).toLocaleString()}</span>
+            </div>
+            {latestRun.dimScoresJson ? (
+              <div className="flex flex-wrap gap-1">
+                {Object.entries(
+                  latestRun.dimScoresJson as Record<string, { score: number; issue?: string }>,
+                ).map(([dim, v]) => {
+                  const label =
+                    (
+                      {
+                        SUBJECT: '主体',
+                        ACTION: '动作',
+                        SCENE: '场景',
+                        LIGHTING: '光影',
+                        CAMERA: '镜头',
+                        STYLE: '风格',
+                        QUALITY: '画质',
+                        CONSTRAINT: '稳定',
+                      } as Record<string, string>
+                    )[dim] ?? dim;
+                  const tone =
+                    v.score >= 80
+                      ? 'text-emerald-600 dark:text-emerald-400 border-emerald-600/40'
+                      : v.score >= 60
+                        ? 'text-amber-600 dark:text-amber-400 border-amber-600/40'
+                        : 'text-red-600 dark:text-red-400 border-red-600/40';
+                  return (
+                    <span
+                      key={dim}
+                      className={`rounded border px-1.5 py-0.5 ${tone}`}
+                      title={v.issue || `${label} ${v.score} 分`}
+                    >
+                      {label} {v.score}
+                    </span>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-[hsl(var(--color-muted-foreground))]">
+                无判官评分(✨ 同步优化只过硬门;配 binding.prompt.judge.modelId 后用 ✨✨ 深度优化出八维分)
+              </p>
+            )}
+          </div>
+        )}
       </section>
 
       {/* Section 4: 视频预览(W5.4)*/}

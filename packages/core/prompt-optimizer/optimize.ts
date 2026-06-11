@@ -11,6 +11,7 @@ import type { PrismaClient } from '@ss/db';
 
 import { loadPromptTemplate } from '../shared/load-prompt.js';
 
+import { parseAbstractBlacklist, runHardGates } from './checkers.js';
 import { ALL_CONTRIBUTORS } from './contributors/index.js';
 import {
   buildFamilyDirective,
@@ -129,6 +130,20 @@ export async function optimizeGroupPrompt(
     };
   }
 
+  // H2(docs/07 §2):硬门一票否决(时长加总/禁用词/抽象偷懒短语/长度;token 上面已单独拦)。
+  // 单组✨同步路在此拒绝即终;深度路(deep-optimize)拿 violations + rawOutput 做定向 Repair。
+  const violations = await runSyncHardGates(prisma, ctx, optimized);
+  if (violations.length > 0) {
+    return {
+      ok: false,
+      code: 'HARD_GATE',
+      message: `优化输出未过硬门:${violations.map((v) => v.message).join(';')} — 已拒绝写回(原提示词未动)`,
+      rawOutput: optimized.slice(0, 4000),
+      violations,
+      costCny: result.costCny,
+    };
+  }
+
   return {
     ok: true,
     optimized,
@@ -138,4 +153,23 @@ export async function optimizeGroupPrompt(
     costCny: result.costCny,
     contributorsUsed,
   };
+}
+
+/** H2:装配硬门输入(黑名单设置 + 项目禁用词)并跑五门 — sync 与 deep 共用口径 */
+export async function runSyncHardGates(
+  prisma: PrismaClient,
+  ctx: OptimizeContext,
+  candidate: string,
+): Promise<Array<{ gate: string; message: string }>> {
+  const blacklistRow = await prisma.systemSetting.findUnique({
+    where: { key: 'prompt.harness.abstractBlacklist' },
+    select: { value: true },
+  });
+  return runHardGates({
+    original: ctx.group.prompt,
+    candidate,
+    groupDurationS: ctx.group.durationS,
+    forbiddenWords: ctx.style?.forbiddenWords ?? [],
+    abstractBlacklist: parseAbstractBlacklist(blacklistRow?.value),
+  });
 }

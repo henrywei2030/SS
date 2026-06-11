@@ -5,6 +5,30 @@
 
 ---
 
+## 2026-06-11(周四,mac-studio · 七一:Prompt Mini-Harness H0–H3 单日四期全落地)— docs/07 蓝图代码完工,migration ×2 点头
+
+**完成**
+- ✅ **H0 基座**:①【时间轴】编译段(timelinePart 从 Shot 表 durationS 累加生成,正文零接触三态统一;总长覆盖按比例缩放,单镜无维度省略)+【画质/稳定】强化词段(`prompt.enhancer.quality/stability` 设置默认=文章模板、清空关闭;与 core DEFAULT 双写),接线 `compileVideoPromptForGroup` → submit/preview/keyframe 自动受益(keyframe 显式挑 parts 不受污染);group-detail 加「🧩 编译预览」折叠块;**真实组实测**:`【时间轴】0-3s 近景·平视 0°·固定·暖调 | 3-8s 全景·拉·暖调` ② mergeShots 默认拼接捡漏:共享 `buildGroupShotLine`(movement/lighting/sound/durationS 首次进组正文;手动 mergeShots 与 autoMergeEpisode 统一 r3 行格式) ③ **PromptKnowledge 表 + 83 条种子语料**(八维分布 ACTION15/CAMERA14/LIGHTING12/CONSTRAINT10/SCENE10/QUALITY8/STYLE8/SUBJECT6,文章方法论+v2 模板蒸馏;migration 点头 42/42;db:sync 按 slug 增量不覆盖 admin 编辑) ④ ITextEmbeddingProvider(openai-compat /embeddings 严格解析:缺行/错位即抛防懒回填写错条目;registry getEmbeddingProvider+缓存失效 8 路)+ 懒回填(embeddingModel 对账,失败降级不抛)+ 检索纯函数(余弦/keyword/tag 三档退化阶梯)
+- ✅ **H1 检索进流水线**:确定性 Planner(零成本规则:QUALITY/CONSTRAINT 保底、夜戏→光影、≥2镜→CAMERA、绑定人物→SUBJECT;**allowTagFallback 闸**=通用维 tag 兜底/对症维宁缺毋滥,防「治愈清新」进紧张戏;`harness.planner.enabled` 升级位)+ knowledge contributor(一个文件接 M6 CSV 开关,默认五件套;embedding binding 配了走懒回填+语义检索、没配 tags 零成本;**实测对症**:"双手接过菜单"→手部稳定条目)+ 分镜侧轻量注入(`buildSceneKnowledgeBlock`:项目世界观条目无条件+全局对症,零 embedding 外呼,失败不阻塞;实测街道场命中市井烟火气)+ **storyboard_main v3**(写作三纪律:主体锚定/微观动作/场景具体化 + 自查⑥;core/seed 双写,db:sync 插 v3 行按 updatedAt 自动生效)
+- ✅ **H2 判官+修复闭环**:硬门五门 checkers(token/时长加总±30%/禁用词/抽象词黑名单(`prompt.harness.abstractBlacklist` 可调可 off)/长度;违规全收集不短路)进单组✨同步路(新 deny 码 HARD_GATE);八维判官(`binding.prompt.judge.modelId` 独立便宜模型;**advisory 纪律 D-C**:输出消毒 known-dims/clamp/issue 截断、repairDims 按分<60 自推不信模型自报、防注入护栏、任何失败跳过不阻塞)+ 定向 Repair ≤2 轮(只喂不及格维+对应片段;**软门修复过不了硬门即丢弃保上一版** — 绝不为软门换掉过硬门的文本);**PromptOptimizeRun 表**(stages 明细/dimScores/fragmentIds/iterations/applied/denyCode;migration 与 weight 列合并点头 43/43)+ §4.6 记账收口(composer/judge/repair 全阶段并入单条 prompt.optimize);延迟分档:整集✨ job 升深度管线、新「✨✨深度」单组 job(同 kind payload.groupId)、单组✨保持秒级;UI 八维体检卡(色阶 chips+轮数+费用+denyCode)
+- ✅ **H3 飞轮三回路 + admin 知识库页**:回路① `minePromptEditCandidates`(PromptEdit AI→人改配对 → LLM 蒸馏泛化规则 → MINED enabled=false 候选;`[AI优化]` 标记配对,admin「⛏️蒸馏」触发,action=knowledge.mine 独立记账)/ 回路② qc 落分钩子 → run.fragmentIds 权重 ±0.05 clamp[0.2,2](7 天归因窗;**qcScore 不可信纪律**:只调检索次级权重,永不自动启停条目)/ 回路③ QC 漂移按模型家族沉淀 CONSTRAINT 候选(幂等 upsert,hitCount=证据数);weight 进检索排序(tag 主序/语义关键词破并列);**/admin/knowledge 管理页**(筛选/启停/编辑(改正文自动清向量重算)/删除(种子提示 sync 会补回)/候选审核/蒸馏触发)+ admin.knowledge 路由 6 procedure
+- ✅ **端到端实测(零真打开销)**:H0 编译段真实组出段 ✓ / H1 contributor+scene-block 真实数据对症命中 ✓ / H3 权重 1→1.05→1 精确 + 漂移候选落库 + 夹具清净 ✓
+- ✅ 回归口径:typecheck 16/16 多轮全过 · 测试 **394 过+2skip**(core 278:checkers9/judge5/planner8/retrieval14/backfill4/merge+4/video+13 等 ~60 新用例;api 57/adapters 48(embedding10)/queue 11)· migration 43/43 · db:sync 10 模板+41 设置+83 条目
+- ✅ 新增结构件全进 seed.ts 闭环:模板 prompt_judge_main + storyboard_main v3;设置 prompt.enhancer.quality/stability、binding.prompt.embedding.modelId、binding.prompt.judge.modelId、prompt.harness.abstractBlacklist、harness.planner.enabled;CSV 默认升五件套(本机 DB 行已同步,**其他机器若手动改过 CSV 需自行加 knowledge**)
+
+**问题/待决策**
+- ❓ **gate 顺验清单扩成"三连+Harness 五验"**(TODO 真打债置顶 ①-⑧):✨硬门拒绝路径/✨✨判官修复/体检卡/知识检索痕迹进产物/分镜 v3 对照/±强化词 A/B/embedding 语义检索
+- ❓ 深度路 deny 时费用只入 run 表不写 ledger(沿 M6 同步路既有口径;run.totalCostCny 已可审计)— gate 后视真打频次再议
+- ❓ 抽象词黑名单默认只收 5 个纯偷懒短语(防误杀);判官阈值 60/修复 ≤2/权重步进 0.05 均为起步定值,H3 飞轮按真打数据调
+- ❓ mac-mini/win-laptop 开工:2 个 migration 待 deploy(开工流程自动提示)+ db:sync 自动补全部新结构;`prompt.optimizer.contributors` 各机若为旧默认值不会自动加 knowledge(db:sync 不覆盖)— 需手动在系统设置加
+
+**下次接着做**
+- 📌 **真打回归 gate 三连+Harness 五验**(需用户在线;单点 ¥2 + QC ¥0.05/take + ✨ ¥0.05 + ✨✨ ¥0.1 + 批量按集)
+- 📌 gate 过后:F5b 并抽/failover(蓝图压后项)或 H3 飞轮运营观察(蒸馏候选质量/权重演化)
+- 📌 可选:`binding.prompt.embedding.modelId` 配 relay 上的 embedding 模型解锁语义检索(首次懒回填 ≈¥0.04)
+
+---
+
 ## 2026-06-11(周四,mac-studio · 七十:M6a/b 动态 Prompt 优化落地 + 八要素文章研读 + 八维 Prompt Mini-Harness 方案定稿)— 代码 + 规划双线
 
 **完成**

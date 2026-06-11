@@ -97,6 +97,7 @@ model Project {
   opLogs   OperationLog[]
   invites  Invitation[]
   inspirationDrafts InspirationDraft[]
+  promptKnowledge   PromptKnowledge[] // H0(docs/07):项目私有知识条目(世界观等)
   style    StyleProfile?     @relation(fields: [styleId], references: [id])
 
   createdAt DateTime  @default(now())
@@ -1241,6 +1242,94 @@ enum PromptCategory {
   PROMPT_FRAGMENT // 复用片段
   PROMPT_PRESET // 预设组合（景别/机位/运镜/光线等）
   PROMPT_OPTIMIZER // M6 动态 prompt 优化器 meta-prompt(按目标 provider 自适应)
+}
+
+// =============================================================================
+// § 10.5 Prompt Mini-Harness 八维知识库(H0,docs/07 §3)
+// =============================================================================
+
+/// 八要素维度(docs/07 §1 — 时间轴是编译期结构段不入库,节奏类规则归 CAMERA)
+enum PromptDimension {
+  SUBJECT // 主体(锚定/外观规则)
+  ACTION // 动作(抽象词→具体画面翻译对/微观死磕)
+  SCENE // 场景(氛围/年代具体化;项目世界观 = projectId 作用域条目,D-E)
+  LIGHTING // 光影
+  CAMERA // 镜头语言(运镜语法/轴线/节奏切片规则)
+  STYLE // 风格
+  QUALITY // 画质强化词
+  CONSTRAINT // 约束/稳定强化词
+}
+
+enum PromptKnowledgeSource {
+  SEED // 种子语料(文章 + v2 模板蒸馏,db:sync 按 slug 增量补)
+  MANUAL // admin 手录
+  MINED // H3 飞轮蒸馏(PromptEdit 人改 / QC 失败模式沉淀,经 admin 审核)
+}
+
+/// 单表多维(D-A:不做 8 个物理库;不复用 PromptTemplate — 无 embedding/tags/projectId)
+model PromptKnowledge {
+  id        String          @id @default(cuid())
+  dimension PromptDimension
+  /// 种子条目锚(db:sync insert-if-missing 用);MANUAL/MINED 条目可空
+  slug      String?         @unique
+  title     String
+  content   String          @db.Text
+  /// { family?: string[], style?: string[], mood?: string[], era?: string[], keywords?: string[] }
+  /// 空对象/键缺失 = 通用条目(任何过滤都命中)— 形状见 core/prompt-knowledge/retrieval.ts
+  tagsJson  Json            @default("{}")
+  /// number[] 懒回填(docs/07 §4.5:seed/db:sync 离线可跑,首次检索批量补算);null = 未算
+  embedding Json?
+  /// 算该向量用的 embedding 模型 id — 换模型后据此识别旧向量重算(维数/语义空间不可混)
+  embeddingModel String?
+  /// null = 全局;非空 = 项目私有(世界观年代设定即项目级场景维条目,D-E)
+  projectId String?
+  source    PromptKnowledgeSource @default(SEED)
+  enabled   Boolean         @default(true)
+  /// 飞轮数据(H3):检索命中计数 / 最近使用 — 权重升降依据
+  hitCount   Int       @default(0)
+  lastUsedAt DateTime?
+  /// H3 飞轮权重:run.fragmentIds × 后续 qcScore 相关性升降(clamp 0.2-2,起始 1)。
+  /// 检索排序的次级信号(tag 模式主排序;embedding/keyword 模式平分破并列)
+  weight     Float     @default(1)
+  createdBy  String?
+
+  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([dimension, enabled])
+  @@index([projectId])
+  @@map("prompt_knowledge")
+}
+
+/// H2(docs/07 §3):优化运行记录 — 八维体检报告 / 审计 / H3 飞轮数据源。
+/// 纯 id 关联无 FK(同 PromptEdit 模式 — 审计行不阻塞业务行删除)。
+model PromptOptimizeRun {
+  id        String  @id @default(cuid())
+  groupId   String
+  episodeId String
+  projectId String
+  userId    String
+  /// 阶段明细:[{stage:'composer'|'judge'|'repair', modelId, inputTokens, outputTokens, costCny, targets?}]
+  stagesJson Json
+  /// 判官八维评分 {SUBJECT:{score,issue},...};判官缺席(未配 binding/失败)null
+  dimScoresJson Json?
+  /// 知识片段命中 id(composer 注入 ∪ repair 注入)— H3 与 qcScore 做相关性
+  fragmentIds String[]
+  /// repair 轮数(≤2,D-F)
+  iterations Int     @default(0)
+  /// 是否写回成功(false = deny / 乐观锁让位)
+  applied    Boolean @default(false)
+  /// deny 时的代码(HARD_GATE/TOKEN_LOST/…);applied=true 时 null
+  denyCode   String?
+  totalCostCny Decimal @default(0) @db.Decimal(12, 4)
+  createdAt  DateTime @default(now())
+
+  @@index([groupId, createdAt])
+  @@index([episodeId])
+  @@index([projectId, createdAt])
+  @@map("prompt_optimize_runs")
 }
 
 model StyleProfile {
