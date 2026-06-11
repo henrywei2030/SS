@@ -145,9 +145,7 @@ export function GenerationPanel({
         : selectedSlot === 'panorama'
           ? '2:1'
           : selectedSlot === 'three_view'
-            ? type === 'SCENE'
-              ? '1:1' // 六八:场景九宫格 3×3,方图最稳
-              : '16:9'
+            ? '16:9' // 七二第八波:三视图/九宫格统一 16:9(场景九宫格默认从 1:1 改 16:9)
             : '16:9',
     );
   }, [selectedSlot, type]);
@@ -164,7 +162,6 @@ export function GenerationPanel({
     [asset],
   );
   const portraitUrl = slotMediaUrl(asset.portraitMediaId);
-  const sceneMainUrl = slotMediaUrl(asset.sceneMainMediaId);
   const sceneGridUrl = slotMediaUrl(asset.threeViewMediaId);
 
   // 自动参考链(六七人物 + 六八场景,同一逻辑):切槽位时重置参考区防泄漏,
@@ -186,11 +183,9 @@ export function GenerationPanel({
     const applied =
       selectedSlot === 'three_view' && type === 'CHARACTER'
         ? autoRef(asset.portraitMediaId, portraitUrl)
-        : selectedSlot === 'three_view' && type === 'SCENE'
-          ? autoRef(asset.sceneMainMediaId, sceneMainUrl)
-          : selectedSlot === 'panorama' && type === 'SCENE'
-            ? autoRef(asset.threeViewMediaId, sceneGridUrl)
-            : false;
+        : selectedSlot === 'panorama' && type === 'SCENE'
+          ? autoRef(asset.threeViewMediaId, sceneGridUrl)
+          : false;
     if (!applied) setRefImageIds([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -198,8 +193,6 @@ export function GenerationPanel({
     type,
     asset.portraitMediaId,
     portraitUrl,
-    asset.sceneMainMediaId,
-    sceneMainUrl,
     asset.threeViewMediaId,
     sceneGridUrl,
   ]);
@@ -209,10 +202,6 @@ export function GenerationPanel({
     selectedSlot === 'three_view' &&
     type === 'CHARACTER' &&
     refImageIds.includes(asset.portraitMediaId ?? '');
-  const gridFromSceneMain =
-    selectedSlot === 'three_view' &&
-    type === 'SCENE' &&
-    refImageIds.includes(asset.sceneMainMediaId ?? '');
   const panoramaFromGrid =
     selectedSlot === 'panorama' &&
     type === 'SCENE' &&
@@ -269,11 +258,11 @@ export function GenerationPanel({
 
         {/* 自动参考状态条(六七人物三视图 + 六八场景九宫格/全景):走「参考图生图」还是「从设定生成」 */}
         {((selectedSlot === 'three_view' && type === 'CHARACTER') ||
-          (type === 'SCENE' && (selectedSlot === 'three_view' || selectedSlot === 'panorama'))) && (
+          (type === 'SCENE' && selectedSlot === 'panorama')) && (
           <div
             className={cn(
               'mt-2 flex items-start gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] leading-snug',
-              threeViewFromPortrait || gridFromSceneMain || panoramaFromGrid
+              threeViewFromPortrait || panoramaFromGrid
                 ? 'border-[hsl(var(--color-accent)/0.4)] bg-[hsl(var(--color-accent)/0.08)] text-[hsl(var(--color-foreground))]'
                 : 'border-[hsl(var(--color-border))] text-[hsl(var(--color-muted-foreground))]',
             )}
@@ -288,16 +277,6 @@ export function GenerationPanel({
                 <span>当前为从设定生成(未用形象图参考)。建议先把人物形象图加回参考区,生成更一致的三视图。</span>
               ) : (
                 <span>人物形象尚未确认。先在「人物形象」槽位生成并确认一张形象图,三视图即可自动以它为参考生成。</span>
-              )
-            ) : selectedSlot === 'three_view' ? (
-              gridFromSceneMain ? (
-                <span>
-                  将以<b>场景主视角</b>为参考(图生图)生成九宫格(9 个角度合一张),保持空间结构/陈设一致;移除参考图可改为从设定生成。图生图约 2-6 分钟。
-                </span>
-              ) : asset.sceneMainMediaId ? (
-                <span>当前为从设定生成(未用主视角参考)。建议把主视角加回参考区,九个角度的空间一致性更好。</span>
-              ) : (
-                <span>场景主视角尚未确认。先在「主视角」槽位生成并确认一张,九宫格即可自动以它为参考生成。</span>
               )
             ) : panoramaFromGrid ? (
               <span>

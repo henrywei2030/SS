@@ -27,13 +27,13 @@ export const SLOTS_BY_TYPE: Record<AssetType, Array<{ slot: Slot; label: string;
     { slot: 'portrait', label: '已确认人物形象 (9:16)', aspectClass: 'aspect-[9/16]' },
     { slot: 'three_view', label: '已确认三视图 (16:9)', aspectClass: 'aspect-[16/9]' },
   ],
-  // 六八(用户定调):场景只留 主视角 / 九宫格 / 全景 三窗口 —
-  //   九宫格 = 一张图含 9 个角度(复用 threeViewMediaId 字段,人物三视图同字段不同语义);
-  //   正面/左侧/右侧/背面 四个单视角槽位下线(DB 字段保留,旧数据不丢,UI 不再展示)。
-  //   参考链:主视角确认 → 九宫格图生图;九宫格确认 → 全景图生图(逻辑同人物 形象→三视图)。
+  // 七二第八波(用户定调):场景下线「主视角」窗口,九宫格为主 —
+  //   九宫格(threeViewMediaId,16:9)= 场景主资产,一次性直接生成(文生图,不再以主视角图生图);
+  //   360° 全景(panoramaMediaId)= 以九宫格为参考图生图。
+  //   主视角(sceneMainMediaId)及正面/左侧/右侧/背面单视角槽位全部下线
+  //   (DB 字段保留,旧数据不丢,UI 不再展示/不参与生成与编译流程)。
   SCENE: [
-    { slot: 'scene_main', label: '主视角', aspectClass: 'aspect-[16/9]' },
-    { slot: 'three_view', label: '九宫格视图 (9 角度合一)', aspectClass: 'aspect-square' },
+    { slot: 'three_view', label: '九宫格视图 (9 角度合一)', aspectClass: 'aspect-[16/9]' },
     { slot: 'panorama', label: '360° 全景', aspectClass: 'aspect-[2/1]' },
   ],
   PROP: [{ slot: 'main', label: '主图', aspectClass: 'aspect-square' }],

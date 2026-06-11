@@ -158,8 +158,8 @@ model Asset {
 
   // W4-MM 新槽位(人物 + 场景 + 道具/风格)
   portraitMediaId   String?  // 人物 9:16 正面形象
-  threeViewMediaId  String?  // 人物 16:9 三视图(正/侧/背合一张)
-  sceneMainMediaId  String?  // 场景主视角
+  threeViewMediaId  String?  // 人物 16:9 三视图;场景复用为「九宫格」16:9(七二第八波:场景主资产)
+  sceneMainMediaId  String?  // 场景主视角(七二第八波下线:场景改九宫格 threeView 为主,本字段保留旧数据,不再参与生成/编译)
   sceneFrontMediaId String?  // 场景正面
   sceneLeftMediaId  String?  // 场景左侧
   sceneRightMediaId String?  // 场景右侧

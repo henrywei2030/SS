@@ -240,7 +240,7 @@ export function computeMaturity(asset: {
     asset.type === 'CHARACTER'
       ? !!asset.portraitMediaId
       : asset.type === 'SCENE'
-        ? !!asset.sceneMainMediaId || !!asset.mainMediaId
+        ? !!asset.threeViewMediaId || !!asset.mainMediaId // 七二第八波:场景主资产=九宫格(threeView)
         : !!asset.mainMediaId;
 
   if (!hasMain) return 'L1_PROMPT_READY';
@@ -249,11 +249,7 @@ export function computeMaturity(asset: {
     asset.type === 'CHARACTER'
       ? !!asset.threeViewMediaId
       : asset.type === 'SCENE'
-        ? !!asset.sceneFrontMediaId ||
-          !!asset.sceneLeftMediaId ||
-          !!asset.sceneRightMediaId ||
-          !!asset.sceneBackMediaId ||
-          !!asset.panoramaMediaId
+        ? !!asset.panoramaMediaId // 七二第八波:场景一致性=360°全景(主视角/单视角槽位下线)
         : true; // 道具 / 风格只要主图即可
 
   if (!consistencyReady) return 'L3_MAIN_CONFIRMED';

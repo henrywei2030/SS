@@ -17,9 +17,9 @@ import { type AssetDetail, type Slot, SLOT_FIELD } from './asset-edit-shared';
 //      (setOutfitSlot / clearOutfitSlot),空槽继承通用形象(灰显);下游该集视频自动用本集造型。
 // ---------------------------------------------------------------------------
 
-// 可按集换装的槽位(AssetVersion 上有对应字段):人物形象/三视图 + 场景主视角
-const OUTFIT_SLOTS = new Set<Slot>(['portrait', 'three_view', 'scene_main']);
-type OutfitSlot = 'portrait' | 'three_view' | 'scene_main';
+// 可按集换装的槽位:人物形象(portrait)/ 三视图(人物)·九宫格(场景)同 three_view 字段
+const OUTFIT_SLOTS = new Set<Slot>(['portrait', 'three_view']);
+type OutfitSlot = 'portrait' | 'three_view';
 
 export function ConfirmedSlotsPanel({
   asset,
@@ -64,13 +64,11 @@ export function ConfirmedSlotsPanel({
     return m?.cdnUrl ?? m?.storageKey ?? null;
   };
 
-  // 某集模式只显示可换装槽位;通用模式显示全部。
-  // SCENE 的 three_view(九宫格)不在 pickAssetMediaId 取图链上 → 按集覆盖下游不生效,
-  //   故场景按集换装只开放 scene_main(避免上传了九宫格造型却对视频零作用的困惑)。
+  // 某集模式只显示可换装槽位(portrait/three_view);通用模式显示全部。
+  // 七二第八波:场景主资产已改九宫格(three_view)且进 pickAssetMediaId 取图链,
+  //   故场景按集换装开放 three_view(九宫格)— 覆盖下游视频生效。
   const displaySlots = outfitEpisodeId
-    ? slots.filter(
-        (s) => OUTFIT_SLOTS.has(s.slot) && !(asset.type === 'SCENE' && s.slot === 'three_view'),
-      )
+    ? slots.filter((s) => OUTFIT_SLOTS.has(s.slot))
     : slots;
 
   const handleSlotUpload = async (slot: Slot, file: File | undefined): Promise<void> => {
@@ -149,7 +147,7 @@ export function ConfirmedSlotsPanel({
                 const has = outfitData.outfits.some(
                   (o) =>
                     o.episodeId === ep.id &&
-                    (o.slots.portrait || o.slots.three_view || o.slots.scene_main),
+                    (o.slots.portrait || o.slots.three_view),
                 );
                 return (
                   <option key={ep.id} value={ep.id}>

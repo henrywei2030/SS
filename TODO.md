@@ -1,7 +1,7 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-06-12(**七二第七波 · mac-studio**:relay 素材同步(generateImage/keyframe→moyu)+ UI 方案执行(aigc/art/director 三大面裸状态色清零:~38 emoji→lucide·~118 色→语义变量·减描边)+ UI 代码三遍复审(色语义 100% 正确)· 详见 [PROGRESS](PROGRESS.md))
-> 上一版:2026-06-12(七二第六波:用户报 5 项 + happyhorse 真打诊断全修 — 99集/跨集换装/happyhorse 防 MOCK · 全盘复审 2 遍 + DMG ×3)
+> 最后更新:2026-06-12(**七二第八波 · mac-studio**:场景工作流改造 — 下线主视角、九宫格(16:9)为场景主资产一次性直生、360°参考九宫格、总览同步生图改九宫格;9 文件 + 浏览器实证 · 详见 [PROGRESS](PROGRESS.md))
+> 上一版:2026-06-12(七二第七波:relay 素材同步 + UI 方案执行(三大面状态色清零)+ UI 代码三遍复审)
 > 仓库:https://github.com/henrywei2030/SS
 > **🚀 一键启动**:`pnpm start`(详见 [README.md](README.md#快速启动) / [CLAUDE.md](CLAUDE.md#设备登记))
 > **📖 主线蓝图**:[docs/06-feature-plan-2026H2.md](docs/06-feature-plan-2026H2.md)(M0–M6 可直接 coding;2026-06-10 mac-mini 逐项核对与代码一致)
@@ -11,6 +11,7 @@
 
 ## 🚧 进行中
 
+- [x] **🏞️ 七二第八波(2026-06-12 mac-studio)· 场景工作流改造(用户指令)**:场景下线「主视角」,九宫格(threeView 复用,16:9)为场景主资产 — 生成面板去主视角 tab + 九宫格默认 16:9(原 1:1)+ 一次性文生图直生(不再图生图)、360° 仍参考九宫格;总览 `PRIMARY_SLOT.SCENE`=three_view + 缺主图/hero/状态chip 改九宫格;后端 `pickAssetMediaId` 场景优先九宫格、maturity L3=九宫格/L4=360°、slot-prompt 16:9;场景换装改在九宫格(进取图链生效)。schema `sceneMainMediaId` 保留未删(旧数据惰性兜底)。9 文件 typecheck 16/16 + 浏览器实证(弹窗只剩九宫格+360°、主视角消失)。**留**:存量旧主视角数据可选清理(等点头)
 - [x] **🎨 七二第七波(2026-06-12 mac-studio)· relay 素材同步 + UI 方案执行 + 三遍复审**:① **relay 素材同步**(用户①)— generateImage/generateKeyframe 生成图补 syncMediaToRelay 同步 moyu,补 happyhorse/wan 等 R2V/I2V 拉不到本机参考图的最后缺口(事务外做/未配 group_id 静默降级)② **UI 方案执行**(用户②,docs/08)— 语义五族色变量基座 + aigc/art/director 三大用户面裸状态色清零(~38 emoji→lucide·~118 色→语义变量·减嵌套描边),4 并行 workflow + 暗亮双模式实证;**优化修订**:字号 5 级迁移暂缓(与 +2px 系统冲突)/ Button 已完备 / art 多已语义化 ③ **三遍复审**(确保美观无漏洞)— 我 + 4 对抗 agent + typecheck16/16/无 unused lucide/裸色全目录 0,色语义 **100% 正确**,修 3 处 P2 打磨(warning 对比/⊘○→图标/🩺→Stethoscope)。**留**:relay 需填 `relay.assets.default_group_id` 真启用 · UI 批④ admin(35 文件低优)· 字号软约束 token
 - [x] **🧩 七二第六波(2026-06-12 mac-studio)· 用户报 5 项 + happyhorse 真打诊断全修**:① **99集幽灵真根因** — archiveEpisode 漏删 script + script.list 没过滤 episode.deletedAt → 修两处+清存量孤儿(1→0)+ episode-cleanup 纵深防御 ② **跨集换装** — AssetVersion 重定义为按集造型(migration 44)+ outfit CRUD + compile 按集覆盖 + 前端造型切换器 ③ 槽位本地上传(全类型)④ 提示词去重(buildGroupShotLine 去维度标签)⑤ 一键生成三视图 ⑥ 自动匹配补 episodes[] ⑦ **happyhorse 防 MOCK**(关键字推断路由真模型)+ **R2V 缺参考图前置硬门**(内部直打实证:真到 moyu、带参考图真出片 ¥8)。生成后弹窗不退修复。全盘复审 2 遍(修 P1 项目级脚本误杀 + P2 SCENE 换装槽位)。~~**留**:relay 素材同步~~ ✅ 七二第七波已完成
 - [x] **🎬 七功能 AIGC 增强路线图(M0–M6)主线全清(2026-06-11 七二)**(蓝图 [docs/06](docs/06-feature-plan-2026H2.md))— ✅ M0 基建 / ✅ M1 成片 / ✅ M2′ 配音补强(均六七)/ ✅ M3 全清(六八/六九)/ ✅ M4+F4(六九)/ ✅ F5a(六九)/ ✅ M6a/b(七十)/ ✅ 真打回归 gate 全过(七二)/ ✅ L5 断点续跑(七二)/ ✅ **F5b 并抽/failover/对比卡(七二 第五波)**:同事务双占位双 PREPAY 对决(真打 seedance×wan 双路独立终态)+ provider 健康度±步进 + 备选链自动切换(真打验证切换/通知/成功回写)+ ⚔ 并排对比卡(QC/价格/采纳)。**留运营**:旗舰档对比数据积累(kling 接入照 wan 路径)

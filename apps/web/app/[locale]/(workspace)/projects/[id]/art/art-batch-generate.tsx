@@ -18,7 +18,7 @@ import type { Slot } from './asset-edit-shared';
 /**
  * 美术工坊「同步生成」(2026-06 需求)— 一键为当前分类下所有「缺主图」的资产各生成 1 张主图并设为槽位。
  *
- * - 主图 = 人物形象图(portrait)/ 场景主视角(scene_main)/ 道具·风格主图(main),由调用方按类型算好传入。
+ * - 主图 = 人物形象图(portrait)/ 场景九宫格(three_view)/ 道具·风格主图(main),由调用方按类型算好传入。
  * - 模型 = binding 默认(当前 = Seedream 5.0 lite),不传 modelId 跟随绑定。
  * - 3 张并发 + 进度条 + 可中断 + 失败重试(复用 storyboard「全部集数生成」同款 pool)。
  * - 生成 1 张后自动 confirmCandidate 设为主图,网格立即填充(refetch by onDone)。
@@ -35,7 +35,7 @@ export interface BatchTarget {
 
 const IMAGE_LABEL: Record<string, string> = {
   CHARACTER: '形象图',
-  SCENE: '主视角',
+  SCENE: '九宫格',
   PROP: '主图',
   STYLE_REFERENCE: '主图',
 };

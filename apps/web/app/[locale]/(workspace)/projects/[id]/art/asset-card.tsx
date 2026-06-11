@@ -69,12 +69,12 @@ export function AssetCard({ asset, heroUrl, bindings, onClick }: Props): React.R
       }));
   }, [bindings]);
 
-  // 主形象 — 9:16 用 portrait,场景用 sceneMain or main,道具用 main
+  // 主形象 — 9:16 用 portrait,场景用 九宫格(threeView,旧数据兜底 sceneMain/main),道具用 main
   const heroMediaId =
     asset.type === 'CHARACTER'
       ? asset.portraitMediaId
       : asset.type === 'SCENE'
-        ? asset.sceneMainMediaId ?? asset.mainMediaId
+        ? asset.threeViewMediaId ?? asset.sceneMainMediaId ?? asset.mainMediaId
         : asset.mainMediaId;
 
   // 卡片比例 — 人物 9:16,场景/道具 16:9
@@ -245,13 +245,7 @@ function MaturityChips({ asset }: { asset: AssetBrief }): React.ReactElement {
       chips.push({ label: '声音已关联', tone: 'success' });
     }
   } else if (asset.type === 'SCENE') {
-    // 六八:场景视图体系收敛为 主视角 / 九宫格(threeViewMediaId 复用) / 360° 全景
-    const hasMain = !!asset.sceneMainMediaId || !!asset.mainMediaId;
-    chips.push(
-      hasMain
-        ? { label: '主视角已完成', tone: 'success' }
-        : { label: '主视角未完成', tone: 'warn' },
-    );
+    // 七二第八波:场景收敛为 九宫格(threeViewMediaId,主资产)/ 360° 全景;主视角已下线
     chips.push(
       asset.threeViewMediaId
         ? { label: '九宫格已完成', tone: 'success' }

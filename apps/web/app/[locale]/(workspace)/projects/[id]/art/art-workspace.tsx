@@ -44,7 +44,7 @@ const TYPES: Array<{ value: AssetType; label: string; icon: React.ElementType }>
 // 各类型「主图」槽位 — 同步生成 / 缺图判定用(对齐网格 hero 取图逻辑)
 const PRIMARY_SLOT: Record<AssetType, Slot> = {
   CHARACTER: 'portrait',
-  SCENE: 'scene_main',
+  SCENE: 'three_view',
   PROP: 'main',
   STYLE_REFERENCE: 'main',
 };
@@ -122,7 +122,8 @@ export function ArtWorkspace({ projectId, locale, initialType }: Props): React.R
     { enabled: assetIds.length > 0 },
   );
 
-  // 「同步生成」目标 — 视图内「缺主图」的资产(主图取图逻辑对齐下方网格 hero)。
+  // 「同步生成」目标 — 视图内「缺主图」的资产。七二第八波:场景主资产=九宫格(threeView),
+  //   缺九宫格即列入(不再看主视角);展示 hero 仍兜底旧 sceneMain 见下方网格。
   // 六八总览:作用于按集数筛选后的资产 → "这些集需要的资产一键补图"
   const batchTargets: BatchTarget[] = React.useMemo(() => {
     if (!visibleAssets) return [];
@@ -132,7 +133,7 @@ export function ArtWorkspace({ projectId, locale, initialType }: Props): React.R
           a.type === 'CHARACTER'
             ? a.portraitMediaId
             : a.type === 'SCENE'
-              ? a.sceneMainMediaId ?? a.mainMediaId
+              ? a.threeViewMediaId
               : a.mainMediaId;
         return !hero;
       })
@@ -485,7 +486,7 @@ export function ArtWorkspace({ projectId, locale, initialType }: Props): React.R
                       a.type === 'CHARACTER'
                         ? a.portraitMediaId
                         : a.type === 'SCENE'
-                          ? a.sceneMainMediaId ?? a.mainMediaId
+                          ? a.threeViewMediaId ?? a.sceneMainMediaId ?? a.mainMediaId
                           : a.mainMediaId;
                     const heroUrl = heroMediaId
                       ? mediaMap[heroMediaId]?.cdnUrl ?? mediaMap[heroMediaId]?.storageKey

@@ -10,7 +10,8 @@
  * fallback 链(W1-W5 audit P1-6 定义):
  *   AUDIO           → voiceMediaId
  *   CHARACTER       → portrait → threeView → main
- *   SCENE           → sceneMain → sceneFront → sceneLeft → sceneRight → sceneBack → panorama → main
+ *   SCENE           → threeView(九宫格) → sceneMain → sceneFront → sceneLeft → sceneRight → sceneBack → panorama → main
+ *                     (七二第八波:九宫格为场景主资产优先;主视角等下线槽位仅作旧数据兜底)
  *   PROP/STYLE/其它  → main
  */
 export interface AssetMediaSlots {
@@ -42,7 +43,9 @@ export function pickAssetMediaId(
     return asset.portraitMediaId ?? asset.threeViewMediaId ?? asset.mainMediaId;
   }
   if (asset.type === 'SCENE') {
+    // 七二第八波:九宫格(threeView)为场景主资产优先;主视角等下线槽位降为旧数据兜底
     return (
+      asset.threeViewMediaId ??
       asset.sceneMainMediaId ??
       asset.sceneFrontMediaId ??
       asset.sceneLeftMediaId ??

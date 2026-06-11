@@ -5,6 +5,25 @@
 
 ---
 
+## 2026-06-12(周五,mac-studio · 七二第八波:场景工作流改造 — 九宫格为主、下线主视角)
+
+**完成**
+- ✅ **场景资产工作流改造(用户指令)**:场景下线「主视角」,九宫格(threeView 字段复用,16:9)为场景主资产 —
+  - 生成面板:去掉主视角 tab,九宫格默认 **16:9**(原 1:1)、**一次性文生图直接生成**(不再以主视角图生图);360° 全景保留以九宫格为参考(图生图),逻辑不变
+  - 总览:`PRIMARY_SLOT.SCENE`=three_view,同步生成/「缺主图」判定改看九宫格;资产卡 hero + 状态 chip 改「九宫格/全景」(去主视角 chip,旧场景 hero 兜底 sceneMain)
+  - 后端:`pickAssetMediaId` 场景优先九宫格(主视角降旧数据兜底);`computeMaturity` 场景 L3=九宫格、L4=360°;slot-prompt 九宫格 1:1→16:9
+  - 换装:场景按集换装改在九宫格(three_view)— 因现在它进 pickAssetMediaId 取图链、覆盖下游视频生效(原先限 scene_main 的限制解除)
+  - schema:`sceneMainMediaId` 字段**保留未删**(避免破坏性 migration;旧数据惰性,仅 hero 兜底显示)
+- ✅ 浏览器实证:场景编辑弹窗只剩 **九宫格 + 360° 两 tab**、主视角彻底消失、九宫格默认 16:9、零 console 错误;typecheck 16/16(9 文件,+37/-66)
+
+**问题/待决策**
+- ❓ 存量场景的旧 `sceneMainMediaId` 数据可选清理(数据级操作,未做,等用户点头)
+
+**下次接着做**
+- 📌 既有:UI 批④ admin / relay 填 group_id 真启用 / 字号软约束 token
+
+---
+
 ## 2026-06-12(周五,mac-studio · 七二第七波:relay 素材同步 + UI 方案执行 + UI 代码三遍复审)
 
 **完成**
