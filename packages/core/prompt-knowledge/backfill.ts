@@ -56,8 +56,6 @@ export async function backfillKnowledgeEmbeddings(
     batchSize?: number;
   },
 ): Promise<BackfillResult> {
-  const batchSize = Math.max(1, args.batchSize ?? 32);
-
   let provider;
   try {
     provider = await getEmbeddingProvider(args.providerId);
@@ -70,6 +68,8 @@ export async function backfillKnowledgeEmbeddings(
     return { updated: 0, failed: 0, modelId: null };
   }
   const modelId = provider.info.id;
+  // provider 声明的单请求上限优先于默认 32(通义 v4 经 moyu ≤10,defaultParams.embeddingBatchSize 配)
+  const batchSize = Math.max(1, args.batchSize ?? provider.maxBatchSize ?? 32);
 
   const todo = args.entries.filter((e) => needsEmbedding(e, modelId));
   if (todo.length === 0) return { updated: 0, failed: 0, modelId };

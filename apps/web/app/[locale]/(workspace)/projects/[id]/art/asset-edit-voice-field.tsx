@@ -1,12 +1,137 @@
 'use client';
 import * as React from 'react';
-import { Loader2, X, Upload, Music, Sparkles, Wand2 } from 'lucide-react';
+import { Loader2, X, Upload, Music, Sparkles, Wand2, Download, Trash2, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { trpc } from '@/lib/trpc/client';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { fileToBase64 } from '@/lib/file-to-base64';
+
+// ---------------------------------------------------------------------------
+// 七二(用户需求①):TTS 模型安装状态卡 — 此前 845MB 权重藏在首次声线 job 里
+// 同步下载(新环境实测 ~20 分钟)UI 零反馈。本卡:未装可后台安装,下载中看进度,
+// 失败可重试/清缓存;就绪只显示一行小字。
+// ---------------------------------------------------------------------------
+
+function TtsWeightsCard(): React.ReactElement | null {
+  const utils = trpc.useUtils();
+  const { data: st } = trpc.asset.voiceWeightsStatus.useQuery(undefined, {
+    refetchInterval: (query) => {
+      const d = query.state.data;
+      if (!d) return 5000;
+      if (d.progress?.state === 'downloading') return 2000; // 下载中密集刷进度
+      return d.ready ? false : 15000; // 未装慢轮询(等别处触发的安装出现)
+    },
+  });
+  const installMut = trpc.asset.voiceWeightsInstall.useMutation({
+    onSuccess: (r) => {
+      toast.success(r.alreadyReady ? 'TTS 模型已就绪' : '已开始后台下载(~850MB),完成会有铃铛通知');
+      void utils.asset.voiceWeightsStatus.invalidate();
+    },
+    onError: (e) => toast.error(`安装启动失败:${e.message}`),
+  });
+  const clearMut = trpc.asset.voiceWeightsClear.useMutation({
+    onSuccess: (r) => {
+      if (r.cleared) toast.success('TTS 模型缓存已清理,可重新安装');
+      else toast.warning(r.reason ?? '暂时无法清理');
+      void utils.asset.voiceWeightsStatus.invalidate();
+    },
+    onError: (e) => toast.error(`清理失败:${e.message}`),
+  });
+
+  if (!st) return null;
+
+  if (st.ready) {
+    return (
+      <p className="flex items-center gap-1 text-[10px] text-[hsl(var(--color-success))]">
+        <CheckCircle2 className="size-3" />
+        本地 TTS 模型已就绪({st.sizeMb}MB · {st.filesDone}/{st.filesTotal} 文件)
+      </p>
+    );
+  }
+
+  const p = st.progress;
+  if (p?.state === 'downloading') {
+    const pct =
+      p.expectedBytes && p.expectedBytes > 0
+        ? Math.min(100, Math.round(((p.doneBytes ?? 0) / p.expectedBytes) * 100))
+        : null;
+    return (
+      <div className="grid gap-1 rounded border border-[hsl(var(--color-accent)/0.4)] bg-[hsl(var(--color-accent)/0.06)] p-2">
+        <div className="flex items-center gap-1.5 text-[11px]">
+          <Loader2 className="size-3 animate-spin text-[hsl(var(--color-accent))]" />
+          正在下载 TTS 模型 {pct != null ? `${pct}%` : ''}(文件 {p.fileIndex ?? '?'}/{p.totalFiles ?? '?'})
+        </div>
+        <div className="h-1.5 overflow-hidden rounded-full bg-[hsl(var(--color-secondary))]">
+          <div
+            className="h-full rounded-full bg-[hsl(var(--color-accent))] transition-all"
+            style={{ width: `${pct ?? 8}%` }}
+          />
+        </div>
+        <p className="text-[10px] text-[hsl(var(--color-muted-foreground))]">
+          {p.currentFile ?? ''} · {Math.round((p.doneBytes ?? 0) / 1e6)}MB
+          {p.expectedBytes ? ` / ${Math.round(p.expectedBytes / 1e6)}MB` : ''} · 可离开此页,完成会有铃铛通知
+        </p>
+      </div>
+    );
+  }
+
+  if (p?.state === 'error') {
+    return (
+      <div className="grid gap-1.5 rounded border border-[hsl(var(--color-destructive)/0.4)] bg-[hsl(var(--color-destructive)/0.06)] p-2">
+        <div className="flex items-center gap-1.5 text-[11px] text-[hsl(var(--color-destructive))]">
+          <AlertTriangle className="size-3" />
+          TTS 模型安装失败
+        </div>
+        <p className="break-all text-[10px] text-[hsl(var(--color-muted-foreground))]">{p.error}</p>
+        <div className="flex gap-1.5">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 gap-1 px-2 text-[10px]"
+            disabled={installMut.isPending}
+            onClick={() => installMut.mutate()}
+          >
+            <Download className="size-3" />
+            重试安装
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 gap-1 px-2 text-[10px]"
+            disabled={clearMut.isPending}
+            onClick={() => clearMut.mutate()}
+            title="删除已下载的不完整文件后重新开始"
+          >
+            <Trash2 className="size-3" />
+            清理缓存
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // 未安装(含部分残留):提示 + 后台安装入口
+  return (
+    <div className="flex items-center justify-between gap-2 rounded border border-[hsl(var(--color-warning)/0.4)] bg-[hsl(var(--color-warning)/0.06)] p-2">
+      <p className="text-[10px] leading-snug text-[hsl(var(--color-muted-foreground))]">
+        本地 TTS 模型未安装({st.filesDone}/{st.filesTotal} 文件)— 不安装也可点「按设定生成」,
+        但首次会卡在静默下载 ~850MB;建议先后台安装
+      </p>
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-6 shrink-0 gap-1 px-2 text-[10px]"
+        disabled={installMut.isPending}
+        onClick={() => installMut.mutate()}
+      >
+        {installMut.isPending ? <Loader2 className="size-3 animate-spin" /> : <Download className="size-3" />}
+        后台安装
+      </Button>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // 五七-3:参考音频字段(配音参考)— 上传 audio → voiceMediaId;视频生成绑该角色自动带上
@@ -159,6 +284,8 @@ export function VoiceField({
       <p className="text-[10px] leading-snug text-[hsl(var(--color-muted-foreground))]/80">
         建议 5-15s 干声(无 BGM/噪音/混响),情绪贴角色;上传后可点 ✨ 一键规范化(掐静音+响度归一)
       </p>
+      {/* 七二:TTS 模型安装状态(未装/下载中/失败/就绪) */}
+      <TtsWeightsCard />
       {/* TTS-B:按设定生成(本地 MOSS-TTS-Nano,免费;文案取角色独白/小传) */}
       <div className="flex items-center gap-1.5">
         <select

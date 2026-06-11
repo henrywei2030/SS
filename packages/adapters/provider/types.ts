@@ -28,6 +28,10 @@ export interface CallContext {
   shotId?: string;
   assetId?: string;
   attemptId?: string;
+  /** L5(七二):视频异步任务在 provider 侧创建成功后立刻回调 task_id — 调用方持久化到
+   * attempt.providerJobId,进程死亡后重入凭它**续轮询同一任务**(不重建,防双结算 —
+   * 实测每只孤儿任务 provider 侧白烧 ≈¥7)。best-effort:回调异常不阻塞生成主流程。 */
+  onVideoTaskCreated?: (providerJobId: string) => void | Promise<void>;
   /**
    * 跳过 Provider 内置 Cost Ledger 记账 — 由 router 单点写入。
    *
@@ -177,6 +181,8 @@ export interface EmbeddingResult {
 
 export interface ITextEmbeddingProvider {
   readonly info: ProviderInfo;
+  /** 单次 /embeddings 请求输入条数上限(通义 v4 经 moyu 实测 ≤10);undefined = 调用方自定批量 */
+  readonly maxBatchSize?: number;
   embed(req: EmbeddingRequest, ctx: CallContext): Promise<EmbeddingResult>;
   estimateCost(req: EmbeddingRequest): number;
 }

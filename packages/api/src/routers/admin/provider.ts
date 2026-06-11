@@ -357,6 +357,9 @@ const providerRouter = router({
         defaultParams.supportsRefVideo = m.supportsRefVideo;
       if (m.supportsRefAudio !== undefined)
         defaultParams.supportsRefAudio = m.supportsRefAudio;
+      if (m.embeddingBatchSize !== undefined)
+        defaultParams.embeddingBatchSize = m.embeddingBatchSize;
+      if (m.adapter !== undefined) defaultParams.adapter = m.adapter; // F5a relay-video 路由(七二)
 
       const created = await ctx.prisma.providerConfig.create({
         data: {

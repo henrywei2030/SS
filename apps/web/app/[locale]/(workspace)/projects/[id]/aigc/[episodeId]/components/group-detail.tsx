@@ -9,6 +9,162 @@ import { type AspectRatio } from '@ss/shared/constants';
 import { VideoPreviewSection } from './video-preview-section';
 
 // ---------------------------------------------------------------------------
+// 七二(用户需求⑤-3):提示词 @ 自动补全 — 编辑态输入 @ 弹出本组已关联资产下拉
+// (名称 + 缩略图 + token),点击插入仓内惯例格式「@名称@图片N」并自动关联。
+// 资产先经「关联素材」手工添加(已有入口)→ 即出现在下拉里。
+// ---------------------------------------------------------------------------
+
+interface MentionBinding {
+  id: string;
+  refSlotIdx: number | null;
+  kind: 'IMAGE' | 'AUDIO';
+  mediaUrl: string | null;
+  asset: { id: string; type: string; name: string };
+}
+
+/** 找光标前最近的「@片段」(@后接 0-20 个非空白非@字符);不在 @ 语境返回 null */
+function findMentionAt(text: string, caret: number): { start: number; query: string } | null {
+  const upto = text.slice(0, caret);
+  const m = /@([^\s@]{0,20})$/.exec(upto);
+  if (!m) return null;
+  return { start: caret - m[0].length, query: m[1] ?? '' };
+}
+
+function PromptTextareaWithMention({
+  value,
+  onChange,
+  bindings,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  bindings: MentionBinding[];
+}): React.ReactElement {
+  const taRef = React.useRef<HTMLTextAreaElement>(null);
+  const [mention, setMention] = React.useState<{ start: number; query: string } | null>(null);
+  const [activeIdx, setActiveIdx] = React.useState(0);
+
+  const candidates = React.useMemo(() => {
+    if (!mention) return [];
+    const q = mention.query.toLowerCase();
+    return bindings.filter((b) => {
+      if (!q) return true;
+      const token = b.refSlotIdx != null ? `${b.kind === 'AUDIO' ? '音频' : '图片'}${b.refSlotIdx}` : '';
+      return b.asset.name.toLowerCase().includes(q) || token.includes(q);
+    });
+  }, [mention, bindings]);
+
+  const sync = (): void => {
+    const ta = taRef.current;
+    if (!ta) return;
+    const next = findMentionAt(ta.value, ta.selectionStart ?? ta.value.length);
+    setMention(next);
+    setActiveIdx(0);
+  };
+
+  const pick = (b: MentionBinding): void => {
+    const ta = taRef.current;
+    if (!ta || !mention) return;
+    const caret = ta.selectionStart ?? value.length;
+    const token =
+      b.refSlotIdx != null
+        ? `@${b.asset.name}@${b.kind === 'AUDIO' ? '音频' : '图片'}${b.refSlotIdx} `
+        : `@${b.asset.name} `;
+    const next = value.slice(0, mention.start) + token + value.slice(caret);
+    onChange(next);
+    setMention(null);
+    // 还原焦点与光标(插入串之后)
+    requestAnimationFrame(() => {
+      ta.focus();
+      const pos = mention.start + token.length;
+      ta.setSelectionRange(pos, pos);
+    });
+  };
+
+  return (
+    <div className="relative">
+      <textarea
+        ref={taRef}
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value);
+          requestAnimationFrame(sync);
+        }}
+        onClick={sync}
+        onKeyUp={(e) => {
+          if (!['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(e.key)) sync();
+        }}
+        onKeyDown={(e) => {
+          if (!mention || candidates.length === 0) return;
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            setActiveIdx((i) => (i + 1) % candidates.length);
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            setActiveIdx((i) => (i - 1 + candidates.length) % candidates.length);
+          } else if (e.key === 'Enter') {
+            e.preventDefault();
+            pick(candidates[activeIdx]!);
+          } else if (e.key === 'Escape') {
+            setMention(null);
+          }
+        }}
+        onBlur={() => {
+          // 延迟关闭,让下拉项的 onMouseDown 先触发
+          setTimeout(() => setMention(null), 150);
+        }}
+        className="min-h-[12rem] w-full rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] p-2 text-[length:0.85em] leading-relaxed outline-none focus:border-blue-500"
+        placeholder="编辑提示词,输入 @ 可从已关联资产中选择插入;保存会写入 PromptEdit 训练集"
+      />
+      {mention && candidates.length > 0 && (
+        <div className="absolute inset-x-0 top-full z-30 mt-1 max-h-56 overflow-y-auto rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-popover,var(--color-card)))] shadow-lg">
+          {candidates.map((b, i) => {
+            const tokenLabel =
+              b.refSlotIdx != null
+                ? `@${b.kind === 'AUDIO' ? '音频' : '图片'}${b.refSlotIdx}`
+                : '(未编号)';
+            return (
+              <button
+                key={b.id}
+                type="button"
+                // onMouseDown 抢在 textarea blur 之前
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  pick(b);
+                }}
+                onMouseEnter={() => setActiveIdx(i)}
+                className={`flex w-full items-center gap-2 px-2 py-1.5 text-left text-[length:0.82em] ${
+                  i === activeIdx ? 'bg-blue-500/10' : ''
+                }`}
+              >
+                <div className="size-8 shrink-0 overflow-hidden rounded bg-[hsl(var(--color-muted))]">
+                  {b.mediaUrl && b.kind === 'IMAGE' ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={b.mediaUrl} alt={b.asset.name} className="size-full object-cover" />
+                  ) : (
+                    <div className="flex size-full items-center justify-center text-sm">
+                      {b.kind === 'AUDIO' ? '🔊' : '🖼'}
+                    </div>
+                  )}
+                </div>
+                <span className="min-w-0 flex-1 truncate font-medium">{b.asset.name}</span>
+                <span className="shrink-0 text-[10px] text-[hsl(var(--color-muted-foreground))]">
+                  {tokenLabel}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {mention && candidates.length === 0 && bindings.length === 0 && (
+        <div className="absolute inset-x-0 top-full z-30 mt-1 rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] px-2 py-1.5 text-[10px] text-[hsl(var(--color-muted-foreground))] shadow-lg">
+          本组还没有关联资产 — 先点上方「关联素材」手工添加,再回来 @ 引用
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // 右侧详情:4 个 section
 // ---------------------------------------------------------------------------
 
@@ -262,11 +418,11 @@ export function GroupDetail({
           </div>
         </div>
         {editingPrompt ? (
-          <textarea
+          // 七二 ⑤-3:@ 自动补全(本组关联资产下拉:缩略图+名称+token,点击插入)
+          <PromptTextareaWithMention
             value={draftPrompt}
-            onChange={(e) => setDraftPrompt(e.target.value)}
-            className="min-h-[12rem] w-full rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] p-2 text-[length:0.85em] leading-relaxed outline-none focus:border-blue-500"
-            placeholder="编辑提示词,保存会写入 PromptEdit 训练集"
+            onChange={setDraftPrompt}
+            bindings={bindings}
           />
         ) : (
           <div className="max-h-[60vh] overflow-y-auto rounded-md border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] p-2 text-[length:0.85em] whitespace-pre-wrap leading-relaxed">
@@ -565,8 +721,17 @@ function KeyframeSection({ groupId }: { groupId: string }): React.ReactElement {
     onError: (e) => toast.error(e.message),
   });
   const chainMut = trpc.aigc.chainTailFrame.useMutation({
-    onSuccess: (r) =>
-      toast.success(`已抽本组尾帧 → 设为下一组 ${r.nextGroupNumber} 的首帧(场内链)`),
+    onSuccess: (r) => {
+      // 七二 ⑤-2:尾帧已包成参考图资产自动关联下一组(关联资产卡可看图)+ 提示词自动 @
+      toast.success(
+        `已抽本组尾帧 → 下一组 ${r.nextGroupNumber}:首帧约束 ✓ · 关联资产「尾帧」✓ · 提示词已 @${r.token.replace('@', '')} 标注首帧画面`,
+        { duration: 6000 },
+      );
+      invalidate();
+      // 下一组的关联资产/提示词都被写了 — 全量失效 getGroupDetail(含 next),列表计数同步
+      void utils.aigc.getGroupDetail.invalidate();
+      void utils.aigc.listGroups.invalidate();
+    },
     onError: (e) => toast.error(e.message),
   });
 

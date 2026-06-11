@@ -1,6 +1,6 @@
 'use client';
 import * as React from 'react';
-import { Image as ImageIcon, Shield, ShieldAlert, Lock } from 'lucide-react';
+import { Image as ImageIcon, ShieldAlert, Lock } from 'lucide-react';
 import type { inferRouterOutputs } from '@trpc/server';
 
 import { characterNeedsVoice } from '@ss/shared';
@@ -293,14 +293,13 @@ function MaturityChips({ asset }: { asset: AssetBrief }): React.ReactElement {
 
 function ComplianceBadge({ status }: { status: string }): React.ReactElement | null {
   if (status === 'NOT_REQUIRED') return null;
+  // 七二(用户指令):合规改纯标识环节 — 过审 = 右上角绿色圆点(不再门控生成)
   if (status === 'APPROVED') {
     return (
       <div
-        title="合规已通过"
-        className="rounded-full bg-[hsl(var(--color-success)/0.2)] p-0.5 text-[hsl(var(--color-success))]"
-      >
-        <Shield className="size-3" />
-      </div>
+        title="已通过合规审查"
+        className="size-2.5 rounded-full bg-[hsl(var(--color-success))] ring-2 ring-white/70 shadow"
+      />
     );
   }
   return (

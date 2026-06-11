@@ -14,7 +14,6 @@ export interface VideoGenBindings {
   maxDurationS: number;
   defaultAspectRatio: AspectRatio;
   dailyBudgetCny: number;
-  requireComplianceForVideo: boolean;
   defaultGenerateAudio: boolean;
   audioSurchargeCnyPerS: number;
 }
@@ -44,7 +43,6 @@ export async function loadVideoGenBindings(
           'shot.video.maxDurationS',
           'shot.video.defaultAspectRatio',
           'shot.video.dailyBudgetCny',
-          'asset.compliance.requireForVideo',
           // M2′ 配音产品化(2026-06-10):有声默认开关 + 有声差价
           'shot.video.generateAudio.default',
           'shot.video.audioSurchargeCnyPerS',
@@ -68,8 +66,7 @@ export async function loadVideoGenBindings(
     maxDurationS: parseNum(settings['shot.video.maxDurationS'], 15),
     defaultAspectRatio: ar,
     dailyBudgetCny: parseNum(settings['shot.video.dailyBudgetCny'], 500),
-    requireComplianceForVideo:
-      (settings['asset.compliance.requireForVideo'] ?? 'false') === 'true',
+    // 七二:requireComplianceForVideo 已退役(合规改纯标识,不再门控生成)
     // seedance 2.0 文档默认 generate_audio=true → 系统默认跟随,admin 可改
     defaultGenerateAudio: (settings['shot.video.generateAudio.default'] ?? 'true') === 'true',
     // clamp [0,100]:防 admin 误填负数/超大值污染 UI 预估(六七深审 P2)

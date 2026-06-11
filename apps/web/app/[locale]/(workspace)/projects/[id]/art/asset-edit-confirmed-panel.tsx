@@ -72,9 +72,22 @@ export function ConfirmedSlotsPanel({
                     const media = (asset as { mediaMap?: Record<string, { cdnUrl?: string | null; storageKey: string }> })
                       .mediaMap?.[mediaId];
                     const url = media?.cdnUrl ?? media?.storageKey;
+                    // 七二(用户指令):合规独立标识 — 人物的形象/三视图过审后图上显示绿字
+                    const complianceApproved =
+                      asset.type === 'CHARACTER' &&
+                      (asset as { complianceStatus?: string }).complianceStatus === 'APPROVED' &&
+                      (s.slot === 'portrait' || s.slot === 'three_view');
                     return url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={url} alt={s.label} className="absolute inset-0 size-full object-contain" />
+                      <>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={url} alt={s.label} className="absolute inset-0 size-full object-contain" />
+                        {complianceApproved && (
+                          <span className="absolute left-1.5 top-1.5 flex items-center gap-1 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-[hsl(var(--color-success))]">
+                            <CheckCircle2 className="size-3" />
+                            已通过合规审查
+                          </span>
+                        )}
+                      </>
                     ) : (
                       <div className="flex flex-col items-center gap-1 text-[10px] text-[hsl(var(--color-muted-foreground))]">
                         <CheckCircle2 className="size-5 text-[hsl(var(--color-accent))]" />

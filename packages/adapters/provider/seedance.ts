@@ -135,15 +135,29 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
       const content = asRecord(inner.content);
       const innerErr = asRecord(inner.error);
       if (upper === 'SUCCESS') {
+        // 七二 M5 真打实测:moyu 对 wan/happyhorse 等用「通用任务信封」,结果不在
+        //   content.video_url 而在 inner.data[](wan: [{url}])或 inner.output 里;
+        //   保险丝:status=SUCCESS 但已知路径全空时,整棵 lvl1 深扫第一个 .mp4 直链
+        //   (wan 甚至把成片 URL 塞在 fail_reason 字段 — moyu 信封怪癖,深扫天然兜住)。
+        const arr = Array.isArray(inner.data) ? inner.data : null;
+        const firstItem = arr ? asRecord(arr[0]) : null;
+        const output = asRecord(inner.output);
+        const videoUrl =
+          asString(content?.video_url) ??
+          asString(firstItem?.url) ??
+          asString(output?.video_url) ??
+          asString(output?.url) ??
+          findFirstMp4Url(lvl1) ??
+          undefined;
         return {
           kind: 'success',
-          videoUrl: asString(content?.video_url) ?? undefined,
+          videoUrl,
           durationS: asNumber(inner.duration) ?? undefined,
           fps: asNumber(inner.framespersecond) ?? undefined,
           rawResponse: raw,
         };
       }
-      if (upper === 'FAILURE' || upper === 'CANCELLED') {
+      if (upper === 'FAILURE' || upper === 'FAILED' || upper === 'CANCELLED') {
         const failReason = asString(lvl1.fail_reason) ?? '';
         const innerMsg = asString(innerErr?.message) ?? '';
         return {
@@ -374,6 +388,19 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
       this.wrapCallError(e);
     }
 
+    // L5(七二):task_id 一拿到先回调持久化 — 进程死在下面轮询里时,重入方可续轮询同一
+    // 任务而非重建(双任务双结算实测 ¥7.2/只)。best-effort:持久化失败不阻塞生成。
+    if (ctx.onVideoTaskCreated) {
+      try {
+        await ctx.onVideoTaskCreated(providerJobId);
+      } catch (e) {
+        console.warn(
+          `[${this.info.id}] onVideoTaskCreated 回调失败(忽略,task=${providerJobId}):`,
+          e instanceof Error ? e.message : e,
+        );
+      }
+    }
+
     // 轮询任务完成(2026-05-27 audit r15:用 parseQueryResponse 规范化 2.0 嵌套 + 大写状态)
     const deadline = Date.now() + this.pollTimeoutMs;
     let lastQuery: NormalizedQuery | undefined;
@@ -494,6 +521,29 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
     const raw = JSON.parse(text) as unknown;
     return this.parseQueryResponse(raw);
   }
+}
+
+/** 七二 M5:深扫对象树找第一个 .mp4 直链(moyu 通用信封各家结果位置不一的保险丝;
+ * 仅在 status=SUCCESS 分支调用,不会把错误文案里的链接误当成片 — 失败分支根本不进来) */
+function findFirstMp4Url(node: unknown, depth = 0): string | null {
+  if (depth > 6) return null;
+  if (typeof node === 'string') {
+    return /^https?:\/\/\S+\.mp4(\?|$)/i.test(node) ? node : null;
+  }
+  if (Array.isArray(node)) {
+    for (const it of node) {
+      const hit = findFirstMp4Url(it, depth + 1);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  const rec = asRecord(node);
+  if (!rec) return null;
+  for (const v of Object.values(rec)) {
+    const hit = findFirstMp4Url(v, depth + 1);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 function clamp(n: number, min: number, max: number): number {

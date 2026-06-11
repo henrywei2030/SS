@@ -17,6 +17,9 @@ type AttemptRow = {
   startedAt: Date | null;
   createdAt: Date;
   errorMsg?: string;
+  /** 七二:批次标签(attempt.groupId)与提交者 — sweep 返回明细/退款归属用 */
+  groupId?: string | null;
+  createdBy?: string;
 };
 type LedgerRow = {
   id: string;
@@ -39,6 +42,8 @@ function makeMockTx(attempts: AttemptRow[], ledger: LedgerRow[]) {
             providerId: a.providerId,
             startedAt: a.startedAt,
             createdAt: a.createdAt,
+            groupId: a.groupId ?? null,
+            createdBy: a.createdBy ?? 'creator-1',
           })),
       update: async ({
         where,
@@ -92,7 +97,7 @@ describe('sweepStaleGroupAttempts', () => {
   it('无 inflight → swept=0,aliveInflight=null', async () => {
     const tx = makeMockTx([], []);
     const r = await sweepStaleGroupAttempts(tx, baseArgs);
-    expect(r).toEqual({ swept: 0, aliveInflight: null });
+    expect(r).toEqual({ swept: 0, aliveInflight: null, sweptAttempts: [] });
   });
 
   it('stale RUNNING → 标 FAILED + 退 PREPAY,alive=null', async () => {
@@ -105,6 +110,9 @@ describe('sweepStaleGroupAttempts', () => {
           status: 'RUNNING',
           startedAt: ago(TIMEOUT + 60_000),
           createdAt: ago(TIMEOUT + 120_000),
+          // 七二:提交者 ≠ 触发 sweep 的 baseArgs.userId('u-1')— 验退款归属修复
+          createdBy: 'u-owner',
+          groupId: 'batch_test-1',
         },
       ],
       [{ id: 'l-1', attemptId: 'a-1', entryType: 'PREPAY', costCny: '2.0000' }],
@@ -116,6 +124,12 @@ describe('sweepStaleGroupAttempts', () => {
     expect(tx._attempts[0]!.errorMsg).toContain('stale RUNNING auto-recovered');
     const refund = tx._ledger.find((l) => l.entryType === 'REFUND');
     expect(refund?.attemptId).toBe('a-1');
+    // 七二修:REFUND 记原提交者(createdBy),不是触发 sweep 的当前操作者
+    expect((refund as unknown as { userId: string }).userId).toBe('u-owner');
+    // 七二:被清明细返回(调用方据 batch_ 标签补批次完成判定)
+    expect(r.sweptAttempts).toEqual([
+      { id: 'a-1', batchLabel: 'batch_test-1', createdBy: 'u-owner' },
+    ]);
   });
 
   it('存活 inflight(窗口内)→ 不清理,原样返回供调用方拒绝', async () => {

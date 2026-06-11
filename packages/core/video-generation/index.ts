@@ -61,6 +61,8 @@ export {
   type BatchPriority,
 } from './batch.js';
 export { handleBatchTerminal, type BatchTerminalArgs } from './batch-followup.js';
+// 七二 P2 修:批次完成判定独立导出 — API 侧终结点(全 denied / sweep / boot 恢复)补判用
+export { maybeNotifyBatchDone, type BatchDoneCheckArgs } from './batch-notify.js';
 // 桌面化 Phase 1:processor 搬进 core(解耦 BullMQ),BullMQ worker 与进程内驱动共用
 export {
   processVideoGenJob,

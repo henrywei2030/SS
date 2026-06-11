@@ -25,6 +25,7 @@ import {
   extractFrame,
   keyframeFilename,
   resolveMediaFetchUrl,
+  syncMediaToRelay,
   tailFrameFilename,
 } from '@ss/core/media';
 import { compileVideoPromptForGroup } from '@ss/core/video-generation';
@@ -501,6 +502,14 @@ export const keyframeProcedures = {
           where: { id: grp.episode.projectId },
           select: { name: true },
         });
+        // 七二 ⑤-2:同步到中转站资产库(meta.relayAssetUrl)— 否则尾帧只有本地 storageKey,
+        //   compile 的 @图片N 解析不出可被 provider 拉取的 URL(本地 MinIO 公网不可达),
+        //   下一组会被「缺主图」拦。relay 未配时静默降级(沿用原行为)。
+        const relayMeta = await syncMediaToRelay({
+          storageKey: key,
+          kind: 'IMAGE',
+          filename: tailFrameFilename(project?.name, grp.episode.number ?? null, grp.number),
+        });
         const frameMedia = await ctx.prisma.mediaItem.create({
           data: {
             projectId: grp.episode.projectId,
@@ -517,6 +526,7 @@ export const keyframeProcedures = {
               fromGroupNumber: grp.number,
               fromAttemptId: take.id,
               toGroupId: nextGroup.id,
+              ...(relayMeta ?? {}),
             },
             source: 'AIGC',
             sourceRef: `tail-frame:${grp.id}`,
@@ -527,6 +537,57 @@ export const keyframeProcedures = {
           where: { id: nextFirst.id },
           data: { startFrameMediaId: frameMedia.id },
         });
+
+        // 七二(用户需求⑤-2):尾帧产品化 — 包成参考图资产自动关联下一组,提示词自动 @。
+        //   · 资产 STYLE_REFERENCE + mainMediaId=尾帧(关联资产卡可看图,素材库可检索)
+        //   · 绑定下一组 refSlotIdx=max+1(只增不复用,口径同 bindAssetToGroup)→ @图片N 可编译
+        //   · 下一组提示词追加「@图片N …作为本次生成视频的首帧画面」
+        //   三步一个事务;失败时尾帧链本体(上面 startFrameMediaId)已生效,重点功能不回滚。
+        const chained = await ctx.prisma.$transaction(async (tx) => {
+          const tailAsset = await tx.asset.create({
+            data: {
+              projectId: grp.episode.projectId,
+              type: 'STYLE_REFERENCE',
+              name: `G${grp.number} 尾帧`,
+              description: `第 ${grp.episode.number ?? '?'} 集 G${grp.number} 成片最后 1 秒尾帧,作为 G${nextGroup.number} 首帧参考`,
+              prompt: '上一组结尾画面(尾帧静态帧),用作本组开场首帧参考',
+              mainMediaId: frameMedia.id,
+            },
+            select: { id: true },
+          });
+          const maxSlot = await tx.assetUsageBinding.aggregate({
+            where: { shotGroupId: nextGroup.id, deletedAt: null },
+            _max: { refSlotIdx: true },
+          });
+          const refSlotIdx = (maxSlot._max.refSlotIdx ?? 0) + 1;
+          await tx.assetUsageBinding.create({
+            data: {
+              assetId: tailAsset.id,
+              projectId: grp.episode.projectId,
+              episodeId: grp.episodeId,
+              shotGroupId: nextGroup.id,
+              usageType: 'APPEAR',
+              required: false,
+              note: `G${grp.number} 尾帧自动链入(首帧参考)`,
+              refSlotIdx,
+            },
+          });
+          const nextGrpRow = await tx.shotGroup.findUnique({
+            where: { id: nextGroup.id },
+            select: { prompt: true },
+          });
+          const token = `@图片${refSlotIdx}`;
+          const line = `${token} 为上一组结尾画面,作为本次生成视频的首帧画面,开场需与其无缝衔接。`;
+          // 已有同款说明行(重复链)不再追加
+          if (!nextGrpRow?.prompt.includes('作为本次生成视频的首帧画面')) {
+            await tx.shotGroup.update({
+              where: { id: nextGroup.id },
+              data: { prompt: `${(nextGrpRow?.prompt ?? '').trimEnd()}\n${line}` },
+            });
+          }
+          return { assetId: tailAsset.id, refSlotIdx, token };
+        });
+
         await logOperation(ctx, 'aigc.chainTailFrame', 'shotGroup', grp.id, null, {
           groupNumber: grp.number,
           nextGroupId: nextGroup.id,
@@ -540,6 +601,10 @@ export const keyframeProcedures = {
           mediaId: frameMedia.id,
           nextGroupId: nextGroup.id,
           nextGroupNumber: nextGroup.number,
+          // 七二 ⑤-2:自动关联产物(UI toast 提示 @token 已写进下一组提示词)
+          tailAssetId: chained.assetId,
+          refSlotIdx: chained.refSlotIdx,
+          token: chained.token,
         };
       } finally {
         rmSync(tmp, { recursive: true, force: true });

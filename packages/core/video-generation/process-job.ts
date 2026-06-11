@@ -51,7 +51,7 @@ import { sanitizeErrorMsg, billingCycle } from '@ss/shared';
  *   - 若 RUNNING/QUEUED:正常继续
  */
 type IdempotencyDecision =
-  | { kind: 'continue' }
+  | { kind: 'continue'; providerJobId: string | null }
   | { kind: 'skip-success'; mediaId: string | null; costCny: number }
   | { kind: 'skip-failed'; errorMsg: string };
 
@@ -70,7 +70,8 @@ class TerminalStateLostError extends Error {
 async function checkIdempotency(attemptId: string): Promise<IdempotencyDecision> {
   const existing = await prisma.generationAttempt.findUnique({
     where: { id: attemptId },
-    select: { status: true, outputMediaId: true, costCny: true, errorMsg: true },
+    // L5(七二):providerJobId 一并带出 — 重入时已有 task_id 走续轮询不重建任务
+    select: { status: true, outputMediaId: true, costCny: true, errorMsg: true, providerJobId: true },
   });
   if (!existing) {
     return { kind: 'skip-failed', errorMsg: `attempt ${attemptId} not found` };
@@ -90,7 +91,7 @@ async function checkIdempotency(attemptId: string): Promise<IdempotencyDecision>
   if (existing.status === 'CANCELLED') {
     return { kind: 'skip-failed', errorMsg: existing.errorMsg ?? 'attempt 已被用户取消' };
   }
-  return { kind: 'continue' };
+  return { kind: 'continue', providerJobId: existing.providerJobId };
 }
 
 export interface ProcessResult {
@@ -98,6 +99,31 @@ export interface ProcessResult {
   mediaId?: string;
   videoUrl?: string;
   costCny?: number;
+}
+
+// L5(七二):重入续轮询参数 — 与 seedance 适配器内建轮询同量级(10s 间隔 / 15min 窗)。
+// provider 侧任务多半已烤了一阵,15min 全新窗只松不紧。
+const RESUME_POLL_INTERVAL_MS = 10_000;
+const RESUME_POLL_TIMEOUT_MS = 15 * 60_000;
+
+/**
+ * L5(七二):凭已持久化的 providerJobId 续轮询 provider 任务(不重建)。
+ * provider.poll 单查语义:pending 继续等;失败由 poll 内部抛(走调用方统一失败处理);
+ * 超时抛普通 Error(isUnrecoverableError=false → 可重试,与 generate 超时同语义)。
+ */
+async function resumeVideoPoll(
+  provider: { poll?: (id: string) => Promise<{ status: 'pending' } | import('@ss/adapters/provider').VideoResult> },
+  providerJobId: string,
+): Promise<import('@ss/adapters/provider').VideoResult> {
+  const deadline = Date.now() + RESUME_POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const r = await provider.poll!(providerJobId);
+    if ('videoUrl' in r) return r;
+    await new Promise((resolve) => setTimeout(resolve, RESUME_POLL_INTERVAL_MS));
+  }
+  throw new Error(
+    `Task timeout (resume ${RESUME_POLL_TIMEOUT_MS / 60000}min) — 续轮询超时,task=${providerJobId}`,
+  );
 }
 
 /** 进程无关的 job 上下文 — BullMQ worker 与进程内驱动都用这个调,不耦合 BullMQ Job。 */
@@ -186,27 +212,50 @@ export async function processVideoGenJob(
 
   let result;
   try {
-    result = await provider.generate(
-      {
-        prompt,
-        durationS,
-        aspectRatio,
-        refImageUrls,
-        refAudioUrls,
-        // M3a:VideoRequest 顶层字段(adapter 已消费:seedance first_frame_image 等)
-        firstFrameUrl,
-        lastFrameUrl,
-        ...(Object.keys(extraParams).length > 0 ? { extra: extraParams } : {}),
-      },
-      {
-        userId,
-        projectId,
-        episodeId,
-        attemptId,
-        // ADR-25:Provider 内部 recordLedger 由 router 单点写代替,防双计费
-        skipLedger: true,
-      },
-    );
+    // L5(七二):重派/重启重入且任务已在 provider 侧创建(task_id 已持久化)→ 续轮询同一
+    // 任务,不再 create(此前 task_id 随死亡进程丢失 → 双任务双结算,实测 ¥7.2/只白烧)
+    if (decision.providerJobId && provider.poll) {
+      console.log(
+        `[${workerId}]${reqTag} attempt=${attemptId} 已有 providerJobId=${decision.providerJobId},续轮询(不重建任务)`,
+      );
+      result = await resumeVideoPoll(provider, decision.providerJobId);
+      // 七二修(happyhorse 真打暴露):provider.poll 无 req 上下文,响应不带时长的家族
+      //   durationS=0 → costCny=0 → 结算被当"多扣"全额退款 = 内账白送(provider 侧真扣)。
+      //   续跑成功回填:时长用任务请求值,成本按 PREPAY 同公式(estimateCost)→ 退差=0。
+      if (!result.durationS || result.costCny <= 0) {
+        const backfillCost = provider.estimateCost({ prompt: '', durationS, aspectRatio });
+        result = { ...result, durationS: result.durationS || durationS, costCny: backfillCost };
+      }
+    } else {
+      result = await provider.generate(
+        {
+          prompt,
+          durationS,
+          aspectRatio,
+          refImageUrls,
+          refAudioUrls,
+          // M3a:VideoRequest 顶层字段(adapter 已消费:seedance first_frame_image 等)
+          firstFrameUrl,
+          lastFrameUrl,
+          ...(Object.keys(extraParams).length > 0 ? { extra: extraParams } : {}),
+        },
+        {
+          userId,
+          projectId,
+          episodeId,
+          attemptId,
+          // ADR-25:Provider 内部 recordLedger 由 router 单点写代替,防双计费
+          skipLedger: true,
+          // L5(七二):task_id 创建即持久化(status 守卫防覆写已取消/清扫的终态行)
+          onVideoTaskCreated: async (providerJobId: string) => {
+            await prisma.generationAttempt.updateMany({
+              where: { id: attemptId, status: 'RUNNING' },
+              data: { providerJobId },
+            });
+          },
+        },
+      );
+    }
   } catch (e) {
     // 第 18 轮 audit P1:errMsg 是 SSE/DB/OperationLog 的对外字符串,必须脱敏。
     // 原始 e 仍在下面 console.error 中保留,供 worker 日志 debug 用。

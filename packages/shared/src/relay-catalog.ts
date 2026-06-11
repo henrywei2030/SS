@@ -30,6 +30,9 @@ export interface RelayCatalogModel {
   // Provider 实现路由
   protocol?: 'openai-compat' | 'anthropic-native' | 'volcengine-native';
   endpointStyle?: 'ark' | 'relay'; // Seedance 用
+  /** F5a 泛化路由(七二):'relay-video' = 走 relay 平铺视频协议(seedance 适配器 relay 分支),
+   * kling/wan/happyhorse 等中转站视频模型用;与 endpointStyle:'relay' 配套 */
+  adapter?: 'relay-video';
   defaultSize?: string; // Image 用
   // Video 时长(秒)
   maxDuration?: number;
@@ -42,6 +45,8 @@ export interface RelayCatalogModel {
   supportsWebSearch?: boolean;
   supportsRefVideo?: boolean;
   supportsRefAudio?: boolean;
+  // Embedding 单请求输入条数上限(通义 v4 经 moyu 实测 ≤10,七二 gate 真打发现)
+  embeddingBatchSize?: number;
   // UI 精选标记
   isDefault: boolean;
 }

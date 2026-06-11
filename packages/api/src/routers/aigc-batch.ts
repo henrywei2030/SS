@@ -21,6 +21,7 @@ import {
   BATCH_GROUP_PREFIX,
   batchDurationS,
   loadVideoGenBindings,
+  maybeNotifyBatchDone,
   orderBatchCandidates,
   parseProductionPlanPriorities,
   refundPrepayForAttempt,
@@ -298,7 +299,6 @@ export const batchProcedures = {
           aspectRatio: plan.bindings.defaultAspectRatio,
           wantAudio: plan.bindings.defaultGenerateAudio,
           dailyBudgetCny: plan.bindings.dailyBudgetCny,
-          requireComplianceForVideo: plan.bindings.requireComplianceForVideo,
           requestId: ctx.requestId,
           attemptGroupId: batchId,
         });
@@ -315,6 +315,25 @@ export const batchProcedures = {
             }
             break;
           }
+        }
+      }
+
+      // 七二 P2 修:一组都没送进 worker(全 denied/skipped)→ worker 终态路径永远不会跑,
+      // 完成判定在这里补(denied 占位带批次标签,统计口径与 worker 路一致;幂等可重入)
+      if (submitted.length === 0 && denied.length > 0) {
+        try {
+          await maybeNotifyBatchDone(ctx.prisma, {
+            batchId,
+            userId: ctx.user.id,
+            projectId: plan.projectId,
+            episodeId: input.episodeId,
+            ...(ctx.requestId ? { requestId: ctx.requestId } : {}),
+          });
+        } catch (e) {
+          console.warn(
+            `[batch] 全 denied 批次完成判定失败(增强项,忽略)batch=${batchId}:`,
+            e instanceof Error ? e.message : e,
+          );
         }
       }
 

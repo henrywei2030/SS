@@ -18,7 +18,12 @@
 import 'dotenv/config';
 import { prisma } from '@ss/db';
 import { COMPOSE_JOB_KIND, processComposeRender } from '@ss/core/compose';
-import { VOICE_SAMPLE_JOB_KIND, processVoiceSampleJob } from '@ss/core/voice';
+import {
+  TTS_WEIGHTS_INSTALL_JOB_KIND,
+  VOICE_SAMPLE_JOB_KIND,
+  processTtsWeightsInstallJob,
+  processVoiceSampleJob,
+} from '@ss/core/voice';
 import { CACHE_VIDEO_JOB_KIND, processCacheVideoJob } from '@ss/core/media';
 import { QC_JOB_KIND, processQcJob } from '@ss/core/qc';
 import { OPTIMIZE_EPISODE_JOB_KIND, processOptimizeEpisodeJob } from '@ss/core/prompt-optimizer';
@@ -54,6 +59,7 @@ async function bootstrap(): Promise<void> {
   // kind 路由见 @ss/queue dispatchJob;handler 由各里程碑在此 bootstrap 注册)
   registerJobHandler(COMPOSE_JOB_KIND, (data) => processComposeRender(data)); // M1 成片
   registerJobHandler(VOICE_SAMPLE_JOB_KIND, (data) => processVoiceSampleJob(data)); // TTS-B 声线样本
+  registerJobHandler(TTS_WEIGHTS_INSTALL_JOB_KIND, (data) => processTtsWeightsInstallJob(data)); // 七二 TTS 权重可观测安装
   registerJobHandler(CACHE_VIDEO_JOB_KIND, (data) => processCacheVideoJob(data)); // 六八 视频本地缓存
   registerJobHandler(QC_JOB_KIND, (data) => processQcJob(data)); // M3c take QC 质检
   registerJobHandler(OPTIMIZE_EPISODE_JOB_KIND, (data) => processOptimizeEpisodeJob(data)); // M6 整集提示词优化

@@ -670,12 +670,8 @@ issue ≤40 字;score ≥70 时 issue 可为空串。
       category: 'general',
       description: '人物三视图默认角度(逗号分隔)',
     },
-    {
-      key: 'asset.compliance.requireForVideo',
-      value: 'true',
-      category: 'feature_flag',
-      description: '视频生成前是否强制要求人物已通过合规检查',
-    },
+    // 七二(用户指令):asset.compliance.requireForVideo 已退役 — 合规改纯标识环节
+    //   (人物卡绿点/编辑页绿字),不再门控视频生成。老机器 DB 里的残留行无害(无人读)。
 
     // ----- W5.0 视频生成 model 绑定(admin 显式选,默认空) -----
     {

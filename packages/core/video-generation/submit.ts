@@ -24,6 +24,8 @@ import type { AspectRatio } from '@ss/shared/constants';
 import { resolveMediaFetchUrl } from '../media/index.js';
 
 import { acquireAigcVideoLock } from './lock.js';
+import { isBatchGroupId } from './batch.js';
+import { maybeNotifyBatchDone } from './batch-notify.js';
 import { checkDailyVideoBudget } from './budget-check.js';
 import { compileVideoPromptForGroup } from './compile.js';
 import { createPlaceholderAttemptWithPrepay } from './prepay.js';
@@ -57,7 +59,6 @@ export interface SubmitVideoArgs {
   wantAudio: boolean;
   // ---- binding 业务参数(api 层 getVideoBindings 读出后传入) ----
   dailyBudgetCny: number;
-  requireComplianceForVideo: boolean;
   // ---- 用户可选参数(原 input 透传) ----
   extraInstruction?: string;
   extraNegative?: string[];
@@ -122,18 +123,23 @@ export async function submitVideoGeneration(
   // 锁释放后占位 attempt 仍在 DB,其他并发 inflight check 会看到 QUEUED → 拒。
   // 后续检查(gachaMax/budget/compile)失败时 update 占位为 FAILED + 写 REFUND 退还 PREPAY;通过则 worker 接管。
   let earlyAttempt: { id: string };
+  // 七二:sweep 清掉的批量标签 attempt — 事务提交后补批次完成判定(通知漏发 P2 修)
+  let sweptBatchAttempts: Array<{ batchLabel: string; createdBy: string }> = [];
   try {
     const created = await prisma.$transaction(async (tx) => {
       // 三十五收工 R2 Phase A:共享 helper(原 inline lock raw → acquireAigcVideoLock)
       await acquireAigcVideoLock(tx, grp.id);
       // 2026-05-27 audit r13 P0:stale RUNNING 自愈 — worker 崩/失踪导致永久卡 RUNNING →
       //   自动标 FAILED + 退 PREPAY;清理后仍存活的才拒(真在跑)
-      const { aliveInflight } = await sweepStaleGroupAttempts(tx, {
+      const { aliveInflight, sweptAttempts } = await sweepStaleGroupAttempts(tx, {
         shotGroupId: grp.id,
         userId,
         projectId: grp.projectId,
         episodeId: grp.episodeId,
       });
+      sweptBatchAttempts = sweptAttempts.flatMap((s) =>
+        isBatchGroupId(s.batchLabel) ? [{ batchLabel: s.batchLabel, createdBy: s.createdBy }] : [],
+      );
       if (aliveInflight) {
         // throw 让事务回滚(语义同原 router 内抛 TRPCError),外层 catch 转判别结果
         throw new InflightConflictError(aliveInflight.providerId);
@@ -161,6 +167,25 @@ export async function submitVideoGeneration(
       };
     }
     throw e;
+  }
+  // 七二 P2 修:sweep 在上面事务里把批量 attempt 标了 FAILED(已提交)— 若那是批次最后
+  // 一个 inflight,worker 终态路径永远不会跑,这里补完成判定(幂等,失败不影响主流程)。
+  // 注意放在 InflightConflictError 之外:conflict 时事务回滚,sweep 未生效,不应补判。
+  for (const swept of sweptBatchAttempts) {
+    try {
+      await maybeNotifyBatchDone(prisma, {
+        batchId: swept.batchLabel,
+        userId: swept.createdBy,
+        projectId: grp.projectId,
+        episodeId: grp.episodeId,
+        ...(args.requestId ? { requestId: args.requestId } : {}),
+      });
+    } catch (e) {
+      console.warn(
+        `[submit] sweep 后批次完成判定失败(增强项,忽略)batch=${swept.batchLabel}:`,
+        e instanceof Error ? e.message : e,
+      );
+    }
   }
 
   // 7 轮 audit A1:任何前置 check 失败都要把占位 attempt 标 FAILED 释放
@@ -237,14 +262,11 @@ export async function submitVideoGeneration(
   }
 
   // 三十六收工 R2:compile 整段(project + dbBindings + media + refs + compileShotGroupVideoPrompt)
-  const {
-    compiled,
-    voiceRefs,
-    voiceMissing,
-    characterImageRefs,
-    characterBindingsForCompliance,
-    projectType,
-  } = await compileVideoPromptForGroup(prisma, {
+  // 七二(用户指令):合规前置硬门退役 — characterBindingsForCompliance/projectType 仍由
+  //   compile 返回(合规改纯标识环节,人物卡绿点/编辑页绿字读 Asset.complianceStatus;
+  //   未来要恢复门控或做提示,接口都在),此处不再消费。
+  const { compiled, voiceRefs, voiceMissing, characterImageRefs } =
+    await compileVideoPromptForGroup(prisma, {
     group: {
       id: grp.id,
       prompt: grp.prompt,
@@ -260,25 +282,9 @@ export async function submitVideoGeneration(
     includeVoiceDescriptions: wantAudio,
   });
 
-  // W1-W5 audit P1 followup(P1-5):合规守卫 — 引用了任何 CHARACTER 且 complianceStatus !== APPROVED 则拒
-  // 2026-06-09:合规审查仅针对 AI_REAL(伪真人剧)。动漫/国漫/海报/自定义项目人物的
-  //   complianceStatus 恒为默认 NOT_REQUIRED,旧逻辑 !== APPROVED 把它们误拒(用户反馈)。
-  //   AI_REAL 仍保持严格(要求 APPROVED),不放松真人合规。
-  if (args.requireComplianceForVideo && projectType === 'AI_REAL') {
-    const blockedChars = characterBindingsForCompliance.filter(
-      (c) => c.complianceStatus !== 'APPROVED',
-    );
-    if (blockedChars.length > 0) {
-      return denyPlaceholder(
-        new Error(
-          `合规未通过的人物不允许生成视频:${blockedChars
-            .map((c) => `${c.assetName}(${c.complianceStatus})`)
-            .join(', ')} — 在美术工作台完成合规后再试`,
-        ),
-        'PRECONDITION_FAILED',
-      );
-    }
-  }
+  // 七二(用户指令):原「AI_REAL 人物必须 APPROVED 才能生成」合规硬门移除 —
+  //   合规审查独立运行(volcengine/手动 setComplianceManually 照旧写 Asset.complianceStatus),
+  //   只作 UI 标识(人物卡绿点/编辑页「已通过合规审查」),不再阻断生成。
 
   // 提示词缺图 / 未关联 token 阻断 — 让用户先修
   if (compiled.warnings.missingMedia.length > 0) {

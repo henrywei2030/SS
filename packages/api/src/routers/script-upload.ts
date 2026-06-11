@@ -539,8 +539,39 @@ export const uploadProcedures = {
       }> = [];
 
       for (const b of boundaries) {
-        // 需求2:重新上传**覆盖所有集**(不管发布/锁定等一切情况)— 以最新上传内容为准。
+        // 七二(用户指令,反转旧"需求2"):重新上传**跳过已锁定集** — 左侧分集锁定的集保留
+        //   原内容,未锁定集照旧覆盖。锁定真相源 = 当前版本 Script.lockedAt(lockVersion 写)。
         // Phase 1.5.3 bugfix:upsert 命中软删 Episode(deletedAt!=null)时复活它。
+        // 预检:已锁定集连 Episode 行都不动(否则 status 被重置 NOT_STARTED/标题被覆盖,
+        //   "跳过"名不副实)。竞态兜底仍在 createNextVersion 的事务内 skipIfLocked。
+        // 两把锁皆认:① 左侧分集按钮锁(Episode.batchLocked,用户主入口)② 剧本版本锁
+        //   (Script.lockedAt,lockVersion 写)。任一锁定 → 本集跳过。
+        const existingEp = await ctx.prisma.episode.findFirst({
+          where: { projectId: input.projectId, number: b.episodeNumber, deletedAt: null },
+          select: {
+            id: true,
+            batchLocked: true,
+            scripts: {
+              where: { isCurrent: true, deletedAt: null },
+              select: { id: true, version: true, lockedAt: true },
+              take: 1,
+            },
+          },
+        });
+        const currentScript = existingEp?.scripts[0];
+        if (existingEp && (existingEp.batchLocked || currentScript?.lockedAt)) {
+          results.push({
+            episodeNumber: b.episodeNumber,
+            title: b.title,
+            scriptId: currentScript?.id ?? '',
+            version: currentScript?.version ?? 0,
+            created: false,
+            skippedLocked: true,
+            sceneCount: b.sceneCount,
+          });
+          continue;
+        }
+
         const episode = await ctx.prisma.episode.upsert({
           where: {
             projectId_number: { projectId: input.projectId, number: b.episodeNumber },
@@ -564,6 +595,7 @@ export const uploadProcedures = {
           content: b.content,
           language: input.language,
           source: 'UPLOAD',
+          skipIfLocked: true,
         });
 
         results.push({
@@ -582,7 +614,12 @@ export const uploadProcedures = {
         format,
         textLength: text.length,
         episodeCount: results.length,
-        episodes: results.map((r) => ({ n: r.episodeNumber, v: r.version, created: r.created })),
+        episodes: results.map((r) => ({
+          n: r.episodeNumber,
+          v: r.version,
+          created: r.created,
+          skippedLocked: r.skippedLocked,
+        })),
       });
 
       return {

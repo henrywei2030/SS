@@ -40,6 +40,8 @@ export interface OpenAICompatEmbeddingConfig {
   unitPriceCny: number;
   displayName?: string;
   maxConcurrent?: number;
+  /** 单次请求输入条数上限(provider defaultParams.embeddingBatchSize;通义 v4 经 moyu ≤10) */
+  maxBatchSize?: number;
   // 2 倍率(modelRate 非空时优先;embedding 无输出 token,outputRate 实际不生效)
   modelRate?: number;
   outputRate?: number;
@@ -87,9 +89,13 @@ export function parseEmbeddingsResponse(
 
 export class OpenAICompatEmbeddingProvider extends BaseProvider implements ITextEmbeddingProvider {
   readonly info: ProviderInfo;
+  readonly maxBatchSize?: number;
 
   constructor(private readonly cfg: OpenAICompatEmbeddingConfig) {
     super();
+    if (cfg.maxBatchSize !== undefined && cfg.maxBatchSize >= 1) {
+      this.maxBatchSize = Math.floor(cfg.maxBatchSize);
+    }
     this.info = {
       id: cfg.defaultModel,
       displayName: cfg.displayName ?? `OpenAI-Compat Embedding (${cfg.defaultModel})`,

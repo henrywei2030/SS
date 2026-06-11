@@ -18,7 +18,15 @@ import { asRecord } from "@ss/shared";
 import { getStorageAdapter, buildStorageKey } from "@ss/adapters/storage";
 import { extractVoiceLabel } from "@ss/core/asset";
 import { normalizeAudio, normalizedVoiceFilename, probeMedia, syncMediaToRelay } from "@ss/core/media";
-import { NANO_BUILTIN_VOICES, VOICE_SAMPLE_JOB_KIND, nanoModelsReady, recommendSeedVoice } from "@ss/core/voice";
+import {
+  NANO_BUILTIN_VOICES,
+  TTS_WEIGHTS_INSTALL_JOB_KIND,
+  VOICE_SAMPLE_JOB_KIND,
+  clearNanoWeightsCache,
+  getNanoWeightsStatus,
+  nanoModelsReady,
+  recommendSeedVoice,
+} from "@ss/core/voice";
 import { enqueueJob } from "@ss/queue/job-queue";
 import { protectedProcedure } from "../trpc.js";
 import { logOperation } from "../middleware/audit.js";
@@ -790,5 +798,41 @@ export const crudProcedures = {
       });
       return { queued: queued.length, items: queued, modelsReady: nanoModelsReady() };
     }),
+
+  // =========================================================================
+  // 七二(用户需求①):TTS 权重可观测安装 — 状态轮询 / 后台安装 / 清理缓存。
+  // 此前 845MB 权重藏在首次声线 job 里同步下载(新环境实测 ~20 分钟),UI 零反馈。
+  // =========================================================================
+
+  /** 权重安装状态(UI 轮询;纯本地文件检查零网络) */
+  voiceWeightsStatus: protectedProcedure.query(async () => {
+    return getNanoWeightsStatus();
+  }),
+
+  /** 触发后台安装(job 进 ss-jobs;进度看 voiceWeightsStatus,完成/失败发铃铛) */
+  voiceWeightsInstall: protectedProcedure.mutation(async ({ ctx }) => {
+    const st = getNanoWeightsStatus();
+    if (st.ready) return { queued: false, alreadyReady: true as const };
+    const jobId = await enqueueJob(
+      TTS_WEIGHTS_INSTALL_JOB_KIND,
+      { userId: ctx.user.id },
+      // 时间戳后缀防 bullmq 撞已完成 jobId;真正去重靠 ensureNanoModels 进程内单例
+      { jobId: `tts-weights-install:${Date.now().toString(36)}` },
+    );
+    await logOperation(ctx, 'asset.voice.weightsInstall', 'system', 'tts-weights', null, {
+      jobId,
+    });
+    return { queued: true, alreadyReady: false as const, jobId };
+  }),
+
+  /** 清理权重缓存(损坏自救/重装前;下载进行中拒绝) */
+  voiceWeightsClear: protectedProcedure.mutation(async ({ ctx }) => {
+    const r = clearNanoWeightsCache();
+    await logOperation(ctx, 'asset.voice.weightsClear', 'system', 'tts-weights', null, {
+      cleared: r.cleared,
+      reason: r.reason ?? null,
+    });
+    return r;
+  }),
 
 };

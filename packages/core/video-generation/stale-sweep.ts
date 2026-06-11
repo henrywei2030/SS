@@ -30,6 +30,9 @@ export interface SweepStaleGroupResult {
   swept: number;
   /** 清理后仍存活的 inflight(真在跑)— null 表示该 group 可新建 */
   aliveInflight: { id: string; providerId: string } | null;
+  /** 七二:被清理 attempt 明细 — 调用方在**事务提交后**对批量标签项补批次完成判定
+   * (batchLabel = attempt.groupId,batch_* 才有意义;非批量为 null/普通值由调用方过滤) */
+  sweptAttempts: Array<{ id: string; batchLabel: string | null; createdBy: string }>;
 }
 
 export async function sweepStaleGroupAttempts(
@@ -45,7 +48,14 @@ export async function sweepStaleGroupAttempts(
       action: 'VIDEO',
       status: { in: ['QUEUED', 'RUNNING'] },
     },
-    select: { id: true, providerId: true, startedAt: true, createdAt: true },
+    select: {
+      id: true,
+      providerId: true,
+      startedAt: true,
+      createdAt: true,
+      groupId: true,
+      createdBy: true,
+    },
   });
   const staleAttempts = inflightCandidates.filter((a) => {
     const ts = (a.startedAt ?? a.createdAt)?.getTime() ?? now;
@@ -62,7 +72,9 @@ export async function sweepStaleGroupAttempts(
     });
     await refundPrepayForAttempt(tx, {
       attemptId: stale.id,
-      userId: args.userId,
+      // 七二修(同六九 cancelQueued 口径):REFUND 归属**原提交者** — 此前记到 args.userId
+      // (触发 sweep 的当前操作者),他人重抽他人僵尸时 per-user 花费归因错位
+      userId: stale.createdBy,
       projectId: args.projectId,
       episodeId: args.episodeId,
       providerId: stale.providerId,
@@ -74,5 +86,10 @@ export async function sweepStaleGroupAttempts(
   return {
     swept: staleAttempts.length,
     aliveInflight: alive ? { id: alive.id, providerId: alive.providerId } : null,
+    sweptAttempts: staleAttempts.map((s) => ({
+      id: s.id,
+      batchLabel: s.groupId,
+      createdBy: s.createdBy,
+    })),
   };
 }

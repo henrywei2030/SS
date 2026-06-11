@@ -5,6 +5,59 @@
 
 ---
 
+## 2026-06-11(周四,mac-mini · 七二:真打回归 gate 三连+Harness 五验全过 — 用户授权 Claude 自主驾驶)— 内账净开销 ¥13.60,真 bug 一修一揪
+
+**完成**
+- ✅ **开工**:强同步 ff 944e715→a1a749b(+93 文件,mac-studio 9 分钟前刚收工);**5 migration 点头 deploy(43/43)**+ db:generate + db:sync(10 模板+41 设置+83 知识条目)全绿;storyboard_main v3 按 updatedAt 生效;`prompt.optimizer.contributors` 新机直插新默认含 knowledge(七一遗留问题④实证解除 — 仅旧值机器需手补)
+- ✅ **Gate④ ✨优化(四条路径全真打)**:happy path = changed + contributors[shot,knowledge] + @token 保全 + PromptEdit `[AI优化 moyu-gpt-5-4]` + 8 条知识 hitCount+1 **全对症**(愤怒→pk_action_angry/「五官一致」→pk_constraint_face/「手指完整自然」→pk_constraint_hands)+ ledger ¥0.0215;**乐观锁**(优化中 SQL 抢改→CONFLICT 409 保人工版,denyCode=PROMPT_CHANGED);**硬门**(黑名单注入必中词→422 原文未动,费用只入 run 表不进 ledger — 口径吻合);**TOKEN_LOST**(模型真丢 @token→守卫拒写回,gpt-5-4 与 sonnet 在「@名 描述+裸名:台词」混用 prompt 上 4/4 连丢 — 守卫全接住,见运营观察②)
+- ✅ **Gate⑤ ✨✨深度**:喂缺维瘦 prompt → composer(gpt-5-4)→judge(sonnet)→repair(gpt-5-4) 异构三阶段后台 job → 八维出分精准命中注入缺陷(SUBJECT 52「裸名无外观定装」)→ **repair 只定向修 ['SUBJECT']** 1 轮过 → applied + dimScores/stages 分账 + 铃铛「单组深度优化 ¥0.05」;测后原 prompt 还原
+- ✅ **Gate⑥ 分镜 v3**:ep20 重生成 84 镜 ¥0.7265/2m50s — 主体锚定(「@陆峰 黑色大衣」跨镜服装锚)/微观动作(「领带微歪,话筒越过同伴肩头」)/场景具体化/**音桥真出现**(「快门声延续上镜」)/固定镜 71%≈六成纪律/「不跳轴」自查 — 教科书级
+- ✅ **Gate② QC+H3 回路②**:配 qc binding(sonnet)+take.qc.enabled;存量 06-10 take(4MB 本机缓存,实锤六八部分真打在 mac-mini)**对题 72 / 跑题注入 22**(promptAdherence 5 — M3c「跑题低分」验收兑现;两次对题独立判分同 72,可复现);**权重飞轮 1→0.95 精确 -0.05**(自标注 fixture run 验生产接线,测后删 run/权重归 1/真分重判还原);QC 失败隔离顺带真打(moyu 瞬断→qcJson.error,take 不受影响);faceConsistency null=无形象图正确降级;**新 take QC 全自动触发出分 75**(SUCCESS→开关→job→VLM→徽章零人工)
+- ✅ **Gate①(M4 资金链全证)**:缺主图 deny PREPAY/REFUND 同秒退净 ×2;provider 15min 超时→FAILED+¥2.8 退净;**stale-sweep 真打自愈**(我改代码→tsx watch 重启 worker→in-flight job stalled→僵尸 RUNNING 24min→重抽 sweep 标「stale RUNNING auto-recovered」+¥6.3 同秒退净 — 六九修复正面真打;boot 恢复 30min 与组级 sweep 10min 双层纵深确认无 bug);**G6-9 真出片 SUCCESS ¥6.3 + cache-video 4.24MB 落地**
+- ✅ **Gate③ 批量全链**:估算双向正确(RUNNING 排除/FAILED 重入列);batchGenerate **submitted/denied 分流**(G1-4 缺主图 deny 退净 + 批次标签 batch_uuid 贯穿含 denied);**③b 取消退费**:停 worker→7 组 ¥32.2 入队全滞留 waiting→`cancelQueued` **cancelled:7** + 7 对 PREPAY/REFUND 对冲净 ¥0 + 队列排空 + worker 重启回归
+- ✅ **Gate⑦ ±强化词 A/B**:同组双臂(编译差 54 字=恰两段强化词,hash 不同),+强化词 75(clarity 85/adherence 72) vs 无强化词 78(85/75)— **机制全链可用;n=1 差异淹没在抽卡方差内,「质量保险丝」声称需 N>1 才有统计力**(管线已具备批量验证能力)
+- ✅ **Gate⑧ embedding 语义检索 + 真 bug 一修**:createFromCatalog 建 moyu-text-embedding-v4(通义 ¥0.5/M)→ **真打逮 bug:通义经 moyu 限 batch≤10,懒回填 32/批全 400**(降级链按设计兜住,优化照常 tags)→ 修:`ITextEmbeddingProvider.maxBatchSize` + openai-compat-embedding/registry 透传 + backfill 尊重 + **catalog 条目带 embeddingBatchSize:10(类型/createFromCatalog/JSON 三处跨机闭环)**;修后 77/83 向量回填(余 6 条懒回填按需 — 设计如此)+ 语义检索成功无降级 + embedding.generate 分账(18 调 ¥0.0022)。其他机器解锁:admin createFromCatalog 加 text-embedding-v4 → 启用 → 填 `binding.prompt.embedding.modelId`
+- ✅ 回归口径:**typecheck 16/16 · adapters 48 · core 278+2skip · api 57 · queue 11 全过**(改动 8 文件 +18/-4)
+- 🔴 **重磅发现(用户贴 moyu 账单对账出真相)**:① **worker 重启 = provider 孤儿任务白烧**:tsx watch 重启→job stalled→bullmq 重派→adapter 因 task_id 未持久化重建 provider 任务→旧任务 provider 侧照常完成结算(¥7.226/只)无人认领;今天两只 ≈ **¥14.4 白烧**(内账对用户全程退净,损耗在 relay 账户层内账不可见)→ **L5 providerJobId 断点续跑从"优化项"升级"真金债"**(生产 deploy/crash 同理,≈¥7/次/任务) ② **seedance 计价低估 14.7%**:moyu 按 token 结算(195300 tok×37/M=¥7.226/9s≈**¥0.803/s**)vs 内部 ¥0.7/s → 「预估偏差<10%」按真实账单不达标,建议 unitPriceCny→0.81 ③ (P2)批次成员**全部在 API 侧终结**(deny/sweep)时 worker followup 不触发 → 批次通知漏发(③a 实测;常态批次至少一组进 worker 则正常)
+
+**完成(下半场 · 用户追加授权"继续执行")**
+- ✅ **seedance-fast 计价校准**:unitPriceCny 0.7→0.81(本机 DB + catalog 双处,fast 档专属、满血 2.0 不动);真打验证:估算 ¥8.1=10s×0.81、结算 ¥3.24=4s×0.81 全新价生效
+- ✅ **P2 批次通知漏发修复 + 真打回归**:完成判定抽 `core/video-generation/batch-notify.ts` 独立模块(零 submit 依赖防环引;advisory lock+batchId 判重幂等原样保留)→ 四站点接入:worker followup(原路委托)/ **批量全 denied**(aigc-batch 循环后补判)/ **submit stale-sweep 后**(事务提交后对被清批量项补判,conflict 回滚不判)/ **boot 恢复后**;cancel 路径有意不接(用户主动操作有即时反馈)。**顺手揪修组级 sweep 退款归属**:REFUND 此前记"触发 sweep 的当前操作者",改记原提交者 createdBy(同六九 cancelQueued 口径;boot 恢复路本来就对)+ 测试锚死。真打:全 denied 批量 → `batch_failed「批量生成全部失败(1 组)」`通知落库 + ¥8.1 退净 ✓
+- ✅ **L5 providerJobId 持久化+断点续跑(真金债清偿)+ 真打处决验证**:`CallContext.onVideoTaskCreated` 回调(adapter 拿到 task_id 即回调,best-effort 不阻塞)→ process-job 写 attempt.providerJobId(status=RUNNING 守卫)→ 重入时 checkIdempotency 带出 task_id + `resumeVideoPoll`(10s 间隔/15min 窗,**任何实现 poll 的适配器免费继承** — relay-video 系 kling/wan 自动受益)。真打:提交后 **3 秒 task_id 落库** → kill -9 worker mid-poll → 新 worker 重派 →「已有 providerJobId=cgt-...,**续轮询(不重建任务)**」→ 同一 task SUCCESS ¥3.24,provider 侧零孤儿(昨日同场景 ×2 各白烧 ¥7.2)
+- ✅ 下半场回归:typecheck 16/16 · core 278+2skip(stale-sweep 测试补归属/明细两断言)· api 57 · adapters 48 全绿
+
+**完成(第三波 · DMG 打包 + 四件套用户需求,Claude 全程自主)**
+- ✅ **macOS DMG 打包**:三步链(SS_DESKTOP_BUILD=1 web build → desktop-pack 资源总装 → tauri build)全绿 → `StarsAlign Studio_0.1.0_aarch64.dmg` 300MB;hdiutil 校验 VALID + 挂载核验自包含(内嵌 node/PG/standalone/migrations/seed);adhoc 签名(他机需 `xattr -cr` 或右键打开),仅 arm64
+- ✅ **①TTS 新机诊断 + 可观测安装**:用打好的包资源 + 全新数据目录**完整复现"新 Mac"**(SS_DESKTOP_PACKAGED=1 全套 env)→ bootstrap/migrate/bundle-seed 全过 → 触发声线生成 → **746MB 权重下载 + onnxruntime 推理 + 6s 样本 + 自动挂参考音频全链成功(~20 分钟)** → 诊断定论:**功能无故障,纯可观测性缺失**(845MB 藏在首次 job 里静默下载)。落地:weights.ts 进度落盘 `.progress.json`(Content-Length 校准+计数流+500ms 节流)+ `getNanoWeightsStatus`/`clearNanoWeightsCache`(下载中 2min 窗拒清)+ 新 kind `tts-weights-install`(双驱动注册,完成/失败铃铛)+ asset.voiceWeightsStatus/Install/Clear 三 API + 声音面板四态卡(未装→后台安装/下载中进度条/失败→重试+清缓存/就绪绿行);脚本真验进度递增+守卫,UI 真验就绪行「763MB·16/16 文件」
+- ✅ **②合规前置门解除(用户指令)**:submit 的 AI_REAL 人物 APPROVED 硬门移除+`requireComplianceForVideo` 全链退役(bindings/三调用点/seed 注释化);合规保留为独立标识环节(volcengine/手动 setComplianceManually 照旧)— **人物卡右上绿色圆点** + 编辑页形象/三视图图上**绿字「✓已通过合规审查」**(preview 截图实证;留接口:compile 仍返 characterBindingsForCompliance)
+- ✅ **③剧本分集锁定上传跳过(用户指令,反转旧"需求2")**:uploadMultiEpisode 预检**两把锁皆认**(左侧分集 Episode.batchLocked + 版本锁 Script.lockedAt)→ 已锁集连 Episode 行都不动(防 status/标题被重置),未锁集照覆盖;事务内 skipIfLocked 兜底竞态;分集栏锁按钮/铃铛文案升级为「批量生成与重新上传都跳过」。**真打**:锁 ep2 双集上传 → ep2 skippedLocked=true 保留 / ep3 覆盖 ✓(测后全还原)。⚠️ 顺带实证:parseEpisodeBoundaries **不识别中文数字集号**(「第二集」被并进第 1 集,把 ep1 覆盖出 v6 — 已拨回 v5;六五留的「第N集」规则债增加实锤)
+- ✅ **④wan/happyhorse 视频模型适配 + 真打打通**:moyu 线上 `/v1/models` 实查 142 模型 — **wan2.7 不存在**(用户口误,按 wan2.6 落地;线上有 2.5preview/2.6 + happyhorse 1.0 四变体);catalog 8 条目补 `endpointStyle:relay + adapter:relay-video`(RelayCatalogModel 类型+createFromCatalog 透传,跨机开箱即用);**M5 形状真打揪出双 bug**:① moyu 对 wan/hh 用「通用任务信封」(结果在 `data.data.data[].url`,wan 把成片 URL 塞 fail_reason 的怪癖)→ parseQueryResponse 补提取链+深扫 .mp4 保险丝+FAILED 大写映射+**5 条形状锁测试** ② **L5 续跑结算缺口**(hh 真打实锤:resume 经 poll() 无时长 → 结算 0 → ¥8 全退=内账白送)→ process-job 续跑后按 PREPAY 同公式回填。**终局**:wan2.6 SUCCESS 结算 ¥5.5 精确(5s×1.1)+ happyhorse SUCCESS,双视频 6.2MB/4.2MB 本地缓存,绑定链路报价正确(绑 wan 报 ¥11=10s×1.1 后还原 seedance);绑定下拉两家族五模型齐现
+- ✅ 第三波回归:**typecheck 16/16 · core 278+2skip · api 57 · adapters 53(+5 形状锁) · queue 11 = 399 测试全绿**
+
+**完成(第四波 · AIGC 工作台三增强 + UI 方案 + 收工打包)**
+- ✅ **⑤-1 历史 take 窗**:40vh 大窗改 2 条高度(6.5rem,第三条露角作"还有更多"暗示),数量不限全量滚动;浏览器实证 maxHeight 110px/3 条全渲染/scrollable
+- ✅ **⑤-2 尾帧链产品化**(在 M3b 首帧约束之上):尾帧(`-sseof -1` 本就取最后 1 秒)→ **自动包成 STYLE_REFERENCE 资产**(主图=尾帧,关联资产卡可看大图)+ 绑定下一组 refSlotIdx=max+1 + 提示词自动追加「@图片N 为上一组结尾画面,作为本次生成视频的首帧画面…」(幂等防重复行);media 创建即 `syncMediaToRelay`(meta.relayAssetUrl → moyu asset:// 可编译)。**真打**:G21-22(wan 成片)→ G24-25 四件全落(资产/绑定 slot1/提示词行/startFrameMediaId),编译 unknownTokens=[]。**顺修产品级缺口**:compile 缺图硬门现在尊重 `binding.required=false`(可缺引用缺图只记 unused 不拦组)— 否则未配 relay 资产通道的机器会被自动链入的尾帧拦死生成
+- ✅ **⑤-3 提示词 @ 自动补全**:编辑态输入 @ 弹本组关联资产下拉(缩略图+名称+@图片N token chip;键盘 ↑↓/Enter/Esc + 鼠标点击),插入仓内惯例格式「@名称@图片N 」;零绑定时空态引导「先点关联素材」;手工添加入口复用既有 bind-asset-dialog。浏览器实证:下拉渲染/点击插入/关闭全链(本机无可达图 URL 时缩略图正确回退 🖼 图标)
+- ✅ **⑤-4 UI 设计审查方案** → [docs/08-ui-optimization-plan.md](docs/08-ui-optimization-plan.md):四界面真截图走查实证 14 项问题(P0:**顶部导航文字竖排折行**/左列表符号串不可读/「0 场」计数疑 bug;P1:字号 9 种→5 级 token/按钮三套→1 组件/emoji→lucide/硬编码色~50→语义五族/嵌套描边噪音/小字对比度)+ 设计 token 规范 + 分界面专项 + P0(半天)~P2 落地路线 + 不做清单
+- ✅ 走查红利:发现并还原 ep3 标题被锁定测试上传污染(「覆盖测试」→「打脸势利亲戚」);「0 场」列表计数疑 bug 记案
+- ✅ 第四波回归:typecheck 16/16 全绿(收工前全套终验见下)
+
+**问题/待决策**
+- ❓ ~~真打期间勿改仓内代码~~ **L5 落地后该纪律解除**:重启/改码只会触发续轮询,不再产生孤儿任务(收工 commit 后可在 moyu 账单复核:11:05 task 之后无第二只 ¥10 预扣)
+- ❓ happyhorse 首条 take 内账结算 0(修复前历史行,relay 侧已实扣 ≈¥8)— 一次性偏差,记账即可
+- ❓ wan2.6/happyhorse 的 QC 自动评分异步进行中(take.qc.enabled=true);kling 家族形状仍未真打(catalog 未补 adapter 字段,接入时照 wan 路径)
+- ❓ 旧机器 DB 里 `asset.compliance.requireForVideo` 残留行无害(无代码读);admin 设置页若展示可手删
+- ❓ take.qc.enabled 留 true(每 take 自动 QC ¥0.02-0.05)— gate 启用,要省可关回
+- ❓ G1-4 类带绑定组在本机无法真打视频(资产缺主图,跨机媒体独立的预期行为)— 要么本机生图要么等媒体云端化
+- ❓ qc/judge/embedding 三绑定 + embedding provider 为本机新配(各机独立,其他机器照 Gate⑧ 步骤自行解锁)
+
+**下次接着做**
+- 📌 **F5b 并抽/failover/A/B 卡**(gate 已过 + L5/计价/通知三债清完,蓝图正式解锁;第一家并抽 = happyhorse 或 kling-v2-6/wan2.6,M5 实测定)
+- 📌 H3 飞轮运营观察(/admin/knowledge 权重演化/蒸馏候选审核)+ 强化词 A/B 扩 N(管线已通)
+- 📌 其他机器开工后:seedance-fast 价格手动改 0.81(或重建 provider)+ 照 Gate⑧ 步骤解锁语义检索
+
+---
+
 ## 2026-06-11(周四,mac-studio · 七一:Prompt Mini-Harness H0–H3 单日四期全落地)— docs/07 蓝图代码完工,migration ×2 点头
 
 **完成**

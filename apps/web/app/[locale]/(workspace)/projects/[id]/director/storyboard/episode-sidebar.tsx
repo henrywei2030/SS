@@ -58,7 +58,11 @@ export function EpisodeSidebar({
 
   const setLock = trpc.storyboard.setBatchLock.useMutation({
     onSuccess: (res) => {
-      toast.success(res.batchLocked ? '已锁定 — 批量生成将跳过本集' : '已解锁 — 可参与批量生成');
+      toast.success(
+        res.batchLocked
+          ? '已锁定 — 批量生成与重新上传剧本都将跳过本集'
+          : '已解锁 — 可参与批量生成,重新上传会覆盖本集',
+      );
       void utils.storyboard.listEpisodes.invalidate();
     },
     onError: (e) => toast.error(e.message),
@@ -100,7 +104,7 @@ export function EpisodeSidebar({
                     {ep.batchLocked && (
                       <Lock
                         className="size-3 text-amber-500"
-                        aria-label="已锁定 · 批量生成跳过"
+                        aria-label="已锁定 · 批量生成与重新上传都跳过"
                       />
                     )}
                   </span>
@@ -127,8 +131,8 @@ export function EpisodeSidebar({
                   disabled={setLock.isPending}
                   title={
                     ep.batchLocked
-                      ? '解锁 — 让本集参与批量生成'
-                      : '锁定 — 批量生成将跳过本集(单集生成不影响)'
+                      ? '解锁 — 本集恢复参与批量生成,重新上传会覆盖'
+                      : '锁定 — 批量生成与重新上传剧本都跳过本集(单集生成不影响)'
                   }
                   className={cn(
                     'flex size-6 items-center justify-center rounded text-[hsl(var(--color-muted-foreground))]',

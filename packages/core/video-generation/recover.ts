@@ -11,6 +11,8 @@
  */
 import { prisma } from '@ss/db';
 
+import { isBatchGroupId } from './batch.js';
+import { maybeNotifyBatchDone } from './batch-notify.js';
 import { STALE_TIMEOUT_WORKER_BOOT_MS } from './constants.js';
 import { refundPrepayForAttempt } from './refund.js';
 
@@ -34,6 +36,7 @@ export async function recoverStaleVideoAttempts(
         projectId: true,
         episodeId: true,
         providerId: true,
+        groupId: true, // 七二:批量标签 — 恢复后补批次完成判定(通知漏发 P2 修)
       },
     });
 
@@ -60,6 +63,21 @@ export async function recoverStaleVideoAttempts(
           });
         });
         if (refunded) refundedCount++;
+        // 七二 P2 修:批量标签 attempt 被 boot 恢复终结 — 若批次因此收尾,worker 终态
+        // 路径不会再跑,这里补完成判定(幂等;projectId/episodeId 批量必有,缺则跳过)
+        if (isBatchGroupId(stale.groupId) && stale.projectId && stale.episodeId) {
+          await maybeNotifyBatchDone(prisma, {
+            batchId: stale.groupId,
+            userId: stale.createdBy,
+            projectId: stale.projectId,
+            episodeId: stale.episodeId,
+          }).catch((e) =>
+            console.warn(
+              `[${workerId}] boot 恢复后批次完成判定失败(增强项,忽略)batch=${stale.groupId}:`,
+              e instanceof Error ? e.message : e,
+            ),
+          );
+        }
       } catch (perAttemptErr) {
         console.error(
           `[${workerId}] stale sweep: attempt ${stale.id} refund failed (non-fatal):`,

@@ -231,6 +231,7 @@ export async function compileVideoPromptForGroup(
       assetId: b.asset.id,
       name: b.asset.name,
       mediaUrl: chosen ? (mediaMap.get(chosen) ?? null) : null,
+      required: b.required, // 七二 ⑤-2:可缺引用缺图不硬拦(尾帧自动链等)
     };
   });
 

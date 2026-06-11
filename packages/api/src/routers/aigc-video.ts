@@ -153,7 +153,6 @@ export const videoProcedures = {
         aspectRatio,
         wantAudio,
         dailyBudgetCny: bindings.dailyBudgetCny,
-        requireComplianceForVideo: bindings.requireComplianceForVideo,
         extraInstruction: input.extraInstruction,
         extraNegative: input.extraNegative,
         resolution: input.resolution,

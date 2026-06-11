@@ -336,6 +336,7 @@ export async function getEmbeddingProvider(id: string): Promise<ITextEmbeddingPr
   }
   const defaultModel =
     (cfg.defaultParams.defaultModel as string | undefined) ?? cfg.providerId;
+  const rawBatch = cfg.defaultParams.embeddingBatchSize;
   const instance = new OpenAICompatEmbeddingProvider({
     apiUrl: cfg.apiUrl,
     apiKey: cfg.apiKey,
@@ -345,6 +346,7 @@ export async function getEmbeddingProvider(id: string): Promise<ITextEmbeddingPr
     maxConcurrent: cfg.maxConcurrent,
     modelRate: cfg.modelRate,
     outputRate: cfg.outputRate,
+    maxBatchSize: typeof rawBatch === 'number' && rawBatch >= 1 ? rawBatch : undefined,
   });
   cache.embedding.set(id, { instance, cacheKey: cfg.cacheKey });
   return instance;

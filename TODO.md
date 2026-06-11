@@ -1,6 +1,6 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-06-11(**七一 · mac-studio:Prompt Mini-Harness H0–H3 单日四期全落地**(时间轴/强化词编译段 + 83 条八维知识库 + 检索/Planner/contributor + 硬门/判官/修复闭环 + 飞轮三回路 + admin 知识库页;migration ×2 点头)· 详见 [PROGRESS](PROGRESS.md))
+> 最后更新:2026-06-11(**七二 · mac-mini 全天四波**:gate 全过+三债清偿 → DMG 打包 → 四件套(TTS 可观测安装/合规改标识/分集锁定/wan2.6+happyhorse 打通) → AIGC 三增强(历史窗 2 条/尾帧链产品化/@ 自动补全)+ [docs/08 UI 优化方案](docs/08-ui-optimization-plan.md) · 详见 [PROGRESS](PROGRESS.md))
 > 仓库:https://github.com/henrywei2030/SS
 > **🚀 一键启动**:`pnpm start`(详见 [README.md](README.md#快速启动) / [CLAUDE.md](CLAUDE.md#设备登记))
 > **📖 主线蓝图**:[docs/06-feature-plan-2026H2.md](docs/06-feature-plan-2026H2.md)(M0–M6 可直接 coding;2026-06-10 mac-mini 逐项核对与代码一致)
@@ -10,9 +10,9 @@
 
 ## 🚧 进行中
 
-- [ ] **🎬 七功能 AIGC 增强路线图(M0–M6)**(蓝图 [docs/06](docs/06-feature-plan-2026H2.md))— ✅ M0 基建 / ✅ M1 成片 / ✅ M2′ 配音补强(均六七)/ ✅ **M3 全清**(3a/3b 六八真打通 + 3c QC 六九)/ ✅ **M4 先决重构 + F4 整集批量**(六九)/ ✅ F5a relay 泛化(六九)/ ✅ **M6a/b 动态 Prompt 优化**(七十:优化器层+ContextContributor 四件套+单组✨/整集后台 job;M6c 并入 docs/07 H3)。**剩:真打回归 gate**(见真打债置顶)→ gate 后 **F5b 并抽/failover**
-- [ ] **🧠 Prompt Mini-Harness(八维知识库 × 装配流水线)**(蓝图 [docs/07](docs/07-prompt-harness.md))— ✅ **H0 基座** / ✅ **H1 检索进流水线 + storyboard v3** / ✅ **H2 硬门+判官+修复闭环(✨✨深度/体检卡)** / ✅ **H3 飞轮三回路 + admin 知识库页**(全部 七一 单日落地,migration ×2;83 条种子语料/检索三档降级链/判官 advisory 纪律/权重±0.05 飞轮均端到端实测)。**剩**:① gate 顺验(见真打债置顶 ⑤-⑧)② 飞轮持续运营(真打数据累积 → 权重演化/候选审核,/admin/knowledge)③ 可选:配 `binding.prompt.embedding.modelId` 解锁语义检索(tags 降级已可用)
-- [ ] **🔊 本地 TTS 声线生成(MOSS-TTS-Nano)**— 六七闭环,**六八三需求加固**:声音设定→推荐种子声线(manifest 真元数据表)/ 人到声必到(voiceRefs 绕 token 闸,旧五七-3 链实为双重失效)/ 批量按设定生成(主演配角 27 人 3.5min 零扣费,群演按用户定调排除)/ relay 同步开关(默认关防死资产)。**留**:桌面包权重首跑 ModelScope 下载验证(.dmg 依赖已修齐,见六八)/ win-laptop onnxruntime 真跑 /「从有声视频抽音轨反向采纳声线」
+- [ ] **🎬 七功能 AIGC 增强路线图(M0–M6)**(蓝图 [docs/06](docs/06-feature-plan-2026H2.md))— ✅ M0 基建 / ✅ M1 成片 / ✅ M2′ 配音补强(均六七)/ ✅ **M3 全清**(3a/3b 六八真打通 + 3c QC 六九)/ ✅ **M4 先决重构 + F4 整集批量**(六九)/ ✅ F5a relay 泛化(六九)/ ✅ **M6a/b 动态 Prompt 优化**(七十)/ ✅ **真打回归 gate 全过(七二 mac-mini)**:出片+扣费/退差/超时退净/stale-sweep 自愈/批量分流+取消退费净 0/QC 自动触发。**剩:F5b 并抽/failover**(已解锁)+ L5 providerJobId 真金债(¥7/重启,见工程卫生)
+- [ ] **🧠 Prompt Mini-Harness(八维知识库 × 装配流水线)**(蓝图 [docs/07](docs/07-prompt-harness.md))— ✅ H0-H3 全落地(七一)/ ✅ **gate 顺验全过(七二)**:✨四路径(happy/乐观锁/硬门/TOKEN_LOST)/✨✨判官八维+定向修复/知识检索对症命中+hitCount 飞轮/权重 -0.05 生产接线/v3 三纪律+音桥教科书级 / ✅ **语义检索解锁**(七二修 embedding batch≤10 真 bug,77/83 向量回填;本机已配,其他机器照 PROGRESS 七二 Gate⑧ 步骤)。**剩**:① 飞轮持续运营(权重演化/蒸馏候选审核,/admin/knowledge)② optimizer meta-prompt 补「@token 逐字保留」强化(gpt-5-4/sonnet 对混用 prompt 丢 token 率高,守卫接得住但费重试钱)
+- [ ] **🔊 本地 TTS 声线生成(MOSS-TTS-Nano)**— 六七闭环,六八三需求加固;✅ **七二:桌面包权重首跑验证通过**(打包资源+全新数据目录完整复现新 Mac:746MB 下载+推理+样本全链 ~20min 成功 — 故障实为"纯不可观测")+ **可观测安装落地**(进度落盘+后台安装 job+声音面板四态卡:安装/进度条/失败重试+清缓存/就绪)。**留**:win-laptop onnxruntime 真跑 /「从有声视频抽音轨反向采纳声线」
 - [ ] **🖥️ 桌面程序化遗留**(ADR-35;六八:**dmg 缺四原生依赖的六七债已修**(依赖闭包补包+darwin-arm64 裁剪,238M 残→300M 全)+ 构建隔离 .next-desktop(打包不再打断 dev server))— 剩:① win-laptop CI artifact 真装真跑(出差时)② 桌面包 Mock 视频端到端 + TTS 权重首跑真打 ③ 退出钩子加固 ④ .dmg Finder 美化/自动更新(低优)⑤ Developer ID + 公证(分发才需要)
 
 ---
@@ -32,17 +32,23 @@
 
 ### 🔥 真打验证债(贯穿,各里程碑结尾消化)
 
-- [ ] **🎯 真打回归 gate 三连+Harness 五验(置顶,一次整集批量可全验;过 gate 才叠 F5b)**:① 单点抽卡 1 次(验 M4 submit 下沉:出片+扣费/退差正常;**顺带看编译预览的【时间轴】【画质/稳定】段真送到模型** — H0)→ ② `/admin/bindings` 配 `binding.shot.qc.modelId` + 开 `take.qc.enabled` → takes QC 徽章出分(验 M3c;**QC 落分后看 /admin/knowledge 权重是否 ±0.05 — H3 回路②**)→ ③ 工作台「批量生成」整集跑(验 F4:优先级顺序/预估偏差<10%/推送/取消退费)→ ④ 配 `binding.storyboard.prompt.modelId` 点「✨AI 优化」(验 M6+H1:token 保全/写回/乐观锁/**【创作知识】检索痕迹进产物**/硬门拒绝路径;¥0.02-0.05/次)→ ⑤ 配 `binding.prompt.judge.modelId` 点「✨✨深度」(验 H2:判官八维出分→体检卡/故意喂缺维 prompt 看定向修复;¥0.03-0.1/组)→ ⑥ 分镜 v3 真打一场对照(写作三纪律是否生效)→ ⑦ ±强化词 A/B(qcScore 对比,验文章"质量保险丝"声称)→ ⑧(可选)配 `binding.prompt.embedding.modelId` 验语义检索+懒回填(首次 ≈¥0.04)
+- [x] **🎯 真打回归 gate 三连+Harness 五验 — 七二 mac-mini 全过(2026-06-11,Claude 自主驾驶,内账净 ¥13.60)**:①M4 出片/扣费/退差/超时退净/stale-sweep 自愈 ✓ ②QC 出分 72(跑题注入 22)+权重 -0.05 飞轮+QC 全自动触发 ✓ ③批量分流/标签贯穿/**取消退费 7 组净 0** ✓ ④✨四路径(含乐观锁/硬门/TOKEN_LOST)+知识对症命中 ✓ ⑤✨✨判官八维+定向修 SUBJECT ✓ ⑥v3 三纪律+音桥 84 镜 ✓ ⑦A/B 75vs78(n=1 无统计力,管线已通)✓ ⑧语义检索(修 batch bug 后)✓。**残留**:预估偏差按真实账单 14.7% 超标(→计价校齐项);带绑定组本机缺主图打不了(跨机媒体债);推送通知仅验铃铛落库,Bark/飞书 webhook 未配未验
 - [ ] **moyu /images/edits ~300s 服务端硬限(六八实证)**:img2img(三视图/九宫格/关键帧带参考)4 次真打全在 284-305s 被掐(EPIPE,gpt-image-2 与 seedream 都一样;文生图通道正常)。临时路:用「从设定生成」(文生图)/错峰重试;根治候选:问 moyu edits 限时 / 火山直连异步任务式 API。客户端三层已修(尺寸/16、超时 600s、per-model 尺寸分档)
-- [ ] docx 上传多集切分真打(六五修复后用户未回报;若集号写法非「第N集」需调 parseEpisodeBoundaries 规则)
+- [ ] docx 上传多集切分真打(六五修复后用户未回报)— **七二实锤**:parseEpisodeBoundaries 不识别中文数字集号(「第二集」整段被并进第 1 集导致误覆盖),若剧本用中文数字需补规则
 - [ ] 视频生成端到端真打(Seedance 扣费,六四起留;六八已有 1 条真 take 并验通 cache-video 落地缓存)+ 桌面包 Mock 视频端到端
 - [ ] **seedance 配音透传真打**(六七卡 moyu token 401,退款已验净 ¥0):更新 token 后打 reference_audio/generate_audio(六八起 voiceRefs 已自动进 refAudioUrls,无需点「自动 @」)。不支持则配音切 kling-v2-6
 - [ ] **seedance 首帧约束真打**(M3a 六八新增):admin/providers 给视频商配 supportsFirstFrame:true 后真打 FLF2V(蓝图:seedance-2.0-fast 首尾帧支持存疑,不支持换 happyhorse-i2v)
 - [ ] **本地 TTS 桌面打包**(六八半消化:.dmg 四原生依赖已修齐并核验)— 剩:新机装包后 TTS 权重首跑 ModelScope 下载真打 + win-laptop onnxruntime 预编译真跑
 - [ ] **跨机模板同步**:storyboard_main v2(四维电影级)— **六九实证缓解**:mac-studio 开工 `db:sync` 按 versionTag 增量把 v2 自动补进了本机 DB(seed-sync 对"新版本行缺失"走 insert-if-missing)→ mac-mini / win-laptop 开工 db:sync 大概率同样自动补,开工后在 /admin/prompts 验证 v2 在即可,手动粘贴仅作兜底
-- [ ] 旗舰档二选一(六七定,v3 已确认不在 moyu):`kling-v2-6`(1.2元/s 音画同出) vs `wan2.6`(t2v/i2v 各 1.1元/s)— M5 真接时逐家实测后定
-- [ ] happyhorse / kling / wan 经 moyu 请求形状逐家真打(M5:参数/轮询/响应解析)
-- [ ] 其余模型价格按实际账单校齐(五八-fix 留:haiku/gemini/gpt-5.5/opus/gpt-image-2 仍是旧文档价,用到时核)
+- [ ] 旗舰档二选一(六七定,v3 已确认不在 moyu):`kling-v2-6`(1.2元/s 音画同出) vs `wan2.6`(t2v/i2v 各 1.1元/s)— **七二:wan2.6 已真打通**(SUCCESS 结算 ¥5.5 精确,moyu 线上无 wan2.7),kling 真接时对比后定
+- [ ] happyhorse / kling / wan 经 moyu 请求形状逐家真打(M5)— ✅ **七二:wan2.6-t2v + happyhorse-1.0-t2v 双通**(moyu 通用任务信封解析落地+5 形状锁测试;catalog 8 条目带 adapter:relay-video 跨机开箱;同家族 i2v/r2v 同协议)。**留 kling**(catalog 未补 adapter 字段,接入照 wan 路径)
+- [ ] 其余模型价格按实际账单校齐(五八-fix 留:haiku/gemini/gpt-5.5/opus/gpt-image-2 仍是旧文档价,用到时核)。~~seedance-2.0-fast~~ ✅ 七二已校:实测 ¥0.803/s(token 计价 37/M)→ unitPriceCny 0.7→**0.81**(本机 DB + catalog 双处,fast 档专属,满血 2.0 各归各价);其他机器开工后在 /admin/providers 手动改 0.81 或重建 provider(catalog 新默认已带)
+
+### 🎨 UI 优化(七二 · 方案见 [docs/08](docs/08-ui-optimization-plan.md),按 P0→P1 排期)
+
+- [ ] **P0(半天)**:顶部导航文字竖排折行修复(nowrap+响应式 icon-only)/ 左列表 ✓1✕1✎ 符号串→可读 chip / 分集列表「0 场」计数排查
+- [ ] **P1(3-4 天)**:字号 9 种→5 级 token + lint 禁任意值 / 手写按钮~40 处→Button 组件 / emoji 图标→lucide(保留 ✨系)/ 硬编码状态色~50→语义五族变量(并清工程卫生既有色债)/ AIGC 右栏边框预算整改
+- [ ] P2 塞缝:相对时间/tabular-nums/滚动渐隐/统一空态组件(与 a11y 债合并)
 
 ### 🧹 工程卫生(塞缝做 · 2026-06-10 六七核对收拢 — 碰到相关代码顺手清,不单独排期)
 
@@ -59,7 +65,8 @@
 - [ ] 预设模板 seed 数据(景别/机位/运镜/光线 — admin/presets UI 已有,seed 缺)
 - [ ] `apps/web/public/logo.png` OG 分享图
 - [ ] Invitation 邀请流程 UI(表/schema 已就绪,~300 行 router+UI+审批区)
-- [ ] W5 worker 升级残项:L3 concurrency 从 ProviderConfig 动态读 / L5 providerJobId 断点续跑 / L6 typed Error 失败分类(L4 cancel:QUEUED 态由 M4 cancelQueuedForEpisode 吸收,RUNNING 态取消仍留)
+- [ ] W5 worker 升级残项:L3 concurrency 从 ProviderConfig 动态读 / ~~L5 providerJobId 断点续跑~~ ✅ **七二实装+真打验证**(task_id 创建即持久化(CallContext.onVideoTaskCreated 回调)+ 重入续轮询(process-job resumeVideoPoll,任何带 poll 的适配器免费继承 — relay-video 系自动受益);真打:kill -9 worker mid-poll → 重启 →「续轮询(不重建任务)」→ 同一 task SUCCESS,孤儿任务白烧根除)/ L6 typed Error 失败分类(L4 cancel:QUEUED 态由 M4 cancelQueuedForEpisode 吸收,RUNNING 态取消仍留)
+- [x] ~~(P2)批次成员全部在 API 侧终结时通知漏发~~ ✅ 七二修:批次完成判定抽 `batch-notify.ts` 独立模块(幂等),四站点接入(worker followup 原路 / 批量全 denied / submit stale-sweep 后 / boot 恢复后)+ **顺手修组级 sweep 退款归属**(REFUND 记原提交者 createdBy,同六九 cancelQueued 口径);全 denied 场景真打:batch_failed 通知落库 ✓
 - [ ] storyboard 生成后端限流 + SSE 流式进度(前端 3 并发池已有;关联想法池「拆解链路深度优化」②)
 - [ ] EN 文案深度 review(低优)
 

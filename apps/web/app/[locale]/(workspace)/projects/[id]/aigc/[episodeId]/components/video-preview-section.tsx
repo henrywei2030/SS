@@ -598,7 +598,9 @@ export function VideoPreviewSection({
               </button>
             )}
           </div>
-          <div className="max-h-[40vh] space-y-1.5 overflow-y-auto pr-1">
+          {/* 七二(用户需求⑤-1):窗口默认 2 条高度(~6.5rem,第三条露一角当"还有更多"暗示),
+           *  数量不限全量渲染,更多滚动查看 — 替代原 40vh 大窗(测试期历史多时占满屏) */}
+          <div className="max-h-[6.5rem] space-y-1.5 overflow-y-auto pr-1">
             {visibleTakes.map((t) => (
               <div
                 key={t.id}

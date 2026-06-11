@@ -74,6 +74,13 @@ export interface VideoReference {
    * compile 时会进 warnings.missingMedia,UI 提示用户去美术工作台补图,且不送给 Seedance。
    */
   mediaUrl: string | null;
+  /**
+   * 七二 ⑤-2:binding.required 透传(schema 语义「必须调用 / 可缺」)。
+   * 可缺(false)的引用缺图时只记 unusedReferences 提示,不进 missingMedia 硬拦 —
+   * 典型:尾帧自动链入的参考图在未配 relay 资产通道的机器上无可达 URL,不应拦死整组生成。
+   * 缺省 true(向后兼容:旧调用方不传 = 原有硬拦语义)。
+   */
+  required?: boolean;
 }
 
 export interface CompileShotGroupVideoPromptInput {
@@ -304,12 +311,15 @@ export function compileShotGroupVideoPrompt(
     const isUsed = usedTokenKeys.has(key);
 
     // W5 audit W1:mediaUrl 缺失先报 missingMedia,无论是否被 text 引用
+    // 七二 ⑤-2:required=false(可缺)的引用缺图只记 unused 提示,不硬拦(见 VideoReference.required)
     if (!r.mediaUrl) {
-      missingMedia.push({
-        refSlotIdx: r.refSlotIdx,
-        kind: r.kind,
-        assetName: r.name,
-      });
+      if (r.required !== false) {
+        missingMedia.push({
+          refSlotIdx: r.refSlotIdx,
+          kind: r.kind,
+          assetName: r.name,
+        });
+      }
       // 同时,如果 text 没引用,也算 unused;但缺图本身是更严重的问题,优先标 missingMedia
       if (!isUsed) unusedReferences.push(r.refSlotIdx);
       continue;
