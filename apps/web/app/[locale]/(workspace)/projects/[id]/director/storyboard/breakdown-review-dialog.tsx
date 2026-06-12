@@ -179,17 +179,7 @@ export function BreakdownReviewDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
-  const apply = trpc.asset.applyBreakdown.useMutation({
-    onSuccess: (res) => {
-      toast.success(
-        `已应用 · 新建 ${res.created.length} · 更新 ${res.updated}` +
-          (res.skippedNames.length ? ` · 跳过重名 ${res.skippedNames.length}` : '') +
-          (res.skippedLocked.length ? ` · 跳过锁定 ${res.skippedLocked.length}` : ''),
-      );
-      onApplied();
-    },
-    onError: (e) => toast.error(`应用失败:${e.message}`),
-  });
+  const apply = trpc.asset.applyBreakdown.useMutation();
 
   // 进入即自动开始(分类型循环)
   const startedRef = React.useRef(false);
@@ -206,8 +196,8 @@ export function BreakdownReviewDialog({
 
   const selectedCount = items?.filter((i) => i.selected).length ?? 0;
 
-  const handleApply = (): void => {
-    if (!items) return;
+  const handleApply = async (): Promise<void> => {
+    if (!items || apply.isPending) return;
     const chosen = items.filter((i) => i.selected);
     if (chosen.length === 0) {
       toast.error('请至少勾选 1 条');
@@ -239,7 +229,41 @@ export function BreakdownReviewDialog({
         ...(d.episodes && d.episodes.length > 0 ? { episodes: d.episodes } : {}),
       };
     });
-    apply.mutate({ projectId, items: payload });
+    // 分批发送(每 CHUNK 条):大批量不再一次性发 —— 避免单请求过大 / 服务端中途重启致整批 Failed to fetch 全丢。
+    // 后端按项目内「同名跳过」幂等去重,已落库批次可安全重发 → 失败后再点「应用」只补未完成的。
+    const CHUNK = 25;
+    const batches: (typeof payload)[] = [];
+    for (let i = 0; i < payload.length; i += CHUNK) batches.push(payload.slice(i, i + CHUNK));
+
+    let created = 0;
+    let updated = 0;
+    let skippedNames = 0;
+    let skippedLocked = 0;
+    try {
+      for (const batch of batches) {
+        const res = await apply.mutateAsync({ projectId, items: batch });
+        created += res.created.length;
+        updated += res.updated;
+        skippedNames += res.skippedNames.length;
+        skippedLocked += res.skippedLocked.length;
+      }
+      toast.success(
+        `已应用 · 新建 ${created} · 更新 ${updated}` +
+          (skippedNames ? ` · 跳过重名 ${skippedNames}` : '') +
+          (skippedLocked ? ` · 跳过锁定 ${skippedLocked}` : ''),
+      );
+      onApplied();
+    } catch (e) {
+      const raw = e instanceof Error ? e.message : String(e);
+      // 传输层错(Failed to fetch:服务端未运行/重启中)翻成人话;并告知已落库部分,重试幂等只补缺
+      const friendly = /failed to fetch|networkerror|load failed|fetch failed/i.test(raw)
+        ? '无法连接服务器(dev server 可能未运行或正在重启),确认服务在跑后再点「应用」即可'
+        : raw;
+      const done = created + updated;
+      toast.error(
+        `应用失败:${friendly}` + (done ? ` — 已保存 新建${created}/更新${updated},重试只补未完成的` : ''),
+      );
+    }
   };
 
   const hasItems = !!items && items.length > 0;
@@ -305,7 +329,7 @@ export function BreakdownReviewDialog({
           {hasItems && (
             <Button
               size="sm"
-              onClick={handleApply}
+              onClick={() => void handleApply()}
               disabled={apply.isPending || running || selectedCount === 0}
             >
               {apply.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}

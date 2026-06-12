@@ -1,7 +1,7 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-06-12(**win-laptop 开工**:完整环境拉起(Prisma 7 / 19 migration / db:sync / preflight 全绿)+ embedded-pg Windows 白名单修 + 全量依赖升级审计 → 暂缓回退基线 · 详见 [PROGRESS](PROGRESS.md))
-> 上一版:2026-06-12(七二第九波 · mac-studio:视频尺寸根因 + 换衣/关键帧 + lightbox 全覆盖 + DMG)
+> 最后更新:2026-06-12(**win-laptop 二轮**:最新 Mac 包(CI)+ 拆解「应用」分批修复(Failed to fetch)+ 风格 prompt 深度优化(2D 日漫 / 3D CG游戏 / 真人细节)· 详见 [PROGRESS](PROGRESS.md))
+> 上一版:2026-06-12(win-laptop 开工:完整环境拉起 + embedded-pg 白名单修 + 依赖升级审计暂缓)
 > 仓库:https://github.com/henrywei2030/SS
 > **🚀 一键启动**:`pnpm start`(详见 [README.md](README.md#快速启动) / [CLAUDE.md](CLAUDE.md#设备登记))
 > **📖 主线蓝图**:[docs/06-feature-plan-2026H2.md](docs/06-feature-plan-2026H2.md)(M0–M6 可直接 coding;2026-06-10 mac-mini 逐项核对与代码一致)
@@ -11,6 +11,8 @@
 
 ## 🚧 进行中
 
+- [x] **🔧 拆解「应用」分批修复(2026-06-12 win-laptop)· 用户报 Failed to fetch**:根因 = dev server 死了致请求打空气(applyBreakdown 后端纯 DB 事务、代码本正确)。修:breakdown-review-dialog「应用」改**分批发送(每 25 条)+ 部分成功可见 + 后端按名去重幂等可安全重试 + Failed to fetch 翻人话**;不加 hook 保 Fast Refresh 不丢草稿。typecheck 16/16、资产区实落 25 人物。**留**:dev server 死因(疑 preview 工具回收)→ 建议本机 `pnpm dev` 自起
+- [x] **🎨 风格 prompt 深度优化(2026-06-12 win-laptop)· 用户指令·调研后重写**:seed.ts 三内置风格定向重写 — **2D→日本动漫**(赛璐璐/京阿尼·ufotable·扳机社)· **3D→CG 游戏**(原神/崩铁/Arcane + NPR + 人工 SSS + UE5,替皮克斯/迪士尼)· **AI 真人→细节**(毛孔/SSS/85mm·f1.8/RAW,负面加塑料感·蜡像·过度磨皮)。内置风格纳入 `FORCE_PROMPTS`(`db:sync:prompts` 强更 + 跨机)。**留**:mac-mini/mac-studio 各跑 `db:sync:prompts` 同步 + 真打验证出图
 - [x] **🎯 七二第九波(2026-06-12 mac-studio)· 视频尺寸根因 + 4任务 + 换衣/关键帧 + 变装bug + 参考图超限 + DMG**(详见 [PROGRESS](PROGRESS.md)):① **视频尺寸根因** happyhorse 比例字段双写 ratio+aspect_ratio + 前端预览跟随项目 aspect ② **4任务** 过场去seedance/happyhorse 1080p/预览横屏放大 · 立绘三视图合一(16:9 turnaround)· 卡片预览 lightbox · 镜头语言词库优化(storyboard v4) ③ **换衣/变装**(generateImage outfit 模式 + compileOutfitPrompt + 变装面板,可设按集造型)④ **关键帧首尾帧**(首帧尺寸跟项目/confirmKeyframe 自动@+提示词/尾帧门禁+真实帧)⑤ **变装 bug**(gpt-image 去 strength)⑥ **参考图超 9 张**(人物只送主体形象 + provider 上限截断 + 前端预警;音频独立不计入 9)⑦ **图像预览 lightbox 全覆盖**(共享组件接候选卡/槽位/关键帧)⑧ **最新 mac DMG**。回归 typecheck 16/16 · core 277 · api 57 · adapters 59 · 多轮浏览器实证。**留真打**:happyhorse 双写aspect_ratio/换衣保身份/首帧@送达/v4分镜质量。
 - [x] **🏞️ 七二第八波(2026-06-12 mac-studio)· 场景工作流改造(用户指令)**:场景下线「主视角」,九宫格(threeView 复用,16:9)为场景主资产 — 生成面板去主视角 tab + 九宫格默认 16:9(原 1:1)+ 一次性文生图直生(不再图生图)、360° 仍参考九宫格;总览 `PRIMARY_SLOT.SCENE`=three_view + 缺主图/hero/状态chip 改九宫格;后端 `pickAssetMediaId` 场景优先九宫格、maturity L3=九宫格/L4=360°、slot-prompt 16:9;场景换装改在九宫格(进取图链生效)。schema `sceneMainMediaId` 保留未删(旧数据惰性兜底)。9 文件 typecheck 16/16 + 浏览器实证(弹窗只剩九宫格+360°、主视角消失)。**留**:存量旧主视角数据可选清理(等点头)
 - [x] **🎨 七二第七波(2026-06-12 mac-studio)· relay 素材同步 + UI 方案执行 + 三遍复审**:① **relay 素材同步**(用户①)— generateImage/generateKeyframe 生成图补 syncMediaToRelay 同步 moyu,补 happyhorse/wan 等 R2V/I2V 拉不到本机参考图的最后缺口(事务外做/未配 group_id 静默降级)② **UI 方案执行**(用户②,docs/08)— 语义五族色变量基座 + aigc/art/director 三大用户面裸状态色清零(~38 emoji→lucide·~118 色→语义变量·减嵌套描边),4 并行 workflow + 暗亮双模式实证;**优化修订**:字号 5 级迁移暂缓(与 +2px 系统冲突)/ Button 已完备 / art 多已语义化 ③ **三遍复审**(确保美观无漏洞)— 我 + 4 对抗 agent + typecheck16/16/无 unused lucide/裸色全目录 0,色语义 **100% 正确**,修 3 处 P2 打磨(warning 对比/⊘○→图标/🩺→Stethoscope)。**留**:relay 需填 `relay.assets.default_group_id` 真启用 · UI 批④ admin(35 文件低优)· 字号软约束 token

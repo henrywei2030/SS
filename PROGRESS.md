@@ -5,6 +5,26 @@
 
 ---
 
+## 2026-06-12(周五,win-laptop · 二轮:最新 Mac 包 + 拆解应用修复 + 风格 prompt 深度优化)
+
+**完成**
+- ✅ **最新 Mac 安装包(CI 云端出包)**:Win 端无法交叉编译 Mac → winget 装 `gh` CLI(用户 `gh auth login` 一次)→ 触发 `desktop-build.yml`(GitHub Actions macOS runner)→ Mac job success(单 job 完即出 artifact,~12-16min)→ `gh run download` 拉 `StarsAlign Studio_0.1.0_aarch64.dmg`(299.9MB · Apple Silicon)到 Downloads。未签名(右键打开绕 Gatekeeper)。
+- ✅ **「在 Chrome 启动系统」两次**:`infra:up` 起容器 + preview dev(web+worker :3000)→ 登录页/工作台正常、footer connected、客户端零 console 错误。第二次开工 db:sync 撞 PG 启动窗口期(ECONNREFUSED),`infra:up` 后补跑通。
+- ✅ **拆解「应用」失败修复(用户报 Failed to fetch)**:根因 = dev server 死了(`:3000` 实测 dead)、请求打空气;applyBreakdown 后端纯 DB 事务、代码本正确。**修法**:[breakdown-review-dialog.tsx](apps/web/app/[locale]/(workspace)/projects/[id]/director/storyboard/breakdown-review-dialog.tsx)「应用」改**分批发送(每 25 条)+ 部分成功可见 + 后端按名去重幂等可安全重试 + `Failed to fetch` 翻人话**;刻意不加 hook 保 Fast Refresh 不丢草稿。typecheck 16/16,资产区实落 **25 人物**,链路通。
+- ✅ **风格 prompt 深度优化(用户指令 · 调研后重写)**:[seed.ts](packages/db/prisma/seed.ts) 三内置风格定向重写 —— **2D 动漫→日本动漫**(赛璐璐 cel-shading/手绘线稿/京阿尼·ufotable·扳机社/逆光描边)· **3D 国漫→CG 游戏**(原神/崩铁/Arcane + 卡通渲染 NPR + 人工 SSS + shadow ramp + UE5,替旧皮克斯/迪士尼)· **AI 真人→细节强化**(毛孔/绒毛/瑕疵/SSS 通透肤质/85mm·f1.8/伦勃朗·黄金时刻/RAW/胶片颗粒,负面加塑料感·蜡像·过度磨皮)。**内置风格纳入 `FORCE_PROMPTS`**(`db:sync:prompts` 强更 + 跨机传播);本机已 `db:sync:prompts` 应用 + DB 回查逐字核对 + `@ss/db` typecheck 绿。
+- ✅ **全链路验证**:typecheck 16/16 · 测试 adapters 59 / core 277(+2skip)/ api·queue·i18n 全过(turbo 12/12)· app 工作台渲染正常零 console 错误。
+
+**问题/待决策**
+- ❓ dev server 为何会死:疑 preview 工具生命周期回收(`preview_list` 查出空)或拆解重负载 → **建议本机 dev server 自己终端起 `pnpm dev`**,别依赖 preview 工具,免再被回收。
+- ❓ 服务端 timeout/Retrying 根源仍未查(本轮启动未复现、日志干净)。
+- ❓ 风格跨机:mac-mini/mac-studio 需各自跑 `pnpm db:sync:prompts` 才同步新内置风格(普通 db:sync 不动风格)。
+
+**下次接着做**
+- 📌 真打验证新三风格出图效果(花钱项)+ 既有主线(真打 4 项 / UI 批④ admin / relay group_id)
+- 📌 19 个依赖 major 升级按 TODO「依赖升级审计」分批做(ioredis+bullmq 成对升)
+
+---
+
 ## 2026-06-12(周五,win-laptop · 开工同步 + 完整环境拉起 + embedded-pg白名单修 + 依赖升级审计暂缓)
 
 **完成**

@@ -17,8 +17,9 @@ async function main() {
   //   无此 flag(pnpm db:seed)= 全量初始化(新机首次,覆盖式),行为不变。
   const ADDITIVE = process.env.SEED_ADDITIVE === '1';
   // 四九收工:增量模式下额外强更 prompt 正文(prompt 是可改进的默认值,改进应能传播)。
-  //   仅影响 prompt_templates 的 content/name/description,不碰 binding 值 / 各机配置。
-  //   ⚠️ 会覆盖 admin 在 /admin/prompts 手动编辑过的正文 —— 故需显式开启(db:sync:prompts)。
+  //   影响 prompt_templates 的 content/name/description + 内置风格 StyleProfile 三段 prompt/禁用词,
+  //   不碰 binding 值 / 各机配置。
+  //   ⚠️ 会覆盖 admin 在 /admin/prompts、/admin/styles 手动编辑过的正文 —— 故需显式开启(db:sync:prompts)。
   const FORCE_PROMPTS = process.env.SEED_FORCE_PROMPTS === '1';
   console.log(
     ADDITIVE
@@ -33,30 +34,30 @@ async function main() {
       slug: 'ai_real',
       name: 'AI 真人',
       kind: StyleKind.AI_REAL,
-      characterPrompt: '核心风格：照片级写实肖像，真实人类，电影级摄影，专业人像\n严格禁止：动漫、卡通、插画、三维渲染、计算机生成图像、三维动画、绘画、素描、错误解剖、变形',
-      scenePrompt: '核心风格：照片级写实，真实环境，电影级摄影，8K 超清\n严格禁止：动漫、卡通、插画、三维渲染、计算机生成图像、三维动画、绘画、素描、错误解剖、变形',
-      propPrompt: '核心风格：照片级写实，真实环境，电影级摄影，8K 超清\n严格禁止：动漫、卡通、插画、三维渲染、计算机生成图像、三维动画、绘画、素描、错误解剖、变形',
-      forbiddenWords: ['动漫', '卡通', '插画', '三维渲染', '错误解剖', '变形'],
+      characterPrompt: '核心风格：照片级写实人像，真实人类，可见毛孔与细腻皮肤纹理、面部绒毛与自然瑕疵(雀斑/细纹)，次表面散射(SSS)通透肤质，发丝级细节，85mm 人像镜头 f1.8 浅景深虚化，伦勃朗光/柔和窗光/黄金时刻，电影级调色，RAW 照片质感，专业人像摄影，8K 超清\n严格禁止：动漫、卡通、插画、三维渲染、计算机生成图像、绘画、素描、塑料感皮肤、蜡像质感、过度磨皮、错误解剖、变形',
+      scenePrompt: '核心风格：照片级写实环境，真实场景，电影级摄影，自然光/黄金时刻/体积光，丰富的材质纹理(粗糙/反射/湿润表面)，大气透视与真实景深，专业构图，电影级调色与轻微胶片颗粒，RAW 照片质感，8K 超清\n严格禁止：动漫、卡通、插画、三维渲染、计算机生成图像、绘画、素描、不真实光影、变形',
+      propPrompt: '核心风格：照片级写实道具，真实材质与工艺细节，微距/产品摄影级刻画(可见纹理/磨损/反射/指纹)，柔光箱布光，浅景深，电影级调色，RAW 照片质感，8K 超清\n严格禁止：动漫、卡通、插画、三维渲染、计算机生成图像、塑料感、不真实材质、变形',
+      forbiddenWords: ['动漫', '卡通', '插画', '三维渲染', '计算机生成图像', '绘画', '素描', '塑料感皮肤', '蜡像质感', '过度磨皮', '错误解剖', '变形'],
       isBuiltIn: true,
     },
     {
       slug: 'anim_3d',
       name: '3D 国漫',
       kind: StyleKind.ANIM_3D,
-      characterPrompt: '核心风格：高质量 3D 国漫风，皮克斯/迪士尼级别建模，电影级渲染，光线追踪，细腻面部表情\n严格禁止：照片级写实、真人、模糊、低多边形',
-      scenePrompt: '核心风格：高质量 3D 国漫场景，氛围光，景深，立体感，色彩饱和但不溢出\n严格禁止：照片写实、真人、低多边形',
-      propPrompt: '核心风格：高质量 3D 道具建模，细腻材质，PBR 渲染\n严格禁止：照片写实、低多边形',
-      forbiddenWords: ['照片写实', '真人', '低多边形'],
+      characterPrompt: '核心风格：高质量风格化 3D 角色，游戏 CG 过场动画级别(原神 / 崩坏：星穹铁道 / 双城之战 Arcane 美术)，卡通渲染 NPR，人工次表面散射(SSS)柔光皮肤，shadow ramp 分层硬边阴影，强边缘光与高光，Unreal Engine 5 实时渲染质感，干净的次世代拓扑，电影级打光与景深\n严格禁止：照片级写实、真人、2D 手绘平涂、低多边形、塑料感、扭曲崩坏',
+      scenePrompt: '核心风格：风格化 3D 游戏场景，游戏引擎实时渲染(原神 / Arcane 美术)，stylized-PBR 材质，体积光与大气雾，强氛围光与景深，色彩鲜明分层且通透，宏大的场景纵深与精致环境细节\n严格禁止：照片级写实、真人、2D 平涂、低多边形、空旷单调',
+      propPrompt: '核心风格：风格化 3D 道具，游戏资产级建模，stylized-PBR 材质(金属/布料/玉石质感)，次世代拓扑，强高光与边缘光，干净而有细节的磨损刻画\n严格禁止：照片级写实、2D 平涂、低多边形、塑料感',
+      forbiddenWords: ['照片级写实', '真人', '2D 平涂', '手绘线稿', '低多边形', '塑料感', '扭曲', '崩坏', '噪点'],
       isBuiltIn: true,
     },
     {
       slug: 'anim_2d',
       name: '2D 动漫',
       kind: StyleKind.ANIM_2D,
-      characterPrompt: '核心风格：高质量 2D 动漫风，赛璐璐上色，干净线稿，富有表现力的眼睛\n严格禁止：照片写实、3D 渲染、扭曲',
-      scenePrompt: '核心风格：动漫风场景，吉卜力级别背景，丰富细节，柔和光线\n严格禁止：照片写实、3D 渲染',
-      propPrompt: '核心风格：2D 动漫风道具，干净线条，平涂上色\n严格禁止：照片写实、3D 渲染',
-      forbiddenWords: ['照片写实', '3D 渲染', '扭曲'],
+      characterPrompt: '核心风格：高质量日本动漫(anime)人物作画，赛璐璐 cel-shading 硬边二分/三分阴影，干净且有粗细变化的手绘线稿，富有表现力的大眼睛(虹膜渐变+高光)，分组发丝带高光，通透平涂肌肤，简化的鼻唇，逆光描边(rim light)，京都动画 / ufotable / 扳机社级作画质感\n严格禁止：3D 渲染、CG 建模、照片写实、真人、厚涂油画感、低多边形、扭曲崩坏、多指畸形',
+      scenePrompt: '核心风格：日本动漫(anime)美术背景，吉卜力 / 新海诚级别手绘场景，赛璐璐平涂结合厚涂笔触，通透柔和的环境光与丁达尔光，干净的透视与丰富环境细节，胶片质感的鲜亮色彩\n严格禁止：3D 渲染、CG 建模、照片写实、真人、低多边形、透视崩坏',
+      propPrompt: '核心风格：日本动漫(anime)道具作画，干净的描边线稿，赛璐璐平涂加少量高光阴影，简洁清晰的造型，鲜明的轮廓与色块\n严格禁止：3D 渲染、CG 建模、照片写实、PBR 材质、低多边形',
+      forbiddenWords: ['3D 渲染', 'CG 建模', '照片写实', '真实人类', '厚涂油画', '低多边形', '扭曲', '崩坏', '多指', '畸形手'],
       isBuiltIn: true,
     },
   ];
@@ -65,7 +66,7 @@ async function main() {
     await prisma.styleProfile.upsert({
       where: { slug: s.slug },
       create: s,
-      update: ADDITIVE ? {} : s, // 增量:已存在不动(保留用户改过的风格)
+      update: ADDITIVE && !FORCE_PROMPTS ? {} : s, // 增量:不覆盖用户改过的风格;db:sync:prompts(FORCE_PROMPTS)强更内置风格默认值
     });
   }
   console.log(`    ✓ ${styles.length} 个风格`);
