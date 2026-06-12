@@ -43,15 +43,15 @@ export function pickAssetMediaId(
     return asset.portraitMediaId ?? asset.threeViewMediaId ?? asset.mainMediaId;
   }
   if (asset.type === 'SCENE') {
-    // 七二第八波:九宫格(threeView)为场景主资产优先;主视角等下线槽位降为旧数据兜底
+    // 用户定调(反转七二第八波):360° 全景(panorama)为场景主资产优先;九宫格/主视角等降为旧数据兜底
     return (
-      asset.threeViewMediaId ??
+      asset.panoramaMediaId ??
       asset.sceneMainMediaId ??
       asset.sceneFrontMediaId ??
       asset.sceneLeftMediaId ??
       asset.sceneRightMediaId ??
       asset.sceneBackMediaId ??
-      asset.panoramaMediaId ??
+      asset.threeViewMediaId ??
       asset.mainMediaId
     );
   }

@@ -43,6 +43,8 @@ export const bindingsProcedures = {
             alias: true,
             description: true,
             portraitMediaId: true,
+            panoramaMediaId: true,
+            threeViewMediaId: true,
             sceneMainMediaId: true,
             mainMediaId: true,
             voiceMediaId: true,
@@ -59,7 +61,7 @@ export const bindingsProcedures = {
       // 一次性查所有相关 media,UI 卡片显示缩略
       const mediaIds = new Set<string>();
       for (const a of assets) {
-        for (const id of [a.portraitMediaId, a.sceneMainMediaId, a.mainMediaId, a.voiceMediaId]) {
+        for (const id of [a.portraitMediaId, a.panoramaMediaId, a.threeViewMediaId, a.sceneMainMediaId, a.mainMediaId, a.voiceMediaId]) {
           if (id) mediaIds.add(id);
         }
       }
@@ -74,11 +76,15 @@ export const bindingsProcedures = {
       return assets.map((a) => {
         const thumb = a.portraitMediaId
           ? mediaMap.get(a.portraitMediaId)
-          : a.sceneMainMediaId
-            ? mediaMap.get(a.sceneMainMediaId)
-            : a.mainMediaId
-              ? mediaMap.get(a.mainMediaId)
-              : null;
+          : a.panoramaMediaId // 用户定调:场景自动关联缩略=360°全景优先(再兜底九宫格/旧主视角/main)
+            ? mediaMap.get(a.panoramaMediaId)
+            : a.threeViewMediaId
+              ? mediaMap.get(a.threeViewMediaId)
+              : a.sceneMainMediaId
+                ? mediaMap.get(a.sceneMainMediaId)
+                : a.mainMediaId
+                  ? mediaMap.get(a.mainMediaId)
+                  : null;
         return {
           id: a.id,
           type: a.type,

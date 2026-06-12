@@ -70,12 +70,12 @@ export function AssetCard({ asset, heroUrl, bindings, onClick }: Props): React.R
       }));
   }, [bindings]);
 
-  // 主形象 — 9:16 用 portrait,场景用 九宫格(threeView,旧数据兜底 sceneMain/main),道具用 main
+  // 主形象 — 9:16 用 portrait,场景用 360°全景(panorama,旧数据兜底九宫格/sceneMain/main),道具用 main
   const heroMediaId =
     asset.type === 'CHARACTER'
       ? asset.portraitMediaId
       : asset.type === 'SCENE'
-        ? asset.threeViewMediaId ?? asset.sceneMainMediaId ?? asset.mainMediaId
+        ? asset.panoramaMediaId ?? asset.threeViewMediaId ?? asset.sceneMainMediaId ?? asset.mainMediaId
         : asset.mainMediaId;
 
   // 卡片比例 — 人物 9:16,场景/道具 16:9
@@ -252,16 +252,16 @@ function MaturityChips({ asset }: { asset: AssetBrief }): React.ReactElement {
       chips.push({ label: '声音已关联', tone: 'success' });
     }
   } else if (asset.type === 'SCENE') {
-    // 七二第八波:场景收敛为 九宫格(threeViewMediaId,主资产)/ 360° 全景;主视角已下线
-    chips.push(
-      asset.threeViewMediaId
-        ? { label: '九宫格已完成', tone: 'success' }
-        : { label: '九宫格未完成', tone: 'warn' },
-    );
+    // 用户定调:场景主资产=360°全景(panorama)放前作主;九宫格(threeView)次要;主视角已下线
     chips.push(
       asset.panoramaMediaId
         ? { label: '全景已完成', tone: 'success' }
         : { label: '全景未完成', tone: 'warn' },
+    );
+    chips.push(
+      asset.threeViewMediaId
+        ? { label: '九宫格已完成', tone: 'success' }
+        : { label: '九宫格未完成', tone: 'warn' },
     );
   } else {
     chips.push(

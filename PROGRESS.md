@@ -5,6 +5,25 @@
 
 ---
 
+## 2026-06-12(周五,win-laptop · 三轮:美术上传/预览修复 + 场景工作流 360°设为主)
+
+**完成**
+- ✅ **美术工坊上传图「无法预览」修复(用户报)**:根因 = 多处前端 `cdnUrl ?? storageKey` —— 上传图(PROJECT scope)`cdnUrl=null` 回退**裸 storageKey**(非 URL)→ `<img>` 404 全黑;后端 `asset-crud` 的 mediaMap 没签名(而 `media.list`/素材库早签了所以正常)。**修法**:抽 [media-url.ts](packages/api/src/utils/media-url.ts) `resolveMediaPreviewUrl`(cdnUrl 优先,否则现签 MinIO signed URL,external/placeholder 兜底)+ asset-crud `list`/`get` mediaMap 补 `previewUrl` + 前端 3 个 mediaMap 显示点(confirmed 槽位 / generation 槽位+参考 / 卡片 hero)改用 `previewUrl ?? cdnUrl ?? null` 绝不回退裸 storageKey。typecheck 16/16。
+- ✅ **图生图「基于上传图重生」链路确认本就通**:[openai-compat-image.ts:271](packages/adapters/provider/openai-compat-image.ts#L271) `/images/edits` 是**服务端 fetch 参考图取字节 → multipart 送 moyu**(refImageBuffers 死字段),服务端能拉 localhost MinIO、moyu 收字节非 URL → 无 localhost 问题。用户「感觉没生效」实为参考图**预览坏**(=上条 bug),已随之修复。
+- ✅ **场景工作流反转:360° 全景设为场景主资产(用户指令,反转七二第八波)**:360° 全景=主(展示图 + AIGC 默认关联 + 面板左侧),九宫格降次要(右侧);生成依赖反转(用户选「360° 直生、九宫格以它为参考」)。**12+ 改动点 / 7 文件**:`pickAssetMediaId` 场景优先 panorama · `computeMaturity` L3=360°/L4=九宫格互换 · `PRIMARY_SLOT.SCENE`=panorama · slot tabs [360°, 九宫格] · 生成面板参考链反转(autoRef/状态条/守卫/info 文案)· 资产卡 hero+网格 hero+缺主图+chip 全优先 360° · AIGC 关联缩略(aigc-bindings 补 panorama 优先)。schema 无需改。typecheck 16/16 · 重命名零残留 · HMR 无错。
+- ✅ 方法论:两轮 Explore agent 并行映射(上传链路 / 场景工作流)精确定位改动点 + 直读交叉验证。
+
+**问题/待决策**
+- ❓ 候选卡(生成结果)仍走 `cdnUrl`(生成图已填)预览,未动;日后若出现 cdnUrl-null 生成图需扩 listCandidates 也返 previewUrl。
+- ❓ signed previewUrl 有效期 3600s(同 media.list);页面开 >1h 需刷新重签。
+- ❓ 场景反转后:存量旧场景(七二第八波以九宫格为主图)hero 优先找 panorama、缺则兜底九宫格 —— 旧数据不丢,需用户视情补 360°。
+
+**下次接着做**
+- 📌 真打验证:上传预览 / 图生图重生 / 360° 场景出图 / AIGC 关联 360°(花钱项)
+- 📌 既有主线 + 19 依赖 major 升级(TODO「依赖升级审计」)
+
+---
+
 ## 2026-06-12(周五,win-laptop · 二轮:最新 Mac 包 + 拆解应用修复 + 风格 prompt 深度优化)
 
 **完成**

@@ -44,7 +44,7 @@ const TYPES: Array<{ value: AssetType; label: string; icon: React.ElementType }>
 // 各类型「主图」槽位 — 同步生成 / 缺图判定用(对齐网格 hero 取图逻辑)
 const PRIMARY_SLOT: Record<AssetType, Slot> = {
   CHARACTER: 'portrait',
-  SCENE: 'three_view',
+  SCENE: 'panorama', // 用户定调:场景主资产=360°全景(反转七二第八波的九宫格)
   PROP: 'main',
   STYLE_REFERENCE: 'main',
 };
@@ -133,7 +133,7 @@ export function ArtWorkspace({ projectId, locale, initialType }: Props): React.R
           a.type === 'CHARACTER'
             ? a.portraitMediaId
             : a.type === 'SCENE'
-              ? a.threeViewMediaId
+              ? a.panoramaMediaId
               : a.mainMediaId;
         return !hero;
       })
@@ -463,10 +463,10 @@ export function ArtWorkspace({ projectId, locale, initialType }: Props): React.R
                       a.type === 'CHARACTER'
                         ? a.portraitMediaId
                         : a.type === 'SCENE'
-                          ? a.threeViewMediaId ?? a.sceneMainMediaId ?? a.mainMediaId
+                          ? a.panoramaMediaId ?? a.threeViewMediaId ?? a.sceneMainMediaId ?? a.mainMediaId
                           : a.mainMediaId;
                     const heroUrl = heroMediaId
-                      ? mediaMap[heroMediaId]?.cdnUrl ?? mediaMap[heroMediaId]?.storageKey
+                      ? mediaMap[heroMediaId]?.previewUrl ?? mediaMap[heroMediaId]?.cdnUrl ?? null
                       : null;
                     return (
                       <AssetCard

@@ -160,18 +160,21 @@ export function GenerationPanel({
     (mediaId: string | null): string | null => {
       if (!mediaId) return null;
       const m = (
-        asset as { mediaMap?: Record<string, { cdnUrl?: string | null; storageKey: string }> }
+        asset as {
+          mediaMap?: Record<string, { cdnUrl?: string | null; storageKey: string; previewUrl?: string | null }>;
+        }
       ).mediaMap?.[mediaId];
-      return m?.cdnUrl ?? m?.storageKey ?? null;
+      // previewUrl = 后端签好的可访问 URL(上传图 cdnUrl=null,绝不能回退裸 storageKey)
+      return m?.previewUrl ?? m?.cdnUrl ?? null;
     },
     [asset],
   );
   const portraitUrl = slotMediaUrl(asset.portraitMediaId);
-  const sceneGridUrl = slotMediaUrl(asset.threeViewMediaId);
+  const panoramaUrl = slotMediaUrl(asset.panoramaMediaId);
 
   // 自动参考链(六七人物 + 六八场景,同一逻辑):切槽位时重置参考区防泄漏,
   //   上游槽位已确认 → 自动以它为参考(图生图);用户可手动移除 → 回退从设定生成。
-  //   人物:形象 → 三视图;场景:主视角 → 九宫格,九宫格 → 360° 全景。
+  //   人物:形象 → 三视图;场景:360° 全景(主)→ 九宫格(次,以全景为参考)。
   React.useEffect(() => {
     setRefPreviews((prev) => {
       for (const u of Object.values(prev)) {
@@ -188,8 +191,8 @@ export function GenerationPanel({
     const applied =
       selectedSlot === 'three_view' && type === 'CHARACTER'
         ? autoRef(asset.portraitMediaId, portraitUrl)
-        : selectedSlot === 'panorama' && type === 'SCENE'
-          ? autoRef(asset.threeViewMediaId, sceneGridUrl)
+        : selectedSlot === 'three_view' && type === 'SCENE'
+          ? autoRef(asset.panoramaMediaId, panoramaUrl) // 九宫格(次)以 360°全景(主)为参考
           : false;
     if (!applied) setRefImageIds([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -198,8 +201,8 @@ export function GenerationPanel({
     type,
     asset.portraitMediaId,
     portraitUrl,
-    asset.threeViewMediaId,
-    sceneGridUrl,
+    asset.panoramaMediaId,
+    panoramaUrl,
   ]);
 
   // 当前自动参考状态(状态条 + 提示用)
@@ -207,10 +210,10 @@ export function GenerationPanel({
     selectedSlot === 'three_view' &&
     type === 'CHARACTER' &&
     refImageIds.includes(asset.portraitMediaId ?? '');
-  const panoramaFromGrid =
-    selectedSlot === 'panorama' &&
+  const threeViewFromPanorama =
+    selectedSlot === 'three_view' &&
     type === 'SCENE' &&
-    refImageIds.includes(asset.threeViewMediaId ?? '');
+    refImageIds.includes(asset.panoramaMediaId ?? '');
 
   // 需求(2026-06):图像模型默认显式选中 binding 配的默认 provider(当前 = Seedream 5.0 lite),
   //   而非停留在抽象的「默认模型(绑定)」。只初始化一次,之后用户可自由切换(含切回 "" 跟随绑定)。
@@ -263,11 +266,11 @@ export function GenerationPanel({
 
         {/* 自动参考状态条(六七人物三视图 + 六八场景九宫格/全景):走「参考图生图」还是「从设定生成」 */}
         {((selectedSlot === 'three_view' && type === 'CHARACTER') ||
-          (type === 'SCENE' && selectedSlot === 'panorama')) && (
+          (type === 'SCENE' && selectedSlot === 'three_view')) && (
           <div
             className={cn(
               'mt-2 flex items-start gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] leading-snug',
-              threeViewFromPortrait || panoramaFromGrid
+              threeViewFromPortrait || threeViewFromPanorama
                 ? 'border-[hsl(var(--color-accent)/0.4)] bg-[hsl(var(--color-accent)/0.08)] text-[hsl(var(--color-foreground))]'
                 : 'border-[hsl(var(--color-border))] text-[hsl(var(--color-muted-foreground))]',
             )}
@@ -283,14 +286,14 @@ export function GenerationPanel({
               ) : (
                 <span>人物形象尚未确认。先在「人物形象」槽位生成并确认一张形象图,三视图即可自动以它为参考生成。</span>
               )
-            ) : panoramaFromGrid ? (
+            ) : threeViewFromPanorama ? (
               <span>
-                将以<b>九宫格视图</b>为参考(图生图)生成 360° 全景,空间四面与九宫格对齐;移除参考图可改为从设定生成。图生图约 2-6 分钟。
+                将以<b>360° 全景</b>为参考(图生图)生成九宫格视图,各角度与全景空间对齐;移除参考图可改为从设定生成。图生图约 2-6 分钟。
               </span>
-            ) : asset.threeViewMediaId ? (
-              <span>当前为从设定生成(未用九宫格参考)。建议把九宫格加回参考区,全景四面与各角度更一致。</span>
+            ) : asset.panoramaMediaId ? (
+              <span>当前为从设定生成(未用全景参考)。建议把 360° 全景加回参考区,九宫格各角度与全景更一致。</span>
             ) : (
-              <span>九宫格尚未确认。先在「九宫格视图」槽位生成并确认一张,全景即可自动以它为参考生成。</span>
+              <span>360° 全景尚未确认。先在「360° 全景」槽位生成并确认一张,九宫格即可自动以它为参考生成。</span>
             )}
           </div>
         )}

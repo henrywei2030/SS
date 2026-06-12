@@ -16,6 +16,7 @@ import { z } from "zod";
 import { Prisma } from "@ss/db";
 import { asRecord } from "@ss/shared";
 import { getStorageAdapter, buildStorageKey } from "@ss/adapters/storage";
+import { resolveMediaPreviewUrl } from "../utils/media-url.js";
 import { extractVoiceLabel } from "@ss/core/asset";
 import { normalizeAudio, normalizedVoiceFilename, probeMedia, syncMediaToRelay } from "@ss/core/media";
 import {
@@ -88,8 +89,13 @@ export const crudProcedures = {
               },
             })
           : [];
-      const mediaMap: Record<string, (typeof medias)[number]> = {};
-      for (const m of medias) mediaMap[m.id] = m;
+      // 给每个 media 补签名 previewUrl(本地 dev cdnUrl 永远 null,裸 storageKey 不可访问)
+      const mediaMap: Record<string, (typeof medias)[number] & { previewUrl: string | null }> = {};
+      await Promise.all(
+        medias.map(async (m) => {
+          mediaMap[m.id] = { ...m, previewUrl: await resolveMediaPreviewUrl(m) };
+        }),
+      );
 
       return { assets, mediaMap };
     }),
@@ -126,8 +132,12 @@ export const crudProcedures = {
               },
             })
           : [];
-      const mediaMap: Record<string, (typeof medias)[number]> = {};
-      for (const m of medias) mediaMap[m.id] = m;
+      const mediaMap: Record<string, (typeof medias)[number] & { previewUrl: string | null }> = {};
+      await Promise.all(
+        medias.map(async (m) => {
+          mediaMap[m.id] = { ...m, previewUrl: await resolveMediaPreviewUrl(m) };
+        }),
+      );
 
       return Object.assign(asset, { mediaMap });
     }),

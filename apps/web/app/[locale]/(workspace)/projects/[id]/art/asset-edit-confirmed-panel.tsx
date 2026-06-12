@@ -62,9 +62,13 @@ export function ConfirmedSlotsPanel({
 
   const generalUrlOf = (mediaId: string | null): string | null => {
     if (!mediaId) return null;
-    const m = (asset as { mediaMap?: Record<string, { cdnUrl?: string | null; storageKey: string }> })
-      .mediaMap?.[mediaId];
-    return m?.cdnUrl ?? m?.storageKey ?? null;
+    const m = (
+      asset as {
+        mediaMap?: Record<string, { cdnUrl?: string | null; storageKey: string; previewUrl?: string | null }>;
+      }
+    ).mediaMap?.[mediaId];
+    // previewUrl = 后端签好的可访问 URL(上传图 cdnUrl=null,绝不能回退裸 storageKey)
+    return m?.previewUrl ?? m?.cdnUrl ?? null;
   };
 
   // 某集模式只显示可换装槽位(portrait/three_view);通用模式显示全部。

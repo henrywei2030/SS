@@ -240,7 +240,7 @@ export function computeMaturity(asset: {
     asset.type === 'CHARACTER'
       ? !!asset.portraitMediaId
       : asset.type === 'SCENE'
-        ? !!asset.threeViewMediaId || !!asset.mainMediaId // 七二第八波:场景主资产=九宫格(threeView)
+        ? !!asset.panoramaMediaId || !!asset.mainMediaId // 用户定调:场景主资产=360°全景(panorama)
         : !!asset.mainMediaId;
 
   if (!hasMain) return 'L1_PROMPT_READY';
@@ -249,7 +249,7 @@ export function computeMaturity(asset: {
     asset.type === 'CHARACTER'
       ? true // 七二第九波:人物三视图已并入「主体形象」一张图,有主图(L3)即达一致性(L4)
       : asset.type === 'SCENE'
-        ? !!asset.panoramaMediaId // 七二第八波:场景一致性=360°全景(主视角/单视角槽位下线)
+        ? !!asset.threeViewMediaId // 用户定调:主资产改 360°全景后,一致性=九宫格(次要视角)
         : true; // 道具 / 风格只要主图即可
 
   if (!consistencyReady) return 'L3_MAIN_CONFIRMED';
