@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-06-12(周五,win-laptop · 四轮:AIGC 上传图识别修 + Seedance 链路深诊 + pnpm start 排障)
+
+**完成**
+- ✅ **AIGC 上传图未识别(「缺主图」)修复(用户报)**:和上传预览同一类根因 —— AIGC 的 [getGroupDetail](packages/api/src/routers/aigc-overview.ts) 与 [listAvailableAssets](packages/api/src/routers/aigc-bindings.ts) 用**裸 cdnUrl** 解析图,上传图 cdnUrl=null → URL=null → compile 判「缺主图」、缩略图空。**修法**:两处改用项目已有的 `resolveMediaFetchUrl`(cdnUrl/外链/签名 storageKey,submit.ts 首帧早用它)。上传图现被识别、缩略正常、生成时正常附带参考。typecheck @ss/api 过。
+- ✅ **Seedance 视频「moyu 后台无调用」深度诊断(用户报)**:逐层查清 ——
+  - **网络全正常**:`www.moyu.info:443` PowerShell TCP 通、**全新 node fetch CONNECT OK 401·1.1s**、DNS 纯 IPv4、无代理。
+  - **根因 = worker 常驻 undici Agent 被拖垮**:seedance adapter 用模块级 `seedanceDispatcher`(16 连接 keep-alive,[seedance.ts:22](packages/adapters/provider/seedance.ts#L22));连点视频致 worker **并发 6 组** + 一堆失败请求(Headers Timeout 恶化成 Connect Timeout),连接池堆满半死连接 → 新 POST 60s 连接超时、根本没到 moyu → 不计费 → 后台空白。**文本走 web 进程另一 dispatcher 没被拖垮 → 正常计费**。这就是「文本有、视频没有」的真相。
+  - **UI「生成中 42%」是假进度**(按 已等/预计 估),实为反复失败重试。
+  - 上传图作视频参考受 **localhost MinIO moyu 够不到** 限制(此组用生成图已规避)。
+- ✅ **`pnpm start` 启动排障(用户报)**:实测 `pnpm start` **本身正常**(preflight 全绿 / migration / turbo dev 启 / web 绑 :3000);pnpm shim 在 CMD/PS/Bash 都齐(`pnpm`/`.CMD`/`.ps1` 在 nodejs 目录 + npm 全局)→ **非 PATH 问题**。真因 = 我托管的 dev server 占 :3000 → start.mjs graceful 跳过启动。已腾空 :3000/:9200,用户可自起(全新 worker 顺带清掉 Seedance 拖垮的连接池)。
+
+**问题/待决策**
+- ❓ **Seedance 根治(真打项)**:给 seedanceDispatcher 加**失败自愈**(连续失败重建 Agent)+ 收紧视频并发(别同时 6 组);worker 跑久建议定期重启。
+- ❓ 上传图作视频参考:需 relay 同步(asset:// moyu 可达 URL),且依赖稳定 moyu 连接 —— 后续真打。
+- ❓ 两份 pnpm(corepack shim + npm 全局)冗余,非必须清。
+
+**下次接着做**
+- 📌 用户自起 `pnpm start`(全新 worker)→ 真打验证视频生成是否恢复
+- 📌 既有主线 + 依赖 major 升级(TODO「依赖升级审计」)
+
+---
+
 ## 2026-06-12(周五,win-laptop · 三轮:美术上传/预览修复 + 场景工作流 360°设为主)
 
 **完成**

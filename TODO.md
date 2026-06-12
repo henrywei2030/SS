@@ -1,7 +1,7 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-06-12(**win-laptop 三轮**:美术上传图预览修复(签名 previewUrl)+ 场景工作流反转(360° 全景设为场景主资产/展示图/AIGC默认,九宫格降次)· 详见 [PROGRESS](PROGRESS.md))
-> 上一版:2026-06-12(win-laptop 二轮:最新 Mac 包 + 拆解应用分批修复 + 风格 prompt 深度优化)
+> 最后更新:2026-06-12(**win-laptop 四轮**:AIGC 上传图识别修(签名 URL)+ Seedance 链路深诊(worker 连接池拖垮根因)+ pnpm start 排障(:3000 占用,非脚本/PATH 问题)· 详见 [PROGRESS](PROGRESS.md))
+> 上一版:2026-06-12(win-laptop 三轮:美术上传图预览修复 + 场景工作流反转 360°设为主)
 > 仓库:https://github.com/henrywei2030/SS
 > **🚀 一键启动**:`pnpm start`(详见 [README.md](README.md#快速启动) / [CLAUDE.md](CLAUDE.md#设备登记))
 > **📖 主线蓝图**:[docs/06-feature-plan-2026H2.md](docs/06-feature-plan-2026H2.md)(M0–M6 可直接 coding;2026-06-10 mac-mini 逐项核对与代码一致)
@@ -11,6 +11,7 @@
 
 ## 🚧 进行中
 
+- [x] **🎬 AIGC 上传图识别修 + Seedance 链路深诊 + pnpm start 排障(2026-06-12 win-laptop 四轮)· 用户报**:① AIGC「缺主图」修 — aigc-overview/aigc-bindings 改用 `resolveMediaFetchUrl` 签名(上传图 cdnUrl=null 不再判缺图、缩略正常);② Seedance「moyu 无调用」根因 = **worker 常驻 seedanceDispatcher 被并发失败请求拖垮**(全新进程连 moyu 1.1s OK、跑久 worker 60s 超时),非网络/代码;UI「生成中42%」是假进度;③ pnpm start 本身正常,失败因 :3000 被占 graceful skip,已腾空。**留真打**:seedanceDispatcher 失败自愈 + 视频并发收紧 + 上传图 relay 同步
 - [x] **🖼️ 美术上传图「无法预览」修复(2026-06-12 win-laptop)· 用户报**:根因前端多处 `cdnUrl ?? storageKey`,上传图 cdnUrl=null 回退裸 storageKey 致 `<img>` 404。修:抽 media-url.ts `resolveMediaPreviewUrl`(签名 MinIO URL,复用 media.list 机制)+ asset-crud mediaMap 补 previewUrl + 前端 3 显示点改用 previewUrl。图生图重生链路确认本就通(服务端 fetch 参考图字节送 moyu)。typecheck 16/16。**留**:候选卡 cdnUrl-null 边角 / signed url 3600s
 - [x] **🏞️ 场景工作流反转:360° 全景设为场景主资产(2026-06-12 win-laptop)· 用户指令**:反转七二第八波(九宫格为主)→ 360° 全景=主(展示图+AIGC默认+面板左侧)、九宫格次(右);生成依赖反转(360°直生·九宫格参考它)。12+ 点/7 文件:pickAssetMediaId/maturity/PRIMARY_SLOT/slot顺序/参考链反转/hero/chip/AIGC缩略全改。schema 无需改。typecheck 16/16。**留**:存量旧场景需视情补 360°
 - [x] **🔧 拆解「应用」分批修复(2026-06-12 win-laptop)· 用户报 Failed to fetch**:根因 = dev server 死了致请求打空气(applyBreakdown 后端纯 DB 事务、代码本正确)。修:breakdown-review-dialog「应用」改**分批发送(每 25 条)+ 部分成功可见 + 后端按名去重幂等可安全重试 + Failed to fetch 翻人话**;不加 hook 保 Fast Refresh 不丢草稿。typecheck 16/16、资产区实落 25 人物。**留**:dev server 死因(疑 preview 工具回收)→ 建议本机 `pnpm dev` 自起

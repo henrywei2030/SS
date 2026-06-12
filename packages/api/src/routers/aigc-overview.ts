@@ -5,6 +5,7 @@
 import { z } from 'zod';
 
 import { pickAssetMediaId } from '@ss/core/asset';
+import { resolveMediaFetchUrl } from '@ss/core/media';
 import { kindFromUsage } from '@ss/core/storyboard';
 import { ASPECT_RATIOS, type AspectRatio } from '@ss/shared/constants';
 
@@ -265,26 +266,30 @@ export const overviewProcedures = {
       //    CHARACTER → portrait → threeView → main
       //    SCENE → sceneMain → sceneFront → sceneLeft → sceneRight → sceneBack → panorama → main
       //    PROP/STYLE → main
-      const bindingsWithMedia = bindings.map((b) => {
-        const a = b.asset;
-        const chosenMediaId = pickAssetMediaId(a, kindFromUsage(b.usageType));
-        const media = chosenMediaId ? mediaMap.get(chosenMediaId) : null;
-        return {
-          ...b,
-          mediaUrl: media?.cdnUrl ?? null,
-          kind: kindFromUsage(b.usageType),
-          // 六八下(关联即全喂):人物可投喂文件清单(形象/三视图/声音)— UI 文件 chips,
-          // 有才显示;生成时这三类全部自动作为参考资源送出(compile characterImageRefs/voiceRefs)
-          files:
-            a.type === 'CHARACTER'
-              ? {
-                  portrait: !!a.portraitMediaId,
-                  threeView: !!a.threeViewMediaId,
-                  voice: !!a.voiceMediaId,
-                }
-              : null,
-        };
-      });
+      const bindingsWithMedia = await Promise.all(
+        bindings.map(async (b) => {
+          const a = b.asset;
+          const chosenMediaId = pickAssetMediaId(a, kindFromUsage(b.usageType));
+          const media = chosenMediaId ? mediaMap.get(chosenMediaId) : null;
+          return {
+            ...b,
+            // 用 resolveMediaFetchUrl(cdnUrl/外链/签名 storageKey)而非裸 cdnUrl ——
+            // 上传图 cdnUrl=null 时签名取 URL,不再被误判「缺主图」、生成时也能正常附带为参考
+            mediaUrl: media ? await resolveMediaFetchUrl(media) : null,
+            kind: kindFromUsage(b.usageType),
+            // 六八下(关联即全喂):人物可投喂文件清单(形象/三视图/声音)— UI 文件 chips,
+            // 有才显示;生成时这三类全部自动作为参考资源送出(compile characterImageRefs/voiceRefs)
+            files:
+              a.type === 'CHARACTER'
+                ? {
+                    portrait: !!a.portraitMediaId,
+                    threeView: !!a.threeViewMediaId,
+                    voice: !!a.voiceMediaId,
+                  }
+                : null,
+          };
+        }),
+      );
 
       // 项目 aspect 白名单校验(老项目 DB 字段是 String,可能有非标准值)
       const projectAspect: AspectRatio =

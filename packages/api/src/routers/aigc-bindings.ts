@@ -5,6 +5,8 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 
+import { resolveMediaFetchUrl } from '@ss/core/media';
+
 import { protectedProcedure } from '../trpc.js';
 import { logOperation } from '../middleware/audit.js';
 import { isEpisodeLockedNow } from '../utils/episode-lock.js';
@@ -69,34 +71,36 @@ export const bindingsProcedures = {
         mediaIds.size > 0
           ? await ctx.prisma.mediaItem.findMany({
               where: { id: { in: Array.from(mediaIds) } },
-              select: { id: true, cdnUrl: true },
+              select: { id: true, cdnUrl: true, storageKey: true },
             })
           : [];
-      const mediaMap = new Map(medias.map((m) => [m.id, m.cdnUrl]));
-      return assets.map((a) => {
-        const thumb = a.portraitMediaId
-          ? mediaMap.get(a.portraitMediaId)
-          : a.panoramaMediaId // 用户定调:场景自动关联缩略=360°全景优先(再兜底九宫格/旧主视角/main)
-            ? mediaMap.get(a.panoramaMediaId)
-            : a.threeViewMediaId
-              ? mediaMap.get(a.threeViewMediaId)
-              : a.sceneMainMediaId
-                ? mediaMap.get(a.sceneMainMediaId)
-                : a.mainMediaId
-                  ? mediaMap.get(a.mainMediaId)
-                  : null;
-        return {
-          id: a.id,
-          type: a.type,
-          name: a.name,
-          alias: a.alias,
-          description: a.description,
-          maturity: a.maturity,
-          complianceStatus: a.complianceStatus,
-          thumbnailUrl: thumb ?? null,
-          alreadyBound: boundSet.has(a.id),
-        };
-      });
+      const mediaMap = new Map(medias.map((m) => [m.id, m]));
+      return Promise.all(
+        assets.map(async (a) => {
+          // 缩略图优先级:人物=形象;场景=360°全景优先(再兜底九宫格/旧主视角/main);道具=main
+          const tmId =
+            a.portraitMediaId ??
+            a.panoramaMediaId ??
+            a.threeViewMediaId ??
+            a.sceneMainMediaId ??
+            a.mainMediaId ??
+            null;
+          const tm = tmId ? mediaMap.get(tmId) : null;
+          // 用 resolveMediaFetchUrl(cdnUrl/外链/签名 storageKey)而非裸 cdnUrl —— 上传图 cdnUrl=null 也能出缩略
+          const thumb = tm ? await resolveMediaFetchUrl(tm) : null;
+          return {
+            id: a.id,
+            type: a.type,
+            name: a.name,
+            alias: a.alias,
+            description: a.description,
+            maturity: a.maturity,
+            complianceStatus: a.complianceStatus,
+            thumbnailUrl: thumb ?? null,
+            alreadyBound: boundSet.has(a.id),
+          };
+        }),
+      );
     }),
 
   /**
