@@ -651,7 +651,7 @@ export function VideoPreviewSection({
         if (pair.length < 2) return null;
         const bothDone = pair.every((t) => t.status === 'SUCCESS' || t.status === 'FAILED');
         const provName = (pid: string): string =>
-          videoProviders?.find((p) => p.providerId === pid)?.displayName ?? pid.replace(/^moyu-/, '');
+          videoProviders?.find((p) => p.providerId === pid)?.displayName ?? pid.replace(/^[a-z0-9]+-/i, '');
         return (
           <div className="mt-3 rounded-md border border-purple-500/40 bg-purple-500/5 p-2">
             <div className="mb-1.5 flex items-center justify-between text-[11px] font-medium text-purple-700 dark:text-purple-300">

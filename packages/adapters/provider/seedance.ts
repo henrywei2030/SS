@@ -329,7 +329,16 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
         ratio: req.aspectRatio,
         aspect_ratio: req.aspectRatio,
       };
-      if (req.refImageUrls?.length) body.images = req.refImageUrls; // docs §14:images 数组
+      // images 数组(happyhorse/wan r2v 等):文档(happyhorse r2v)写「HTTP/HTTPS 或 base64」,
+      //   这里的 base64 = 裸 base64 串(无 data:<mime>;base64, 前缀)。我们的生成图存成 data: URL,
+      //   直接塞进去 moyu 会把它【当 URL 去下载】→ data: 下不动 → 卡 47-120s → ECONNRESET(实测)。
+      //   故对 data: URL 剥前缀转裸 base64,http(s) 公网 URL 原样保留。
+      //   (seedance-2.0 走 image_url 内联格式、不经本分支,base64 直接可用,不受影响。)
+      if (req.refImageUrls?.length) {
+        body.images = req.refImageUrls.map((u) =>
+          /^data:/i.test(u) ? u.slice(u.indexOf(',') + 1) : u,
+        );
+      }
       if (req.firstFrameUrl) body.first_frame_image = req.firstFrameUrl;
       if (req.lastFrameUrl) body.last_frame_image = req.lastFrameUrl;
       if (req.seed !== undefined) body.seed = req.seed;
@@ -380,7 +389,7 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
     if (needsRefMedia && !hasRefMedia) {
       throw new ProviderError(
         this.info.id,
-        `模型 ${modelId} 为「${modelId.toLowerCase().includes('r2v') ? 'R2V 参考生视频' : 'I2V 图生视频'}」,必须至少提供一张参考图 — 请在生成段绑定人物/场景形象图(且确保该图可被中转站访问),或改用文生视频(t2v)模型。`,
+        `模型 ${modelId} 为「${modelId.toLowerCase().includes('r2v') ? 'R2V 参考生视频' : 'I2V 图生视频'}」,必须至少提供一张中转站可用的参考图,但本次 0 张 — 参考图存在本机 localhost 存储(中转站够不到、已过滤;生成图的 base64 是可用的,请确认本组关联了形象图),或改用文生视频(t2v)模型。`,
       );
     }
 

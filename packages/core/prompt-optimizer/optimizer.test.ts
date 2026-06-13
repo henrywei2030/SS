@@ -89,11 +89,13 @@ function fixtureCtx(partial?: Partial<OptimizeContext>): OptimizeContext {
 }
 
 describe('extractAtTokens / findLostTokens(核心护栏)', () => {
-  it('提取中英数 token,去重保序', () => {
-    expect(extractAtTokens('a @图片1 b @音频2 c @图片1 @ref-3')).toEqual([
+  it('只提取 @图片N/@音频N(与编译器 video.ts 同源),数字边界即止 + 去重保序', () => {
+    // 2026-06-13 修真 bug:@图片1 后紧跟中文(无空格)只取 @图片1,不吞成「@图片1虚化」;
+    //   @ref-3 / @苏然 等非编译 token 不提取(编译器只解析 @图片N/@音频N)。
+    expect(extractAtTokens('a @图片1虚化 b @音频2 c @图片1 @ref-3 @苏然@图片3')).toEqual([
       '@图片1',
       '@音频2',
-      '@ref-3',
+      '@图片3',
     ]);
   });
 

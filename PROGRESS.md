@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-06-13(周六,win-laptop · happyhorse 链路深诊 + Provider 删除放开 + 去moyu化 + 优化器 token 真 bug)
+
+**完成**
+- ✅ **优化器深度优化「恒挂」真 bug 修复(用户报「还是失败」· 检查三遍)**:✨✨深度优化总撞 TOKEN_LOST/HARD_GATE 被拒,根因**不是 LLM 丢 token**,是守卫 [guards.ts](packages/core/prompt-optimizer/guards.ts) 的 token 正则 `@[一-龥A-Za-z0-9_-]+` **贪婪**,把 `@图片N` 后紧跟的中文描述吞成假 token(实测组 33-35:`@图片1虚化`/`@图片6钥匙`/`@图片1与雪山虚化成清透冷调光斑` 等 5 个假 token)→ 优化重写描述后必「丢失」→ findLostTokens 误报。修:对齐编译器 [video.ts:288](packages/core/storyboard/video.ts#L288) 的 `/@(图片|音频)\d+/`(数字边界即止)。**系统级修复**——几乎所有 token 密集提示词的深度优化此前都恒挂,不止 33-35。prompt-optimizer 测试 24 过(+锁死本 bug 用例)。
+- ✅ **Provider 删除「全部放开」(用户指令)**:去 3 道守卫(含 key / active / 中转站有关联模型)+ 删除自动清 key([provider.ts](packages/api/src/routers/admin/provider.ts) 去含-key 守卫)+ 新增 `invalidateProviderCache` 清进程内 5 缓存(防明文 key 残留)+ 中转站凭证级联删关联模型(不留孤儿)。前端删除按钮去 active 禁用 + 级联提示。
+- ✅ **初始零数据 + moyu 中性化第一波(用户指令)**:seed 去默认中转站占位([seed.ts](packages/db/prisma/seed.ts),新机初始零数据;老机残留 UI 手删)+ 报错文案/UI 占位符/前端 `/^moyu-/` 前缀逻辑中性化。架构本就支持换站(providerId 前缀派生自 RelayProvider.name,无写死品牌判断)。**留**:~20 处纯注释/JSDoc/文档/脚本未扫(零功能影响)+ schema.prisma 注释(需 db:generate)。
+- ✅ **happyhorse 视频链路深诊(用户报屡败)**:① 格式 — seedance 走 image_url 内联(吃 base64),happyhorse 走 images 数组(moyu 当 URL 下载,base64 卡死 ECONNRESET);② 体积 — moyu 请求体硬限 6MB / **单图 base64 硬限 61440(60KB)**。修:[resolve-url.ts](packages/core/media/resolve-url.ts) `isRelayFetchableUrl` 放行 base64(seedance 真打实证 moyu 吃 base64)+ seedance 1.x 分支送裸 base64(剥 data: 前缀)+ [process-job.ts](packages/core/video-generation/process-job.ts) 送 provider 前 ffmpeg 缩图(>400KB 的 data: 图缩 ≤1024px JPEG)。报错逐层推进 ECONNRESET→TooLarge→InvalidParameter。**留**:base64 单图 60KB 限纯本地无解;seedance 失败实为**输出端版权过滤**(豆包,客户端无开关)。
+- ✅ **DB 清理(用户授权)**:`binding.script.docx.parser` 误配模型 ID → 改回解析库 `mammoth`(库选择非 provider,红字「未注册」消除)。
+- ✅ **方法论**:两个 ultracode workflow(happyhorse 解法穷举 / de-moyu 审计 2 遍,各 6 agent)。验证:相关包 typecheck 全过 · prompt-optimizer 24 / video-generation 31 / media / provider-resolution / adapters 全过。
+
+**问题/待决策**
+- ❓ **happyhorse i2v/r2v 纯本地无解**:moyu images 要可下载 URL、base64 单图限 60KB;要真出片需公网可达存储(隧道=安全权衡需点头 / 云对象存储=配密钥)或换 t2v。seedance 又被输出端版权过滤挡(角色像受版权 IP)。
+- ❓ moyu 中性化剩余纯注释/文档/脚本(~20 处)未扫 —— 零功能影响,可选清理。
+
+**下次接着做**
+- 📌 真打验证深度优化(token 正则修复后 ✨✨是否真出八维分 + 写回)
+- 📌 happyhorse 若要真出片 → 定公网存储方案
+- 📌 剩余 moyu 注释中性化(可选)+ schema.prisma 注释 + db:generate
+
+---
+
 ## 2026-06-12(周五,win-laptop · 四轮:AIGC 上传图识别修 + Seedance 链路深诊 + pnpm start 排障)
 
 **完成**

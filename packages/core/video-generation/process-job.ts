@@ -29,6 +29,7 @@ import {
 import { EVENTS } from '@ss/shared/events';
 import { enqueueJob } from '@ss/queue/job-queue';
 import { CACHE_VIDEO_JOB_KIND } from '../media/cache-video.js';
+import { downscaleDataUrlIfLarge } from '../media/ffmpeg.js';
 import { shotTakeFilename } from '../media/naming.js';
 import {
   QC_JOB_KIND,
@@ -211,6 +212,17 @@ export async function processVideoGenJob(
   if (refVideoUrl !== undefined) extraParams.refVideoUrl = refVideoUrl;
   if (refAudioUrl !== undefined) extraParams.refAudioUrl = refAudioUrl;
 
+  // 2026-06-13(治 happyhorse「BadRequest.TooLarge max 6MB」):中转站视频模型请求体硬限 6MB,
+  //   本地 1MB+ PNG 参考图的 base64 拼进 images 数组(seedance.ts:332)必撞上限。送 provider 前把
+  //   过大的 data: 参考图缩到 ≤1024px JPEG(参考图只作身份约束,无需全分辨率;http 公网图不进 body、
+  //   原样跳过)。缩图失败降级原图照送,绝不因缩图阻断生成。
+  const refImageUrlsForGen = refImageUrls
+    ? await Promise.all(refImageUrls.map((u) => downscaleDataUrlIfLarge(u)))
+    : refImageUrls;
+  const firstFrameUrlForGen = firstFrameUrl
+    ? await downscaleDataUrlIfLarge(firstFrameUrl)
+    : firstFrameUrl;
+
   let result;
   try {
     // L5(七二):重派/重启重入且任务已在 provider 侧创建(task_id 已持久化)→ 续轮询同一
@@ -233,10 +245,10 @@ export async function processVideoGenJob(
           prompt,
           durationS,
           aspectRatio,
-          refImageUrls,
+          refImageUrls: refImageUrlsForGen,
           refAudioUrls,
           // M3a:VideoRequest 顶层字段(adapter 已消费:seedance first_frame_image 等)
-          firstFrameUrl,
+          firstFrameUrl: firstFrameUrlForGen,
           lastFrameUrl,
           ...(Object.keys(extraParams).length > 0 ? { extra: extraParams } : {}),
         },

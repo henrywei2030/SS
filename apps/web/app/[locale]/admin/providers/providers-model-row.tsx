@@ -37,8 +37,7 @@ export function ModelRow({
     },
   });
   // Phase 1.5.2:删除按钮 — 从展示界面移除,放回下拉候选(下次可重新加)
-  // 中转站模型:apiKey 在 RelayProvider 上,ProviderConfig 本身无 key → 可直接删
-  // 直连模型 + 有 key:backend 会拒,用户需先在 SetApiKey 对话框清除 Key 再删
+  // 2026-06-13(用户:所有配置可直接删):后端已去掉「含 key」「active」守卫,直接删即清 key + 缓存
   const deleteProvider = trpc.admin.provider.delete.useMutation({
     onSuccess: onChange,
     onError: (err) => alert(err.message),
@@ -176,10 +175,10 @@ export function ModelRow({
           size="sm"
           variant="ghost"
           onClick={handleDelete}
-          disabled={deleteProvider.isPending || provider.isActive}
+          disabled={deleteProvider.isPending}
           className="size-7 p-0 text-red-600 hover:text-red-700"
           aria-label="从列表移除"
-          title={provider.isActive ? '请先停用再移除' : '从列表移除(下次可从下拉重新加)'}
+          title="从列表移除(直接删除,含 key 也一并清掉)"
         >
           <Trash2 className="size-3.5" />
         </Button>

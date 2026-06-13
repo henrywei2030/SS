@@ -20,6 +20,7 @@ import {
   listProviderConfigs,
   setProviderApiKey,
   clearProviderApiKey,
+  invalidateProviderCache,
   setProviderActive,
   getTextProvider,
   getImageProvider,
@@ -158,12 +159,12 @@ const providerRouter = router({
     }),
 
   /**
-   * 删除 Provider — 仅允许 admin 自创的(非 seed 内置)
+   * 删除 Provider(2026-06-13 用户:所有配置可直接删)
    *
-   * 安全防御:
-   *   - apiKeyConfigured=true 时拒删(防误删带 token 的)
-   *   - 关联的 GenerationAttempt / CostLedgerEntry 不级联(数据保留供 audit)
-   *   - 真实场景:推荐 setActive=false 软关闭代替 delete
+   * 行为:
+   *   - 不拦「含 API Key」—— delete 整行删除即清掉 apiKeyEnc/apiKeyMasked,再失效进程缓存(防明文 key 残留)
+   *   - 删前自动把指向它的 binding.* 改绑到同 kind 其它 active provider(防 binding 悬空)
+   *   - 关联的 GenerationAttempt / CostLedgerEntry 不级联(providerId 是字符串,数据保留供 audit)
    */
   delete: adminProcedure
     .input(z.object({ providerId: z.string().max(100), confirmDelete: z.literal(true) }))
@@ -172,12 +173,6 @@ const providerRouter = router({
         where: { providerId: input.providerId },
       });
       if (!cfg) throw new TRPCError({ code: 'NOT_FOUND' });
-      if (cfg.apiKeyEnc) {
-        throw new TRPCError({
-          code: 'PRECONDITION_FAILED',
-          message: 'Provider 含 API Key,请先 clearApiKey 再 delete(防误删带 token 的)',
-        });
-      }
       // Layer A:删前先把指向它的 binding.* 自动改绑到同 kind 其它 active provider,
       //   防止删除后 binding 静默悬空 → 业务侧硬崩(根因:binding 与 ProviderConfig 无引用完整性)。
       const repointed = await repointBindingsAwayFrom(ctx.prisma, {
@@ -186,6 +181,8 @@ const providerRouter = router({
       });
       // 关联数据保留(GenerationAttempt / CostLedgerEntry 的 providerId 是字符串,不外键级联)
       await ctx.prisma.providerConfig.delete({ where: { providerId: input.providerId } });
+      // 删行已清 apiKeyEnc/apiKeyMasked;再失效进程内 provider 缓存(防解密后的明文 key 残留)
+      invalidateProviderCache(input.providerId);
       if (repointed.length > 0) {
         // binding 缓存失效(storyboard 等缓 60s),让改绑立即生效
         try {

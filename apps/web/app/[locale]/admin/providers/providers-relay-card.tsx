@@ -73,21 +73,26 @@ export function RelayCard({
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <ToggleSwitch checked={relay.isActive} onChange={toggleActive} loading={updateRelay.isPending} />
-          {relay.attachedProviderCount === 0 && (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                if (confirm(`删除中转站 "${relay.displayName}"?(没有关联模型,安全)`))
-                  deleteRelay.mutate({ id: relay.id, confirmDelete: true });
-              }}
-              disabled={deleteRelay.isPending}
-              className="size-7 p-0 text-red-600"
-              aria-label="删除"
-            >
-              <Trash2 className="size-3.5" />
-            </Button>
-          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              const n = relay.attachedProviderCount;
+              if (
+                confirm(
+                  n > 0
+                    ? `删除中转站 "${relay.displayName}"?\n会一并删掉它关联的 ${n} 个模型(指向它们的绑定将变「未注册」)。`
+                    : `删除中转站 "${relay.displayName}"?(没有关联模型)`,
+                )
+              )
+                deleteRelay.mutate({ id: relay.id, confirmDelete: true });
+            }}
+            disabled={deleteRelay.isPending}
+            className="size-7 p-0 text-red-600"
+            aria-label="删除"
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
         </div>
       </div>
 

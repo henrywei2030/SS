@@ -180,23 +180,11 @@ async function main() {
     console.log(`    ✓ ${providers.length} 个 Provider`);
   }
 
-  // ---------- 2.5 默认 RelayProvider 占位(Phase 1.5.1) ----------
-  // 用户启动后会在 /admin/providers UI 看到一个空的 "moyu" 中转站 placeholder
-  // 填 apiUrl + token 后从 catalog 选模型,生成的 ProviderConfig 自动关联到这条
-  console.log('  → 创建默认 RelayProvider 占位(moyu)');
-  await prisma.relayProvider.upsert({
-    where: { name: 'moyu' },
-    create: {
-      name: 'moyu',
-      displayName: 'moyu.info(默认中转站)',
-      apiUrl: '', // 用户填
-      catalogKey: 'moyu',
-      isActive: true,
-      notes: 'seed 默认创建 — 填 apiUrl + apiKey 后从 catalog 添加模型',
-    },
-    update: {}, // 已存在不动(保留用户配过的 token + apiUrl)
-  });
-  console.log('    ✓ 默认 RelayProvider "moyu" 就绪');
+  // ---------- 2.5 中转站凭证(RelayProvider)----------
+  // 2026-06-13(用户:provider 界面初始零数据):不再种默认中转站占位。
+  //   用户自行在 /admin/providers 新建中转站(name 自定,如 moyu / poe),providerId
+  //   前缀随该 name 派生 → 支持任意中转站、无品牌写死。
+  //   ⚠️ 老机/已跑过 20260525000000 migration 的库已残留一条默认行,需在 UI 手删(删除已放开)。
 
   // ---------- 3. 提示词模板（核心几个） ----------
   console.log('  → 创建核心 Prompt 模板');

@@ -582,6 +582,11 @@ export async function setProviderApiKey(
     },
   });
   // 失效缓存
+  invalidateProviderCache(providerId);
+}
+
+/** 失效某 Provider 的全部进程内缓存(删 provider / 改 key 时调,防解密后的明文 key 残留内存) */
+export function invalidateProviderCache(providerId: string): void {
   cache.video.delete(providerId);
   cache.image.delete(providerId);
   cache.text.delete(providerId);
@@ -805,30 +810,24 @@ export async function clearRelayProviderApiKey(
   invalidateRelayProviderCache(id);
 }
 
-/** 删除中转站凭证(拒删:还有关联 active ProviderConfig 的) */
+/** 删除中转站凭证 — 级联删掉它的全部关联模型(2026-06-13 用户:中转站直接可删) */
 export async function deleteRelayProvider(id: string): Promise<void> {
   const cfg = await prisma.relayProvider.findUnique({
     where: { id },
-    include: { providers: { select: { providerId: true, isActive: true } } },
+    include: { providers: { select: { providerId: true } } },
   });
   if (!cfg) throw new Error('RelayProvider not found');
-  const activeCount = cfg.providers.filter((p) => p.isActive).length;
-  if (activeCount > 0) {
-    throw new Error(
-      `中转站 "${cfg.name}" 还有 ${activeCount} 个 active 模型关联,先停用所有模型再删`,
-    );
-  }
-  // Audit 修(P1-1):删除前级联停用关联的非 active provider(防 onDelete:SetNull 后 UI 显示假启用)
-  // 实际上上面已 check activeCount=0,这里是防御性双保险
+  const childProviderIds = cfg.providers.map((p) => p.providerId);
+  // 用户「所有配置可直接删」:移除「还有 active 模型不让删」守卫,改为级联删掉该中转站的全部
+  //   关联模型 ProviderConfig(而非 onDelete:SetNull 留下无 key 无 relay 的孤儿行)。
+  //   指向被删模型的 binding 会变「未注册」(系统已容忍),清空到底符合用户意图。
   await prisma.$transaction(async (tx) => {
-    await tx.providerConfig.updateMany({
-      where: { relayProviderId: id },
-      data: { isActive: false },
-    });
-    // onDelete: SetNull 会把 relayProviderId 自动设 null
+    await tx.providerConfig.deleteMany({ where: { relayProviderId: id } });
     await tx.relayProvider.delete({ where: { id } });
   });
+  // 失效中转站凭证缓存 + 其全部关联模型的 provider 缓存(防解密后的明文 key 残留进程内)
   invalidateRelayProviderCache(id);
+  for (const pid of childProviderIds) invalidateProviderCache(pid);
 }
 
 /** 调试用：列出已注册 + 已缓存 */

@@ -90,7 +90,7 @@ export function AddRelayDialog({
                 id="r-name"
                 value={name}
                 onChange={(e) => setName(e.target.value.toLowerCase())}
-                placeholder="moyu-prod / poe-personal"
+                placeholder="relay-prod / poe-personal"
                 className="font-mono text-xs"
               />
             </div>
@@ -100,7 +100,7 @@ export function AddRelayDialog({
                 id="r-display"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="主用 moyu / 备用 OpenRouter"
+                placeholder="主用中转站 / 备用 OpenRouter"
               />
             </div>
           </div>

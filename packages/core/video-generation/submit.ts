@@ -23,7 +23,7 @@ import type { VideoGenJobData } from '@ss/queue/types';
 import { sanitizeErrorMsg } from '@ss/shared';
 import type { AspectRatio } from '@ss/shared/constants';
 
-import { resolveMediaFetchUrl } from '../media/index.js';
+import { resolveMediaFetchUrl, isRelayFetchableUrl } from '../media/index.js';
 
 import { acquireAigcVideoLock } from './lock.js';
 import { isBatchGroupId } from './batch.js';
@@ -386,6 +386,54 @@ export async function submitVideoGeneration(
     );
   }
 
+  // 2026-06-13(用户报 happyhorse i2v/r2v 同段屡败 11 次):图/参考生视频前置硬门 —
+  //   r2v/i2v 模型必须至少有一张「中转站(moyu)可拉取」的参考图(或可达首帧);本组参考图
+  //   全是本地 URL(base64 内联 / localhost MinIO)时,moyu 在公网够不到、已被 isRelayFetchableUrl
+  //   过滤光 → 现状是绕 queue+worker 一圈,在 seedance.ts 兜底门才报错,留 RUNNING→FAILED 废卡 +
+  //   触发前端永久轮询。这里提前同步 deny:省往返、报错即时清晰(改 t2v 或配公网存储)。
+  //   ⚠️ 必须在「升 RUNNING」之前 — denyPlaceholder 的 updateMany 只匹配 status:'QUEUED'
+  //      (同上方 caps/refVideo 检查的位置约束,放 RUNNING 之后会命中 0 行 → 占位卡死)。
+  const needsRefMedia = /(?:^|[-_/])(?:r2v|i2v)(?:$|[-_/])/.test(providerId.toLowerCase());
+  if (needsRefMedia) {
+    const reachableRefs = Array.from(
+      new Set([
+        ...compiled.references
+          .filter((r) => r.kind === 'IMAGE')
+          .map((r) => r.mediaUrl)
+          .filter((u): u is string => !!u),
+        ...characterImageRefs.map((r) => r.mediaUrl),
+      ]),
+    ).filter(isRelayFetchableUrl);
+    // 0 张可达参考图时,可达「首帧」也能满足图生视频门槛 — 仅此路才多查一次(有参考图的常态不查)
+    let hasReachableFirstFrame = false;
+    if (reachableRefs.length === 0 && capsParams.supportsFirstFrame === true) {
+      const ff = await prisma.shot.findFirst({
+        where: { groupId: grp.id, deletedAt: null },
+        orderBy: { positionIdx: 'asc' },
+        select: { startFrameMediaId: true },
+      });
+      if (ff?.startFrameMediaId) {
+        const ffm = await prisma.mediaItem.findFirst({
+          where: { id: ff.startFrameMediaId, deletedAt: null },
+          select: { cdnUrl: true, storageKey: true },
+        });
+        const ffu = ffm ? await resolveMediaFetchUrl(ffm, { expiresInSeconds: 12 * 3600 }) : null;
+        hasReachableFirstFrame = !!ffu && isRelayFetchableUrl(ffu);
+      }
+    }
+    if (reachableRefs.length === 0 && !hasReachableFirstFrame) {
+      const modelKind = providerId.toLowerCase().includes('r2v') ? 'R2V 参考生视频' : 'I2V 图生视频';
+      return denyPlaceholder(
+        new Error(
+          `「${modelKind}」模型(${providerId})需要至少一张中转站可用的参考图,但本生成段一张都没有 —— ` +
+            `已关联的参考图要么缺失、要么存在本机 localhost 存储(中转站够不到、已自动过滤;生成图的 base64 是可用的)。` +
+            `请确认本组关联了已生成的形象图,或改用文生视频(t2v)模型(seedance / wan,无需参考图)。`,
+        ),
+        'BAD_REQUEST',
+      );
+    }
+  }
+
   // 升级占位 attempt 到 RUNNING + 真实 inputJson(7 轮 audit A1)
   // 注:projectId/episodeId/shotGroupId/providerId/modelId/action 在占位时已写,不重复 set
   const startedAt = new Date();
@@ -425,16 +473,26 @@ export async function submitVideoGeneration(
       ...characterImageRefs.map((r) => r.mediaUrl),
     ]),
   );
+  // 过滤掉中转站 / 远端 provider 够不到的参考图 URL(data: 内联 base64 / localhost 本地存储)——
+  //   这类 URL 送给 moyu 会让它 server-side 拉取卡死(Headers Timeout 180s)而非建单,后台也无计费痕迹。
+  //   本地 dev(MinIO 非公网)+ 生成图把 base64 存进 cdnUrl(data: URL)时尤其常见。提前丢弃 + 记警。
+  const reachableRefImageUrls = rawRefImageUrls.filter(isRelayFetchableUrl);
+  const unreachableRefCount = rawRefImageUrls.length - reachableRefImageUrls.length;
+  if (unreachableRefCount > 0) {
+    console.warn(
+      `[generateVideo] group ${grp.number} 丢弃 ${unreachableRefCount} 张中转站够不到的参考图(data:/localhost,如本地生成图或本地 MinIO)— moyu 无法拉取,不作视频参考`,
+    );
+  }
   // 七二第九波(用户报失败:happyhorse「media list must have at most 9 reference_images, got 15」):
   //   按 provider 上限截断参考图 —— happyhorse R2V 硬限 9 张,超了整单 InvalidParameter。优先保留
   //   @token 引用图(compiled.references 在 Set 前段先入),再补人物主体形象参考;截断记警。
   const maxRefImages = maxRefImagesFor(providerId);
-  if (rawRefImageUrls.length > maxRefImages) {
+  if (reachableRefImageUrls.length > maxRefImages) {
     console.warn(
-      `[generateVideo] group ${grp.number} 参考图 ${rawRefImageUrls.length} 张超 provider ${providerId} 上限 ${maxRefImages},截断保留前 ${maxRefImages} 张(优先 @token 引用图)`,
+      `[generateVideo] group ${grp.number} 参考图 ${reachableRefImageUrls.length} 张超 provider ${providerId} 上限 ${maxRefImages},截断保留前 ${maxRefImages} 张(优先 @token 引用图)`,
     );
   }
-  const refImageUrls = rawRefImageUrls.slice(0, maxRefImages);
+  const refImageUrls = reachableRefImageUrls.slice(0, maxRefImages);
   // 2026-05-27 audit r13:binding 含 AUDIO 类资产(角色配音 voiceMediaId)时收集
   // capsParams.supportsRefAudio !== true 时静默丢弃(Provider 不支持就别传,避 422)
   // 六八(人到声必到):voiceRefs(人物绑定的参考声线)无条件并入 — 不依赖 @音频N token;
@@ -483,10 +541,11 @@ export async function submitVideoGeneration(
         select: { cdnUrl: true, storageKey: true },
       });
       const u = m ? await resolveMediaFetchUrl(m, { expiresInSeconds: 12 * 3600 }) : null;
-      if (u) firstFrameUrl = u;
+      // 首帧也须是中转站够得到的 URL(data:/localhost 会让 moyu 拉取卡死)
+      if (u && isRelayFetchableUrl(u)) firstFrameUrl = u;
       else {
         console.warn(
-          `[generateVideo] group ${grp.number} 首帧媒体 URL 解析失败,本次不带首帧约束`,
+          `[generateVideo] group ${grp.number} 首帧媒体 URL ${u ? '中转站够不到(data:/localhost)' : '解析失败'},本次不带首帧约束`,
         );
       }
     } else {

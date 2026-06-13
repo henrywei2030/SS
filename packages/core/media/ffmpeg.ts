@@ -18,7 +18,10 @@
  */
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import ffmpegStaticPath from 'ffmpeg-static';
@@ -438,4 +441,71 @@ export async function mixBgm(opts: {
     }),
     { timeoutMs: opts.timeoutMs },
   );
+}
+
+// ---------------------------------------------------------------------------
+// 参考图缩图(2026-06-13:治 happyhorse「BadRequest.TooLarge max 6MB」)
+// ---------------------------------------------------------------------------
+
+/**
+ * 把过大的 data: base64 图等比缩到 ≤maxDim px 并转 JPEG,返回新的 data:image/jpeg;base64 URL。
+ *
+ * 背景:中转站视频模型(happyhorse 等)请求体硬限 6MB(实测 `max bytes to request body : 6291456`),
+ *   本地生成图多为 1MB+ 的 PNG,转 base64 拼进 images 数组(seedance.ts:332)必撞 TooLarge。
+ *   参考图只用于身份/形象条件约束,无需全分辨率 → 缩到 1024px JPEG(~100-200KB)即足够,body 立降到 1MB 内。
+ *
+ * 行为:
+ *   - 非 data: URL(http(s) 公网链)→ 原样返回(它由 provider 服务端下载,不进 body)。
+ *   - 非 base64 编码的 data: 或解码后 ≤thresholdBytes 的小图 → 原样返回(免无谓 ffmpeg)。
+ *   - 缩图失败(解码 / ffmpeg 出错)→ 原样返回 + 记警(降级:大图照送,可能 TooLarge,但绝不因缩图崩生成)。
+ */
+export async function downscaleDataUrlIfLarge(
+  url: string,
+  opts: { thresholdBytes?: number; maxDim?: number; jpegQ?: number } = {},
+): Promise<string> {
+  const threshold = opts.thresholdBytes ?? 400 * 1024;
+  const maxDim = opts.maxDim ?? 1024;
+  const jpegQ = opts.jpegQ ?? 5;
+
+  if (!url.startsWith('data:')) return url;
+  const comma = url.indexOf(',');
+  if (comma < 0) return url;
+  if (!/;base64$/i.test(url.slice(5, comma))) return url; // 非 base64 编码 data:
+
+  let buf: Buffer;
+  try {
+    buf = Buffer.from(url.slice(comma + 1), 'base64');
+  } catch {
+    return url;
+  }
+  if (buf.length <= threshold) return url; // 已经够小
+
+  let dir: string | null = null;
+  try {
+    dir = await mkdtemp(join(tmpdir(), 'ss-refimg-'));
+    const inPath = join(dir, 'in');
+    const outPath = join(dir, 'out.jpg');
+    await writeFile(inPath, buf);
+    await runFfmpeg(
+      [
+        '-y',
+        '-i', inPath,
+        // 等比缩到 maxDim 内(不放大小图);转 JPEG 压体积
+        '-vf', `scale='min(${maxDim},iw)':'min(${maxDim},ih)':force_original_aspect_ratio=decrease`,
+        '-q:v', String(jpegQ),
+        outPath,
+      ],
+      { timeoutMs: 30_000 },
+    );
+    const out = await readFile(outPath);
+    return `data:image/jpeg;base64,${out.toString('base64')}`;
+  } catch (e) {
+    console.warn(
+      '[downscaleDataUrlIfLarge] 缩图失败,原图照送:',
+      e instanceof Error ? e.message : e,
+    );
+    return url;
+  } finally {
+    if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
 }
