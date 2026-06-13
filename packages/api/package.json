@@ -23,14 +23,14 @@
     "@ss/i18n": "workspace:*",
     "@ss/queue": "workspace:*",
     "@ss/shared": "workspace:*",
-    "@trpc/server": "^11.0.0-rc.660",
-    "mammoth": "^1.8.0",
-    "superjson": "^2.2.1",
-    "zod": "^3.23.8"
+    "@trpc/server": "^11.17.0",
+    "mammoth": "^1.12.0",
+    "superjson": "^2.2.6",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@types/node": "^22.7.4",
-    "typescript": "^5.6.3",
-    "vitest": "^2.1.2"
+    "@types/node": "^22.19.21",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
   }
 }

@@ -9,6 +9,6 @@
     "tauri:icon": "tauri icon"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.1.0"
+    "@tauri-apps/cli": "^2.11.2"
   }
 }

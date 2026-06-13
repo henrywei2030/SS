@@ -31,15 +31,15 @@
     "@ss/db": "workspace:*",
     "@ss/queue": "workspace:*",
     "@ss/shared": "workspace:*",
-    "ffmpeg-static": "^5.2.0",
+    "ffmpeg-static": "^5.3.0",
     "ffprobe-static": "^3.1.0",
-    "onnxruntime-node": "^1.23.0",
+    "onnxruntime-node": "^1.26.0",
     "sentencepiece-js": "^1.1.0",
-    "zod": "^3.23.8"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@types/node": "^22.7.4",
-    "typescript": "^5.6.3",
-    "vitest": "^2.1.2"
+    "@types/node": "^22.19.21",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
   }
 }

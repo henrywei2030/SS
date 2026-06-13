@@ -5,6 +5,26 @@
 
 ---
 
+## 2026-06-14(周日,win-laptop · 依赖稳升审计落地 + 前后端性能优化 + Turbopack 验证 + 深度优化 jobId 去重)
+
+**完成**
+- ✅ **P0 依赖卫生(全仓 typecheck 16/16 绿)**:① 钉死 web 的 RC/alpha 预发布版→稳定版(react/react-dom `^19.2.7`、@trpc/* `^11.17.0`、tailwindcss(+postcss) `^4.3.1`、next `^15.5.x`;`@types/react` 别名 `types-react@rc.1` → 真 `@types/react@19.2.17`,消除三套 types 并存)→ 止住 `^RC/alpha` 浮动范围的 install 漂移/重复副本;② `pnpm up -r` 批量 within-major 安全补丁(radix/react-query/aws-sdk/zod3.25/superjson/tsx/vitest/undici6.26/jose5.10/mammoth/intl-messageformat10.7.18 等),major 全被 `^` 范围挡住未动。
+- ✅ **bullmq/ioredis 双版本雷·根治**:`pnpm up` 升到 bullmq5.78/ioredis5.11 复现「ioredis 双版本致 @ss/queue typecheck 炸」。**实测拍板**:根因是 pnpm 解析出双 ioredis(非 API 破坏)→ root `pnpm.overrides` 钉**单版本** ioredis 5.11.1 + bullmq 5.78.0,16/16 通过。**这俩从此可随 override 单版本稳升**(TODO「关键雷」解除)。
+- ✅ **P1 性能优化(低风险高收益)**:① 后端签名 URL 进程内缓存([minio.ts](packages/adapters/storage/minio.ts) `getSignedUrl` 加 LRU,key=storageKey+ttl)— 所有 list/detail 签名走此单点,**返回稳定 URL → 浏览器不再把同图当新 URL 反复下载**(取证 `buildStorageKey` 唯一 uuid 无原地覆盖,缓存安全);② GroupDetail `React.memo`([group-detail.tsx](apps/web/app/%5Blocale%5D/(workspace)/projects/%5Bid%5D/aigc/%5BepisodeId%5D/components/group-detail.tsx))— listGroups 刷新必需且正确(左栏 badge/合计/轮询触发依赖它,r14/r15 已精确化),病灶是刷新触发所有卡片重渲染;GroupDetail 自拉数据 props 稳定 → memo 后只重渲被操作的那个。
+- ✅ **P2 Turbopack 验证 → BLOCKED**:实启 `next dev --turbopack` 崩在 instrumentation hook(`Can't resolve './weights.js'`)。根因 = @ss/core NodeNext `.js` 扩展名导入(实为 .ts),webpack 靠 `extensionAlias` 重写、**Turbopack 无此能力**(`resolveExtensions` 只管无扩展名导入)。已固化进 [next.config.ts](apps/web/next.config.ts) 注释、撤掉不工作的 dev:turbo、保持 webpack 默认。
+- ✅ **依赖「稳定升级」全量审计(ultracode 15 簇 workflow × 研究+对抗复核 30 agent)**:分级矩阵见 [TODO 依赖升级审计区](TODO.md)。🟢 可稳升:tailwind-merge2→3 / jose5→6 / bcryptjs2→3 / recharts2→3 / vitest2→4 / mime-types2→3 / styled-jsx·esbuild patch / bullmq·ioredis(已应用);🟡 带活:zod3→4 / next15→16 / @types-node→24.x / undici→7.x / lucide0→1;🔴 押后:typescript6 / next-intl4 簇 / embedded-pg18。
+- ✅ **深度优化「点了没反应/无通知」根因 = jobId 去重**:`deepOptimizeGroupPrompt` 用固定 jobId,06-13 已为 14-18/33-35 跑过(completed job 留 24h)→ 同组被静默 no-op(POST 200 但不重跑)。修 [job-queue.ts](packages/queue/src/job-queue.ts):入队前先 `queue.remove(jobId)`(completed/waiting 移除→允许重跑;active→保留并发不双跑)。新依赖下 core/queue/adapters/api 4 包 typecheck + prompt-optimizer 24 测试复验过。+ `scripts/_diag-relay.ts` 诊断脚本随本次提交。
+
+**问题/待决策**
+- ❓ **深度优化端到端实测待开 Docker**:Redis/PG 容器 down → worker ioredis 空转、:3000 起不来。需 `pnpm infra:up` 才能真点验证(真跑+写回+通知)。
+- ❓ Turbopack 受阻于 @ss/core `.js` 扩展名导入;onnxruntime1.26/ffmpeg5.3 已重编译(起服顺手验 TTS/ffmpeg);P1 后端缓存需重启 dev server 才生效。
+
+**下次接着做**
+- 📌 🟢 稳升批落地(tailwind-merge/jose/bcryptjs/recharts/vitest/mime-types,逐个或整批 + typecheck)
+- 📌 开 Docker → 深度优化(jobId 去重 + token 修复)端到端真打 + 验签名缓存
+
+---
+
 ## 2026-06-13(周六,win-laptop · happyhorse 链路深诊 + Provider 删除放开 + 去moyu化 + 优化器 token 真 bug)
 
 **完成**

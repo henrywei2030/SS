@@ -141,7 +141,18 @@ const nextConfig: NextConfig = {
   },
 
   /**
-   * Turbopack 等价配置（next dev 默认使用 Webpack；如未来切 turbo 也兼容）
+   * Turbopack 配置（next dev 默认仍用 Webpack）
+   *
+   * ⚠️ 2026-06-14 实测:`next dev --turbopack` 当前**跑不起来**,勿切默认。
+   *   instrumentation hook 加载即崩:`Module not found: Can't resolve './weights.js'`
+   *   (packages/core/voice/index.ts)、`Cannot find module './timeline.js'`。
+   *   根因:@ss/core 等 workspace 包用 NodeNext 风格 `.js` 扩展名相对导入(源文件实为 `.ts`)。
+   *   Webpack 靠上面的 `extensionAlias: {'.js':['.ts','.tsx',...]}` 把 `.js` 重写到 `.ts`;
+   *   而 Turbopack 的 `resolveExtensions` **只对无扩展名导入生效**,无 `extensionAlias` 等价能力,
+   *   故所有显式 `.js` 导入解析失败。且这是 @ss/core 消费层的**全仓**问题,非单点。
+   *   解锁路径(三选一,均非小改):① Turbopack 支持 extensionAlias(上游 feature,待);
+   *   ② @ss/core 相对导入去掉 `.js` 扩展名;③ @ss/core 预编译成 `.js` 产物后被消费。
+   *   在此之前 dev 保持 Webpack。
    */
   turbopack: {
     resolveExtensions: ['.tsx', '.ts', '.jsx', '.js', '.mjs', '.cjs', '.json'],

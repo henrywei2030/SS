@@ -28,11 +28,23 @@ export interface MinioAdapterConfig {
   publicBaseUrl?: string;
 }
 
+/** 签名 URL 缓存软上限:每条仅一个字符串,留足美术/素材库规模(条目过期会被惰性清理) */
+const SIGNED_URL_CACHE_MAX = 5000;
+
 export class MinioStorageAdapter implements StorageAdapter {
   readonly id: string;
   private readonly s3: S3Client;
   private readonly bucket: string;
   private readonly publicBaseUrl: string;
+  /**
+   * 进程内签名 URL 缓存(性能优化):list/detail 接口对每条素材逐条 presign(N+1),
+   * 单页几十~上百次。presign 是本地 HMAC 不慢,但**每次重签都生成新 query string**
+   * → 浏览器把同一张图当新 URL 反复下载,这是"翻页/刷新慢"的隐形大头。
+   * 缓存让同 key 在有效期内返回同一 URL → 浏览器命中缓存不再重下。
+   * 安全:签名只对 key 计算、与对象内容无关;缓存期 = 签名有效期 - 安全余量,绝不发临期 URL;
+   * 对象被删时缓存 URL 与新签 URL 同样 404,不引入新失效。
+   */
+  private readonly signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
 
   constructor(cfg: MinioAdapterConfig) {
     this.id = `minio:${cfg.bucket}`;
@@ -99,11 +111,35 @@ export class MinioStorageAdapter implements StorageAdapter {
   }
 
   async getSignedUrl(key: string, expiresInSeconds = 3600): Promise<string> {
-    return getSignedUrl(
+    const cacheKey = `${expiresInSeconds}:${key}`;
+    const now = Date.now();
+    const hit = this.signedUrlCache.get(cacheKey);
+    if (hit && hit.expiresAt > now) return hit.url;
+
+    const url = await getSignedUrl(
       this.s3,
       new GetObjectCommand({ Bucket: this.bucket, Key: key }),
       { expiresIn: expiresInSeconds },
     );
+
+    // 缓存期 = 有效期 - 安全余量(≤20% 或 10min,取小),确保永不返回临期 URL
+    const marginSec = Math.min(600, Math.floor(expiresInSeconds * 0.2));
+    const ttlMs = Math.max(1, expiresInSeconds - marginSec) * 1000;
+    this.signedUrlCache.set(cacheKey, { url, expiresAt: now + ttlMs });
+
+    // 软上限:超限时先扫掉已过期项,仍超则按插入序删最旧,防内存无界增长
+    if (this.signedUrlCache.size > SIGNED_URL_CACHE_MAX) {
+      for (const [k, v] of this.signedUrlCache) {
+        if (v.expiresAt <= now) this.signedUrlCache.delete(k);
+      }
+      while (this.signedUrlCache.size > SIGNED_URL_CACHE_MAX) {
+        const oldest = this.signedUrlCache.keys().next().value;
+        if (oldest === undefined) break;
+        this.signedUrlCache.delete(oldest);
+      }
+    }
+
+    return url;
   }
 
   async deleteObject(key: string): Promise<void> {

@@ -121,7 +121,16 @@ export async function enqueueJob(
     });
     return jobId;
   }
-  const job = await getSsJobsQueue().add(
+  const queue = getSsJobsQueue();
+  // 幂等键语义修(2026-06-14):BullMQ 对已存在 jobId 的 add 是 no-op —— 但 completed job 默认留
+  //   24h(defaultJobOptions removeOnComplete age),导致「同组重跑」(如 ✨✨深度优化重试)在 24h
+  //   内被旧 completed job 静默去重 → 无 run / 无通知。add 前先移除同 ID 旧 job:
+  //   - completed/waiting/failed/delayed → 移除成功 → add 创建全新 job(允许重跑);
+  //   - active(正在跑)→ remove 抛错(job 锁定)→ catch 后 add 仍被 BullMQ 去重 → 保留「并发不双跑」。
+  if (opts?.jobId) {
+    await queue.remove(opts.jobId).catch(() => {});
+  }
+  const job = await queue.add(
     kind,
     { kind, data },
     opts?.jobId ? { jobId: opts.jobId } : undefined,

@@ -215,7 +215,7 @@ export interface DetailProps {
   onAutoSelectConsumed: () => void;
 }
 
-export function GroupDetail({
+function GroupDetailInner({
   groupId,
   onAutoMatch,
   autoMatchPending,
@@ -929,3 +929,12 @@ function KeyframeSection({ groupId }: { groupId: string }): React.ReactElement {
     </section>
   );
 }
+
+/**
+ * R-perf(性能优化):memo 化 — GroupDetail 自拉自身数据(getGroupDetail / previewCompiledPrompt by groupId),
+ * 不消费父级 listGroups 的 group 对象,只接 groupId(字符串)+ useCallback 稳定回调 + 按 groupId 计算的 pending 标志。
+ * 父级 listGroups 失效刷新(每次单组操作都会触发,为更新左栏 badge / 顶栏合计 / 轮询触发——必需且正确)时,
+ * 未被操作 group 的 props 全部稳定 → memo 命中 → 不重渲染。只有被操作的那个(pending 翻转)才重渲。
+ * 这消除了「点一个按钮 → 所有 GroupDetail 一起重渲染」的风暴(用户报「点击后等一会刷新」的前端大头之一)。
+ */
+export const GroupDetail = React.memo(GroupDetailInner);

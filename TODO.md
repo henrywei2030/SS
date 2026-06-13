@@ -1,7 +1,7 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-06-12(**win-laptop 四轮**:AIGC 上传图识别修(签名 URL)+ Seedance 链路深诊(worker 连接池拖垮根因)+ pnpm start 排障(:3000 占用,非脚本/PATH 问题)· 详见 [PROGRESS](PROGRESS.md))
-> 上一版:2026-06-12(win-laptop 三轮:美术上传图预览修复 + 场景工作流反转 360°设为主)
+> 最后更新:2026-06-14(**win-laptop**:依赖稳升审计落地 + 前后端性能优化(签名 URL 缓存 / GroupDetail memo)+ Turbopack 验证(BLOCKED)+ 深度优化 jobId 去重 · 详见 [PROGRESS](PROGRESS.md))
+> 上一版:2026-06-13(win-laptop:优化器 token 真 bug + Provider 删除放开 + 去moyu化 + happyhorse 链路)
 > 仓库:https://github.com/henrywei2030/SS
 > **🚀 一键启动**:`pnpm start`(详见 [README.md](README.md#快速启动) / [CLAUDE.md](CLAUDE.md#设备登记))
 > **📖 主线蓝图**:[docs/06-feature-plan-2026H2.md](docs/06-feature-plan-2026H2.md)(M0–M6 可直接 coding;2026-06-10 mac-mini 逐项核对与代码一致)
@@ -11,7 +11,9 @@
 
 ## 🚧 进行中
 
+- [x] **🚀 依赖稳升审计 + 前后端性能优化 + Turbopack 验证(2026-06-14 win-laptop)· 用户指令**:① **P0 依赖卫生** 钉死 web RC/alpha→稳定版(react/trpc/tailwind/@types-react 真包)+ `pnpm up -r` 批量 within-major;② **bullmq/ioredis 双版本雷根治** — override 钉单版本 ioredis5.11.1+bullmq5.78.0(实测 16/16 绿,「关键雷」解除);③ **P1** 签名 URL 进程内缓存([minio.ts](packages/adapters/storage/minio.ts),返回稳定 URL 省浏览器重下)+ GroupDetail `React.memo`(治列表刷新重渲风暴);④ **P2 Turbopack 验证=BLOCKED**(@ss/core `.js` 扩展名导入 turbopack 无 extensionAlias → 固化 next.config 注释、撤 dev:turbo、保 webpack);⑤ **稳升全量审计**(ultracode 15 簇 workflow,矩阵见下「📦 依赖升级审计」区)。typecheck 16/16。**留**:🟢 稳升批落地 · onnxruntime/ffmpeg 原生重编译需起服验 TTS/ffmpeg · 签名缓存需重启 dev server 生效
 - [x] **🔧 优化器 token 真 bug + Provider 删除放开 + 去moyu化 + happyhorse 链路(2026-06-13 win-laptop)· 用户报/指令**:① **深度优化恒挂真 bug** — guards.ts token 正则贪婪吞 `@图片N` 后中文成假 token → 对齐编译器 `@(图片|音频)\d+`(**系统级**,几乎所有 token 密集提示词受影响);② **Provider 删除全部放开** — 去 3 守卫 + 删除自动清 key/缓存 + 中转站级联删;③ **初始零数据 + moyu 中性化** — seed 去默认中转站 + 文案/占位符/前缀逻辑中性化(架构本就支持换站);④ **happyhorse 深诊** — base64 格式(裸 base64)+ ffmpeg 缩图,卡 moyu 单图 60KB 限。DB 清理 docx.parser→mammoth。typecheck/测试全过。**留**:happyhorse 需公网存储真出片 · 剩余注释中性化 · 深度优化真打验证
+  - **06-14 续**:深度优化「点了无反应/无通知」根因 = **jobId 去重**(同组固定 jobId,06-13 已 completed 的 job 在 BullMQ 留 24h → 重点同组被静默 no-op)。修 [job-queue.ts](packages/queue/src/job-queue.ts) 入队前 remove 旧 job(允许重跑、仍防并发双跑)。新依赖(TS 5.9)下 4 包 typecheck + 24 测试复验过。**端到端实测待开 Docker**;本会话**不提交**,由另一会话(依赖升级)统一提交。
 - [x] **🎬 AIGC 上传图识别修 + Seedance 链路深诊 + pnpm start 排障(2026-06-12 win-laptop 四轮)· 用户报**:① AIGC「缺主图」修 — aigc-overview/aigc-bindings 改用 `resolveMediaFetchUrl` 签名(上传图 cdnUrl=null 不再判缺图、缩略正常);② Seedance「moyu 无调用」根因 = **worker 常驻 seedanceDispatcher 被并发失败请求拖垮**(全新进程连 moyu 1.1s OK、跑久 worker 60s 超时),非网络/代码;UI「生成中42%」是假进度;③ pnpm start 本身正常,失败因 :3000 被占 graceful skip,已腾空。**留真打**:seedanceDispatcher 失败自愈 + 视频并发收紧 + 上传图 relay 同步
 - [x] **🖼️ 美术上传图「无法预览」修复(2026-06-12 win-laptop)· 用户报**:根因前端多处 `cdnUrl ?? storageKey`,上传图 cdnUrl=null 回退裸 storageKey 致 `<img>` 404。修:抽 media-url.ts `resolveMediaPreviewUrl`(签名 MinIO URL,复用 media.list 机制)+ asset-crud mediaMap 补 previewUrl + 前端 3 显示点改用 previewUrl。图生图重生链路确认本就通(服务端 fetch 参考图字节送 moyu)。typecheck 16/16。**留**:候选卡 cdnUrl-null 边角 / signed url 3600s
 - [x] **🏞️ 场景工作流反转:360° 全景设为场景主资产(2026-06-12 win-laptop)· 用户指令**:反转七二第八波(九宫格为主)→ 360° 全景=主(展示图+AIGC默认+面板左侧)、九宫格次(右);生成依赖反转(360°直生·九宫格参考它)。12+ 点/7 文件:pickAssetMediaId/maturity/PRIMARY_SLOT/slot顺序/参考链反转/hero/chip/AIGC缩略全改。schema 无需改。typecheck 16/16。**留**:存量旧场景需视情补 360°
@@ -61,13 +63,15 @@
 - [ ] **P1(3-4 天)**:字号 9 种→5 级 token + lint 禁任意值 / 手写按钮~40 处→Button 组件 / emoji 图标→lucide(保留 ✨系)/ 硬编码状态色~50→语义五族变量(并清工程卫生既有色债)/ AIGC 右栏边框预算整改
 - [ ] P2 塞缝:相对时间/tabular-nums/滚动渐隐/统一空态组件(与 a11y 债合并)
 
-### 📦 依赖升级审计(2026-06-12 win-laptop · 全量审计 → 暂缓,停基线)
+### 📦 依赖升级审计(2026-06-14 win-laptop · P0 within-major 全升 + ultracode 稳升矩阵)
 
-> 用户要求全量升级;审计后**除已验证的 windows-x64 白名单修复外全部回退/暂缓**,保持 typecheck 16/16 绿。下次专门排期、分批验证再升。
+> 2026-06-14 重审:P0 已把所有 within-major 安全补丁吃掉(typecheck 16/16 绿)+ RC/alpha 预发布版钉死成稳定版。剩余 major 经 ultracode workflow(15 簇 × 研究+对抗复核 30 agent)逐个研判「破坏性变更 vs 本仓真实用法」,分级如下。
 
-- ⚠️ **关键雷(必读)**:`ioredis` 哪怕只升 minor(5.10.1→5.11.1)也会与 `bullmq` 内部 ioredis 撞成**双版本共存** → TS 类型身份不一致,`@ss/queue` 把 `Redis` 传给 bullmq `Queue` 编译失败。**ioredis 与 bullmq 必须成对同步升 + 跑 typecheck**,不可单独 bump。
-- [ ] **🔴 破坏性 major(19 个,逐个验证)**:zod 3→4(7 包都用,最毒)/ next 15→16 / typescript 5→6 / vitest 2→4 / next-intl 3→4 · @formatjs/intl 2→4 · intl-messageformat 10→11(i18n 栈)/ jose 5→6(JWT 安全)/ bcryptjs 2→3(密码哈希 安全)/ recharts 2→3 / lucide-react 0.453→1.x(图标名可能变)/ undici 6→8 / tailwind-merge 2→3 / mime-types 2→3 / @types/{node(跟 node v24),bcryptjs,mime-types} / embedded-postgres beta16→18
-- [ ] **🟢 安全档(in-range minor/patch)**:9 Radix UI / react·react-dom 19.2.6→.7 / @tanstack-query / zustand / turbo / prettier / tsx / @aws-sdk / @radix-select(minor)/ **bullmq+ioredis(成对,见上雷)**。⚠️ 即便 in-range 也须逐项 typecheck —— 本次实测 ioredis 就炸了
+- [x] ✅ **关键雷·已解除**:bullmq/ioredis 双版本撞 typecheck 根因是 **pnpm 解析出双 ioredis**(非 API 破坏)→ root `pnpm.overrides` 钉单版本 ioredis 5.11.1 + bullmq 5.78.0,实测 16/16 绿。**这俩从此随 override 单版本稳升**。
+- [x] ✅ **P0 within-major 全升 + RC/alpha 钉稳定**(2026-06-14):react/trpc/tailwind/@types-react 真包 + radix/react-query/aws-sdk/zod3.25/vitest/undici6.26/tsx/superjson 等 `^` 范围内全更新;major 由范围挡住未动。
+- [ ] **🟢 可稳定升级(已逐项证伪破坏性风险,建议作一批落地 + typecheck)**:tailwind-merge 2→3(本就该配 tw v4,零改码)· jose 5→6(只用 SignJWT/jwtVerify HS256,旧 token 仍验签)· bcryptjs 2→3(只用 async hash/compare,旧 2a hash 兼容;删 @types/bcryptjs)· recharts 2→3(用得浅不撞)· vitest 2→4(devDep 核心 API 兼容)· mime-types 2→3(代码其实没真用,可升可删)· styled-jsx 5.1.7 / esbuild 0.28.1(patch)
+- [ ] **🟡 能升但需改动/验证**:zod 3→4(改 2 处 `z.string().email/.url`→`z.email/z.url` + QA admin 路由 `.default()` 行为变;tRPC v11 已支持 zod4)· next 15→16(无 Pages Router 迁移,但 webpack 钩子/原生 externals/next-intl 插件需分支验)· @types/node →**24.x**(对齐运行时 node24,非最新 25)· undici 6→**先 7.x**(v8 砍 Node20 需 ≥22.19;验三家 provider 长超时)· lucide 0→1(next.config `modularizeImports` 路径需验 build,或删冗余靠 optimizePackageImports)
+- [ ] **🔴 押后(违背最稳定)**:typescript 5→6(默认 `types` 改 `[]`,需 tsconfig 加 `types:["node"]` + 全仓爆炸半径验证)· next-intl 4 簇(+@formatjs/intl 4 + intl-messageformat 11;配置 API 重写联动,当前 `^3` 范围内已无待升)· embedded-postgres 18(beta + PG 16→18 大版本需数据迁移)
 - [x] ✅ **windows-x64 白名单修复**(独立,已保留进工作树):`@embedded-postgres/win32-x64`→`windows-x64` + rebuild 验证 postinstall 通过
 
 ### 🧹 工程卫生(塞缝做 · 2026-06-10 六七核对收拢 — 碰到相关代码顺手清,不单独排期)

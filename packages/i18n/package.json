@@ -17,11 +17,11 @@
   },
   "dependencies": {
     "@formatjs/intl": "^2.10.15",
-    "intl-messageformat": "^10.7.7"
+    "intl-messageformat": "^10.7.18"
   },
   "devDependencies": {
-    "@types/node": "^22.7.4",
-    "typescript": "^5.6.3",
-    "vitest": "^2.1.2"
+    "@types/node": "^22.19.21",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
   }
 }
