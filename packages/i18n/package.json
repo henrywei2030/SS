@@ -16,12 +16,13 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@formatjs/intl": "^2.10.15",
-    "intl-messageformat": "^10.7.18"
+    "@formatjs/intl": "^4.1.13",
+    "intl-messageformat": "^11.2.8"
   },
   "devDependencies": {
     "@types/node": "^22.19.21",
     "typescript": "^5.9.3",
-    "vitest": "^2.1.9"
+    "vite": "^7.0.0",
+    "vitest": "^4.1.8"
   }
 }
