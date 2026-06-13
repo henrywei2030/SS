@@ -63,7 +63,7 @@ const t = initTRPC.context<Context>().meta<TRPCMeta>().create({
         safeZodIssues = {
           formErrors: flat.formErrors.length > 0 ? ['校验失败'] : [],
           fieldErrors: Object.fromEntries(
-            Object.entries(flat.fieldErrors).map(([k, v]) => [k, v && v.length > 0 ? ['校验失败'] : []]),
+            Object.entries(flat.fieldErrors).map(([k, v]) => [k, Array.isArray(v) && v.length > 0 ? ['校验失败'] : []]),
           ),
         };
       } else {

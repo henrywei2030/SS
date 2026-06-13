@@ -27,7 +27,7 @@
     "jsonrepair": "^3.14.0",
     "mime-types": "^3.0.2",
     "undici": "^6.26.0",
-    "zod": "^3.25.76"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",

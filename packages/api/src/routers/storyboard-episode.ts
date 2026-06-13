@@ -122,7 +122,7 @@ export const episodeProcedures = {
       z.object({
         episodeId: z.string().cuid(),
         confirmDelete: z.literal(true, {
-          errorMap: () => ({ message: '需显式 confirmDelete=true(防误删)' }),
+          error: '需显式 confirmDelete=true(防误删)',
         }),
       }),
     )

@@ -35,7 +35,7 @@
     "ffprobe-static": "^3.1.0",
     "onnxruntime-node": "^1.26.0",
     "sentencepiece-js": "^1.1.0",
-    "zod": "^3.25.76"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^22.19.21",
