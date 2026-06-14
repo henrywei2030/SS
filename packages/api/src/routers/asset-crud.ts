@@ -690,7 +690,12 @@ export const crudProcedures = {
           afterDurationS: afterProbe.durationS,
         };
       } finally {
-        rmSync(tmp, { recursive: true, force: true });
+        // 清理失败(Windows EBUSY 等,force 只吞 ENOENT)不致命,别顶替业务错误(对齐 QC handler)
+        try {
+          rmSync(tmp, { recursive: true, force: true });
+        } catch (e) {
+          console.warn('[asset-crud] tmp 目录清理失败(不影响结果):', e instanceof Error ? e.message : e);
+        }
       }
     }),
 

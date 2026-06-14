@@ -226,6 +226,11 @@ export async function processVoiceSampleJob(data: unknown): Promise<void> {
     // 抛脱敏后的消息(原始 err 可能含内网路径/密钥;队列侧只需知道失败)
     throw new Error(msg);
   } finally {
-    rmSync(tmp, { recursive: true, force: true });
+    // 清理失败(Windows 文件句柄竞争 EBUSY,force 只吞 ENOENT)不致命,别顶替业务错误(对齐 QC handler)
+    try {
+      rmSync(tmp, { recursive: true, force: true });
+    } catch (e) {
+      console.warn('[voice-sample] tmp 目录清理失败(不影响结果):', e instanceof Error ? e.message : e);
+    }
   }
 }
