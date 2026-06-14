@@ -124,7 +124,7 @@ export default async function AdminLayout({
           <div className="mt-auto pt-3 text-[10px] text-[hsl(var(--color-muted-foreground))]">
             <div className="flex items-center gap-2 px-2">
               <LogoMark className="size-4" mono />
-              <p className="wordmark-metallic font-semibold tracking-wide">StarsAlign · v0.1.0</p>
+              <p className="wordmark-metallic font-semibold tracking-wide">StarsAlign · v0.2.0</p>
             </div>
             <p className="mt-1 px-2 opacity-60">© 2026 星垣工坊</p>
           </div>
