@@ -1,7 +1,7 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-06-14(**win-laptop** 第二场:依赖大升级全落地 TS6/next16/zod4/next-intl4/undici8 + Win 本地打包 + eslint 迁移 + 全盘审查 · 详见 [PROGRESS](PROGRESS.md))
-> 上一版:2026-06-14(win-laptop:依赖稳升审计落地 + 性能优化(签名缓存/memo)+ Turbopack(BLOCKED)+ jobId 去重)
+> 最后更新:2026-06-14(**win-laptop** 第三场:全盘深度审计(依赖CVE 4→0 / 代码漏洞×3遍 / 模块逻辑 / 传导链路)+ 21 漏洞全修复 · 详见 [PROGRESS](PROGRESS.md))
+> 上一版:2026-06-14(win-laptop 第二场:依赖大升级全落地 TS6/next16/zod4/next-intl4/undici8 + Win 本地打包 + eslint 迁移 + 全盘审查)
 > 仓库:https://github.com/henrywei2030/SS
 > **🚀 一键启动**:`pnpm start`(详见 [README.md](README.md#快速启动) / [CLAUDE.md](CLAUDE.md#设备登记))
 > **📖 主线蓝图**:[docs/06-feature-plan-2026H2.md](docs/06-feature-plan-2026H2.md)(M0–M6 可直接 coding;2026-06-10 mac-mini 逐项核对与代码一致)
@@ -11,6 +11,7 @@
 
 ## 🚧 进行中
 
+- [x] **🔒 全盘深度审计 + 21 漏洞修复(2026-06-14 win-laptop 第三场)· 用户指令**:① **依赖** `pnpm audit` 4 CVE→0(esbuild0.28.1 + postcss/@hono override)② **模块逻辑** 分层干净无循环、零结构 bug ③ **传导链路** 6 条端到端全通 ④ **代码漏洞×3遍**(58 agent/3.78M tokens)37 raw→**21 确认**(毙 16 误报)→ **全修复**:批①认证/密钥(logout CSRF / 弱KDF prod 拒 / 脱敏统一 / 解密日志)批②SSRF(refVideo/AudioURL refine / **validateApiUrl IPv6 方括号绕过真 bug** / isRelayFetchableUrl 硬化)批③DoS(DOCX zip bomb / base64 上限 / 集数上限治 N×DB)批④临时文件 try-catch。1 误报(字符正则)读码不动。5 commit · typecheck 16/16 · test 12/12。**留 backlog**:非-bug 设计债(ShotAssetRef deprecated / dist/cost 死产物 / recordLedger 写失败只日志 / DNS rebinding Phase2)
 - [x] **🚀 依赖大升级全落地 + Win 本地打包 + eslint 迁移 + 全盘审查(2026-06-14 win-laptop 第二场)· 用户指令**:① **Win 本地打包** 装 Rust1.96+开发者模式(解 symlink EPERM)→ 三步链出 NSIS 140M/MSI 241M ② **中低批 9 major + vite7**(lucide/recharts/tailwind-merge/jose/bcryptjs/mime-types/@formatjs/intl-messageformat/vitest;加密运行时验旧 hash 兼容)③ **高风险 5 个逐个升+真验证**(research→二次确认→装→验→独立 commit):TS6(rootDir+css.d.ts)· next-intl4 · zod4(errorMap→error+真打 tRPC)· next16(--webpack 绕 Turbopack)· undici8(engines22.19+allowH2:false+**真打 moyu ok**)④ **收尾** @types/node25+vite8(eslint10 不兼容已回退9)→ **升级天花板** ⑤ **Next16 eslint 迁移**(flat config,`pnpm lint` 转绿 0err/57warn)+ 删 @types/bcryptjs stub ⑥ **全盘审查 0 漏洞**(5 维度 workflow+对抗复核)。9 commit · typecheck16/16 · test12/12。**留**:桌面 standalone 闭环未验(用户取消;现安装包是升级前代码)· mac-mini/mac-studio 确认 node≥22.19 · 57 set-state-in-effect lint warning backlog · Next16 clean-build 偶发竞态(重试即过)
 - [x] **🚀 依赖稳升审计 + 前后端性能优化 + Turbopack 验证(2026-06-14 win-laptop)· 用户指令**:① **P0 依赖卫生** 钉死 web RC/alpha→稳定版(react/trpc/tailwind/@types-react 真包)+ `pnpm up -r` 批量 within-major;② **bullmq/ioredis 双版本雷根治** — override 钉单版本 ioredis5.11.1+bullmq5.78.0(实测 16/16 绿,「关键雷」解除);③ **P1** 签名 URL 进程内缓存([minio.ts](packages/adapters/storage/minio.ts),返回稳定 URL 省浏览器重下)+ GroupDetail `React.memo`(治列表刷新重渲风暴);④ **P2 Turbopack 验证=BLOCKED**(@ss/core `.js` 扩展名导入 turbopack 无 extensionAlias → 固化 next.config 注释、撤 dev:turbo、保 webpack);⑤ **稳升全量审计**(ultracode 15 簇 workflow,矩阵见下「📦 依赖升级审计」区)。typecheck 16/16。**留**:🟢 稳升批落地 · onnxruntime/ffmpeg 原生重编译需起服验 TTS/ffmpeg · 签名缓存需重启 dev server 生效
 - [x] **🔧 优化器 token 真 bug + Provider 删除放开 + 去moyu化 + happyhorse 链路(2026-06-13 win-laptop)· 用户报/指令**:① **深度优化恒挂真 bug** — guards.ts token 正则贪婪吞 `@图片N` 后中文成假 token → 对齐编译器 `@(图片|音频)\d+`(**系统级**,几乎所有 token 密集提示词受影响);② **Provider 删除全部放开** — 去 3 守卫 + 删除自动清 key/缓存 + 中转站级联删;③ **初始零数据 + moyu 中性化** — seed 去默认中转站 + 文案/占位符/前缀逻辑中性化(架构本就支持换站);④ **happyhorse 深诊** — base64 格式(裸 base64)+ ffmpeg 缩图,卡 moyu 单图 60KB 限。DB 清理 docx.parser→mammoth。typecheck/测试全过。**留**:happyhorse 需公网存储真出片 · 剩余注释中性化 · 深度优化真打验证

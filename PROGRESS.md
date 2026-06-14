@@ -5,6 +5,31 @@
 
 ---
 
+## 2026-06-14(周日,win-laptop · 第三场:全盘深度审计(依赖/漏洞×3/模块/链路)+ 21 漏洞修复)
+
+**完成**
+- ✅ **全盘深度审计**(用户指令,ultracode 多 workflow):
+  - ① **依赖/框架**:`pnpm outdated -r` 确认升级到天花板;`pnpm audit` 查出 **4 CVE → 修到 0**(esbuild 0.28.0→0.28.1 治 Windows dev-server 任意读文件[low,本机适用]+ Deno 二进制完整性[high,Deno 专属不适用];pnpm override postcss `^8.5.10` 治 next 内嵌 postcss XSS、@hono/node-server `^1.19.13` 治传递依赖中间件绕过)。
+  - ③ **模块逻辑关系**(8 包测绘 workflow,14 agent):分层干净 web→api→core→adapters→db→shared **无循环依赖**,@ss/api+@ss/web 零异常;异常全是非-bug 设计债。
+  - ④ **传导链路**(6 链路追踪):鉴权 / 剧本→分析→分镜 / Provider 调用 / AIGC→视频→成片 / 队列worker / 存储签名URL —— **6 条端到端全通(intact)**。
+  - ② **代码漏洞 ×3 遍**(7 维度×3 轮 + 对抗性复核,58 agent / 3.78M tokens):**37 raw → 21 确认真漏洞**(毙 16 误报)。**全是历史代码,非本会话升级引入。**
+- ✅ **21 漏洞全修复**(5 commit,逐批 typecheck+test 验证):
+  - 批①认证/密钥(`a53b9b0`):**logout CSRF**(补 isOriginAllowed,对齐 login/trpc)· **弱 KDF**(APP_MASTER_KEY 非 64-hex 时生产拒绝弱 SHA-256 派生,dev 兜底+warn)· 密钥脱敏统一 canonical maskSecret · relay decrypt 日志脱敏。
+  - 批②SSRF(`ddc1938`):**refVideoUrl/refAudioUrl** 用户 URL 直送 provider 无校验 → zod refine validateApiUrl(API 边界拒)· **validateApiUrl IPv6 字面量方括号绕过真 bug**(`[::1]`/`[fe80::]` 让所有 IPv6/环回检查失效)修 + IPv4-mapped IPv6 复查 · isRelayFetchableUrl 补内网/metadata 拦截。
+  - 批③DoS(`25b41a7`):DOCX **zip bomb**(mammoth 解压前扫 ZIP 中央目录限 80MB)· media base64 无上限(加 25MB)· parseEpisodeBoundaries **集数上限 500**(治恶意多集头 N×DB 插入风暴)。
+  - 批④(`5faf80f`):临时文件 rmSync(force) 补 try-catch+log ×2(对齐 QC handler)。
+  - **1 误报**:字符正则 over-match,读码证 SPEAKER 是固定常量、非用户构造、按行处理、文本已限 5MB,无 ReDoS → 不动(证据驱动)。
+- 最终态:typecheck 16/16 · test 12/12 · `pnpm audit` 0 漏洞 · 模块/链路健全。
+
+**问题/待决策**
+- ❓ 模块审计的**非-bug 设计债**留 backlog:ShotAssetRef/AssetRefKind deprecated 待 W6 清 · @ss/core 有个 `dist/cost` 死编译产物(源已删)· BaseProvider.recordLedger 写失败只日志(成本统计黑洞潜在隐患)· @ss/shared·core·queue 导出声明与 package.json subpath 不全一致(消费方按现用法均能跑)· url-safety DNS rebinding(注释已标 Phase 2,需 DNS pinning,本次未实现)。
+
+**下次接着做**
+- 📌 桌面 standalone 闭环验证 + 重打含全部升级/安全修复的安装包
+- 📌 mac-mini/mac-studio 开工确认 node ≥22.19(undici8 engines)+ 跑 `db:sync`
+
+---
+
 ## 2026-06-14(周日,win-laptop · 第二场:依赖大升级全落地 TS6/next16/zod4/next-intl4/undici8 + Win 本地打包 + eslint 迁移 + 全盘审查)
 
 **完成**
