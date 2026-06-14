@@ -12,32 +12,71 @@
 //   standalone   Next standalone server.js —— 打包后(Step D)用
 // =============================================================================
 
-import { bootstrapDesktop } from './desktop-bootstrap.mjs';
+import { bootstrapDesktop, getDesktopPaths } from './desktop-bootstrap.mjs';
 import { spawn } from 'node:child_process';
-import { openSync, mkdirSync, writeFileSync } from 'node:fs';
+import { openSync, mkdirSync, writeFileSync, writeSync, rmSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
+// ── 早期日志:必须在 bootstrap 之前就绪(诊断核心)────────────────────────────
+// 打包态(main.rs windows_subsystem="windows")无控制台 → stdout/stderr 丢失;旧版 desktop.log
+// 直到 bootstrap 返回【之后】才打开,导致 initdb/pg.start 这类最易在全新机崩的阶段报错无迹可寻
+// (= "卡初始界面、无任何信息" 的根)。现在:模块加载第一时间算出 logs 目录、开 fd,
+// 把全部 console 输出 tee 进 desktop.log;启动失败时把错误写 last-error.txt 供 splash 回显。
+const earlyPaths = getDesktopPaths();
+mkdirSync(earlyPaths.logs, { recursive: true });
+const logPath = join(earlyPaths.logs, 'desktop.log');
+const lastErrorPath = join(earlyPaths.logs, 'last-error.txt');
+const logFd = openSync(logPath, 'a');
+const ts = () => {
+  try {
+    return new Date().toISOString();
+  } catch {
+    return '';
+  }
+};
+const logLine = (s) => {
+  try {
+    writeSync(logFd, `${s}\n`);
+  } catch {
+    /* ignore */
+  }
+};
+// tee:bootstrap 内所有 console.log/error 既走原 stdout(dev 可见)又落 desktop.log(打包态唯一可查处)。
+// orig 也包 try —— 打包态原 stdout 句柄无效,直接调会抛,会连带打断 console.log。
+for (const stream of [process.stdout, process.stderr]) {
+  const orig = stream.write.bind(stream);
+  stream.write = (chunk, ...rest) => {
+    try {
+      writeSync(logFd, typeof chunk === 'string' ? chunk : chunk.toString());
+    } catch {
+      /* ignore */
+    }
+    try {
+      return orig(chunk, ...rest);
+    } catch {
+      return true;
+    }
+  };
+}
+logLine(`\n[desktop] ===== 启动 ${ts()} =====`);
+logLine(
+  `[desktop] packaged=${process.env.SS_DESKTOP_PACKAGED ?? '0'} mode=${process.env.SS_DESKTOP_WEB_MODE ?? 'dev'} port=${process.env.PORT ?? '47900'}`,
+);
+logLine(`[desktop] node=${process.execPath} cwd=${process.cwd()}`);
+
 async function main() {
-  const { env, stop, paths } = await bootstrapDesktop();
+  const { env, stop } = await bootstrapDesktop({ logFd });
   console.log('[desktop] bootstrap 完成,启动 web 服务...');
 
   const mode = process.env.SS_DESKTOP_WEB_MODE ?? 'dev';
   // 打包态由 main.rs 传 PORT=47900(冷门端口,避开常见 dev 端口冲突);dev 模式走 next dev -p 3000(忽略 PORT)
   const port = process.env.PORT ?? '47900';
 
-  // 文件日志:.app GUI 启动会 detach、stdout 丢失 → 把关键信息 + web 服务输出写进数据目录,便于诊断。
-  mkdirSync(paths.logs, { recursive: true });
-  const logPath = join(paths.logs, 'desktop.log');
   const maskedUrl = (env.DATABASE_URL || '(未设)').replace(/:[^:@/]+@/, ':***@');
-  writeFileSync(
-    logPath,
-    `[desktop] ${new Date().toISOString?.() ?? ''} mode=${mode} port=${port}\n[desktop] DATABASE_URL=${maskedUrl}\n`,
-    { flag: 'a' },
-  );
-  const logFd = openSync(logPath, 'a');
+  logLine(`[desktop] DATABASE_URL=${maskedUrl}`);
 
   let webChild;
   if (mode === 'standalone') {
@@ -67,6 +106,13 @@ async function main() {
     });
   }
 
+  // 已越过 bootstrap 崩溃点、web 子进程已拉起 → 清掉上一轮失败留下的 last-error 标记
+  try {
+    rmSync(lastErrorPath, { force: true });
+  } catch {
+    /* ignore */
+  }
+
   let shuttingDown = false;
   const shutdown = async (sig) => {
     if (shuttingDown) return;
@@ -90,6 +136,14 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error('[desktop] 启动失败:', e);
+  const detail = (e && e.stack) || String(e);
+  const msg = `[desktop] 启动失败 ${ts()}:\n${detail}`;
+  logLine(msg);
+  // last-error.txt:供 main.rs 在超时分支读取并回显到 splash(把"瞎卡"变"自报错")
+  try {
+    writeFileSync(lastErrorPath, `${msg}\n`, { flag: 'w' });
+  } catch {
+    /* ignore */
+  }
   process.exit(1);
 });

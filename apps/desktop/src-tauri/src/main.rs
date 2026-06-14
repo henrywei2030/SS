@@ -34,6 +34,45 @@ const REDIRECT_JS: &str = "window.location.replace('http://localhost:3000')";
 const REDIRECT_JS: &str = "window.location.replace('http://localhost:47900')";
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(180);
 
+/// 数据目录下的 logs 路径(与 desktop-bootstrap.mjs getDesktopPaths 对齐)。
+/// 优先 SS_DESKTOP_DATA_DIR 覆盖;否则 Windows 用 %APPDATA%\StarsAlign Studio\logs。
+/// (非 Windows 无 APPDATA → None,退回通用提示;桌面打包卡屏问题聚焦 Windows。)
+fn logs_dir() -> Option<std::path::PathBuf> {
+    if let Ok(dir) = std::env::var("SS_DESKTOP_DATA_DIR") {
+        return Some(std::path::PathBuf::from(dir).join("logs"));
+    }
+    let appdata = std::env::var("APPDATA").ok()?;
+    Some(
+        std::path::PathBuf::from(appdata)
+            .join("StarsAlign Studio")
+            .join("logs"),
+    )
+}
+
+/// 启动失败时给 splash 的提示 JS:优先读 last-error.txt 显示真实错误(node sidecar 写),
+/// 读不到再退回通用超时文案。serde_json 安全转义,避免错误文本里的引号/换行破坏 JS。
+fn failure_hint_js() -> String {
+    let detail = logs_dir()
+        .map(|d| d.join("last-error.txt"))
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|s| s.chars().take(800).collect::<String>())
+        .unwrap_or_default();
+    let msg = if detail.trim().is_empty() {
+        "本地服务启动超时。请退出重试;若反复失败,日志见 %APPDATA%\\StarsAlign Studio\\logs\\desktop.log"
+            .to_string()
+    } else {
+        format!(
+            "启动失败:\n{}\n\n完整日志:%APPDATA%\\StarsAlign Studio\\logs\\desktop.log",
+            detail.trim()
+        )
+    };
+    let json = serde_json::to_string(&msg).unwrap_or_else(|_| "\"启动失败\"".to_string());
+    format!(
+        "var h=document.querySelector('.hint');if(h){{h.style.whiteSpace='pre-wrap';h.style.maxWidth='82%';h.style.fontSize='12px';h.style.lineHeight='1.5';h.textContent={};}}",
+        json
+    )
+}
+
 /// dev:仓库根 = 编译期 manifest 目录(.../apps/desktop/src-tauri)上溯三级。
 #[cfg(debug_assertions)]
 fn workspace_root() -> std::path::PathBuf {
@@ -155,6 +194,16 @@ fn main() {
                 }
                 Err(e) => {
                     eprintln!("[desktop] 拉起 sidecar 失败:{e}");
+                    // sidecar 没起来 → JS 侧不会写日志,这里兜底写 last-error 供超时分支回显
+                    if let Some(dir) = logs_dir() {
+                        let _ = std::fs::create_dir_all(&dir);
+                        let _ = std::fs::write(
+                            dir.join("last-error.txt"),
+                            format!(
+                                "拉起 node sidecar 失败:{e}\n(通常是 bundled node.exe 缺失/损坏,或被杀软拦截)"
+                            ),
+                        );
+                    }
                 }
             }
 
@@ -166,9 +215,8 @@ fn main() {
                     if ready {
                         let _ = win.eval(REDIRECT_JS);
                     } else {
-                        let _ = win.eval(
-                            "var h=document.querySelector('.hint');if(h)h.textContent='本地服务启动超时,请退出重试或查看日志';",
-                        );
+                        let js = failure_hint_js();
+                        let _ = win.eval(js.as_str());
                     }
                 }
             });

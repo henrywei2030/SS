@@ -1272,6 +1272,25 @@ ADR-35 定方向,本 ADR 记 Phase 2 落地的关键实现决策与踩坑(详见
 
 ---
 
+## ADR-37 · Win 安装包"全新机一步到位"+ 卡 splash 双根因修复(2026-06-14)
+
+**状态**:✅ 已采纳。承 ADR-36。背景:之前打包的 Win 安装包在全新机上"打开永久卡 splash 初始界面、无任何信息"。全盘排查定位为**两个独立 bug 叠加**(都让 bootstrap 在 web 绑 :47900 前崩溃 → splash 永不跳转),另带一个 MSI 构建期硬限制。
+
+**决策**:
+1. **VC++ CRT 走 app-local 部署(非装 redistributable)**。根因:内嵌 `@embedded-postgres/windows-x64` 的 `postgres.exe`/`initdb`/`libpq`/wx* 全部 import `vcruntime140.dll`/`msvcp140.dll`/`vcruntime140_1.dll`,这 3 个 CRT 既不在包里、全新 Win10/11 也不保证有(只随 VC++ 2015-2022 Redist 装)→ PG 起不来 → 卡死。构建机有 VS BuildTools 自带这些 DLL,**恰好长期掩盖**。**采纳**:`desktop-pack.mjs` 把 3 个 CRT DLL 拷进 PG `native/bin`(Windows DLL 搜索顺序里 exe 自身目录优先 System32 → 就地解析,微软官方支持的 app-local 部署)。**替代方案**:NSIS 钩子静默装 redist(只对 NSIS 生效,MSI 走 WiX 不行)/ WiX 自定义动作(更繁)/ 装时下载(违背离线一步到位)→ app-local 最轻(~2MB)、打包器无关、无 UAC。
+2. **`run()` 绝对路径 exe 不走 shell**。根因:`desktop-bootstrap.mjs` 的 `run()` 一律 `shell:true`(因 pnpm 是 .cmd),但跑含空格的 `process.execPath`(`C:\Program Files\...\node.exe`)时 shell 不加引号 → 被 cmd 拆成 `C:\Program` → 打包态 seed 必挂、**所有 Win 机都中招**(既有 bug,本次冒烟测试当场抓到)。**采纳**:`shell: win32 && !/[\\/]/.test(cmd)`(裸命令 pnpm 仍走 shell,绝对路径直跑)。
+3. **删 standalone 冗余 `.pnpm` 修 MSI MAX_PATH**。`next@16.2.9` 的 `.pnpm` 目录名带 peer 哈希(`next@16.2.9_@babel+core@7.29.7_react-dom...`)使文件路径超 Windows 260 字符 → WiX `light.exe` LGHT0103 打不开 → MSI 构建挂。`hoistPnpmFlat` 已把真包提到 node_modules 顶层(npm 式可解析),`.pnpm` 是死重量。**采纳**:pack 删 `.pnpm`(实测 standalone 去掉后 Next 正常 Ready + worker 注册 + Prisma 加载,不依赖它)→ 消灭超长路径 + 瘦身 45MB。
+4. **打包目标 MSI + WebView2 offlineInstaller**。`tauri.conf.json` `targets:["msi"]` + `bundle.windows.webviewInstallMode:{type:"offlineInstaller"}` → 完整 WebView2 运行时安装器内嵌 MSI Binary 表,装时静默装(已装跳过,`NOT INSTALLED_WEBVIEW2_VERSION` 守卫)→ **真离线、不联网**。代价:MSI ~240→~430MB(+WebView2 ~150MB)。
+5. **诊断兜底**:`desktop-server.mjs` 从进程第一行 tee 全部输出到 `%APPDATA%\StarsAlign Studio\logs\desktop.log`(旧版日志在 bootstrap 返回后才开 → bootstrap 崩溃阶段全丢),失败写 `last-error.txt`,`main.rs` 超时把真实错误回显到 splash。把"无声卡死"变"自报错"。
+
+**验收(本机,2026-06-14)**:① 依赖齐全(CRT/node/PG/4 外置包/prisma/seed/44 迁移 + WebView2 离线内嵌)② `msiexec /a` 管理式解包 exit 0 ③ 完整链端到端跑通 web 返回激活页 200 + 28KB HTML(非 splash)。回归工具 `scripts/verify-desktop-flow.mjs`。**唯一未本地验证**:CRT 修复在真·无 VC++ 机上的效果(本机自带系统 CRT)→ 待干净机实装确认。
+
+**代价/风险**:MSI 体积大(~430MB);未签名(SmartScreen 拦);app-local CRT 源依赖构建机有 VS Redist 文件夹(回退 System32),换 CI 机需确保其一存在。
+
+**关联**:承 ADR-36(桌面打包实现);依赖矩阵见 [[win-laptop-desktop-build]] 记忆。
+
+---
+
 ## 待补充的决策(占位)
 
 📋 ADR-32 · 桌面端 vs 移动端的代码共享策略(Phase 2 拆分时)

@@ -252,6 +252,17 @@ writeFileSync(
 log('  ✓ 预编译 @ss/db(esbuild)→ standalone(绕开 Next 编译 Prisma client)');
 log('  ✓ standalone + static + public');
 
+// 删冗余 .pnpm 虚拟存储:hoistPnpmFlat 已把真实包提到 node_modules 顶层(npm 式可解析),.pnpm 仅剩死重量。
+//   且其 next@16.2.9_@babel+core@7.29.7_react-dom... 这类带 peer 哈希的超长目录名会让文件路径超 Windows
+//   MAX_PATH(260)→ WiX light.exe 打不开(LGHT0103),MSI 打包必挂(2026-06-14 实测踩线)。删掉它:
+//   消灭全部超长路径 + 瘦身 ~45MB。已实测验证 standalone 去掉 .pnpm 后 Next 正常 Ready、进程内 worker
+//   注册、Prisma 加载均无 "Cannot find module"(仅因无 DB 报 P1001,证明模块全解析成功)。
+const pnpmStore = join(webOut, 'node_modules/.pnpm');
+if (existsSync(pnpmStore)) {
+  rmSync(pnpmStore, { recursive: true, force: true });
+  log('  ✓ 删冗余 .pnpm(hoist 后无用 · 修 MSI MAX_PATH · 瘦身 ~45MB)');
+}
+
 // ---- 3. Runtime(bootstrap 脚本 + 平铺 node_modules:embedded-pg + pg)----
 // ESM 不读 NODE_PATH → 脚本与 node_modules 同级放在 runtime/,import 自然解析。
 log('③ Runtime(npm install embedded-postgres + pg → 平铺 node_modules)');
@@ -283,6 +294,72 @@ rmSync(tmpPrefix, { recursive: true, force: true });
 copyFileSync(join(root, 'scripts/desktop-bootstrap.mjs'), join(runtimeOut, 'desktop-bootstrap.mjs'));
 copyFileSync(join(root, 'scripts/desktop-server.mjs'), join(runtimeOut, 'desktop-server.mjs'));
 log('  ✓ runtime(node_modules + bootstrap 脚本)');
+
+// ---- 3b. App-local VC++ CRT(关键:上一版安装包"卡初始界面"的根因修复)----
+//   @embedded-postgres/windows-x64 的 postgres.exe/initdb.exe/libpq.dll/wx* DLL 全部 import
+//   vcruntime140.dll / msvcp140.dll / vcruntime140_1.dll;这三个 CRT 既不在包里、全新 Win 机也
+//   不保证有(只随 VC++ Redistributable 安装)→ postgres.exe 加载失败 → pg.start() 崩 → bootstrap
+//   退出 → web 永不监听 47900 → 永久卡 splash。构建机有 VS BuildTools(自带这些 DLL)恰好掩盖。
+//   Windows DLL 搜索顺序里 exe 自身目录优先于 System32 → 把 CRT 拷进 PG bin 即可就地解析,
+//   全新机无需装 redist(微软官方支持的 VC++ app-local 部署)。仅 win32 打包时执行,MSI/NSIS 通吃。
+if (process.platform === 'win32') {
+  const pgBin = join(runtimeOut, 'node_modules/@embedded-postgres/windows-x64/native/bin');
+  if (!existsSync(pgBin)) {
+    throw new Error(`[pack] 找不到内嵌 PG bin 目录(${pgBin})—— 无法部署 app-local CRT`);
+  }
+  const crtDlls = ['vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll'];
+  // 源:优先 VS 的 VC Redist 文件夹(权威 app-local 副本),回退 System32
+  const tryDir = (d) => {
+    try {
+      return readdirSync(d);
+    } catch {
+      return [];
+    }
+  };
+  const findCrtSrc = () => {
+    const vsRoots = [
+      'C:/Program Files/Microsoft Visual Studio',
+      'C:/Program Files (x86)/Microsoft Visual Studio',
+    ];
+    const hits = [];
+    for (const r of vsRoots) {
+      for (const year of tryDir(r)) {
+        for (const ed of tryDir(join(r, year))) {
+          const msvc = join(r, year, ed, 'VC/Redist/MSVC');
+          for (const ver of tryDir(msvc)) {
+            for (const sub of ['x64', 'onecore/x64']) {
+              const crtRoot = join(msvc, ver, sub);
+              for (const f of tryDir(crtRoot)) {
+                if (/^Microsoft\.VC\d+\.CRT$/.test(f) && existsSync(join(crtRoot, f, 'vcruntime140.dll'))) {
+                  hits.push(join(crtRoot, f));
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    hits.sort(); // 版本号在路径里,字典序近似取最新
+    return hits.length ? hits[hits.length - 1] : 'C:/Windows/System32';
+  };
+  const crtSrc = findCrtSrc();
+  const missing = [];
+  let n = 0;
+  for (const dll of crtDlls) {
+    const src = join(crtSrc, dll);
+    if (existsSync(src)) {
+      copyFileSync(src, join(pgBin, dll));
+      n++;
+    } else {
+      missing.push(dll);
+    }
+  }
+  if (missing.length) {
+    // 失败必须响 —— 静默漏掉就是再出一个全新机卡死的安装包
+    throw new Error(`[pack] app-local CRT 缺 ${missing.join(', ')}(源 ${crtSrc})—— 全新机 PG 仍会起不来,中止打包`);
+  }
+  log(`  ✓ app-local VC++ CRT → PG bin(${n}/3,源 ${crtSrc})`);
+}
 
 // ---- 4. Node 二进制(tauri externalBin,名字带 target triple)----
 log('④ Node 二进制(externalBin)');

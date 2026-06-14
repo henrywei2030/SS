@@ -126,13 +126,19 @@ export function loadOrCreateSecrets(paths) {
 // =============================================================================
 // 复用现有 pnpm 命令(注入桌面 env)
 // =============================================================================
-function run(cmd, args, env, cwd = rootDir) {
+function run(cmd, args, env, cwd = rootDir, logFd = null) {
   return new Promise((res, rej) => {
     const child = spawn(cmd, args, {
       cwd,
       env,
-      stdio: 'inherit',
-      shell: process.platform === 'win32', // Windows 下 pnpm 是 .cmd,需 shell
+      // logFd 存在(打包态由 sidecar 传入)→ migrate/seed 子进程输出落 desktop.log(否则继承父无效句柄丢失);
+      // 不传(dev CLI 直跑)→ 'inherit',终端实时可见。
+      stdio: logFd ? ['ignore', logFd, logFd] : 'inherit',
+      // shell 仅给裸命令名(pnpm/npm = .cmd,需 shell 解析 PATH);绝对路径 exe(如 process.execPath)
+      //   绝不用 shell —— 否则 shell:true 不给含空格的路径加引号,'C:\Program Files\...\node.exe' 被
+      //   cmd 拆成 'C:\Program' → 打包态 seed 必挂、app 永久卡 splash(2026-06-14 冒烟测试实捕,
+      //   与 VC++ Redist 缺失并列为旧安装包卡死根因)。
+      shell: process.platform === 'win32' && !/[\\/]/.test(cmd),
     });
     child.on('exit', (code) =>
       code === 0 ? res() : rej(new Error(`\`${cmd} ${args.join(' ')}\` 退出码 ${code}`)),
@@ -256,9 +262,10 @@ async function verifyEmbedded(databaseUrl) {
 // =============================================================================
 // 主流程
 // =============================================================================
-export async function bootstrapDesktop() {
+export async function bootstrapDesktop({ logFd = null } = {}) {
   const paths = getDesktopPaths();
   ensureDirs(paths);
+  console.log(`[desktop] bootstrap 开始(数据目录 ${paths.base})`);
   const secrets = loadOrCreateSecrets(paths);
 
   const freshInstall = !existsSync(join(paths.pgData, 'PG_VERSION'));
@@ -289,7 +296,14 @@ export async function bootstrapDesktop() {
       await pg.start();
       break;
     } catch (e) {
-      if (attempt >= 4) throw e;
+      if (attempt >= 4) {
+        console.error(
+          '[desktop] 内嵌 PostgreSQL 启动失败(已重试 4 次)。全新 Windows 机最常见根因:' +
+            '缺 Microsoft Visual C++ Redistributable(postgres.exe 依赖 vcruntime140.dll/msvcp140.dll)。' +
+            `原始错误:${e instanceof Error ? e.stack : e}`,
+        );
+        throw e;
+      }
       console.warn(
         `[desktop] 内嵌 pg 启动失败(第 ${attempt}/4 次),1.5s 后重试:${e instanceof Error ? e.message : e}`,
       );
@@ -337,7 +351,7 @@ export async function bootstrapDesktop() {
     console.log(`[desktop] migrations:共 ${m.total} 个,本次新应用 ${m.applied} 个`);
   } else {
     console.log('[desktop] prisma migrate deploy...');
-    await run('pnpm', ['--filter', '@ss/db', 'migrate:deploy'], env);
+    await run('pnpm', ['--filter', '@ss/db', 'migrate:deploy'], env, rootDir, logFd);
   }
 
   // ---- seed:首跑全量(建 admin + provider 占位 + 结构),后续增量补缺(SEED_ADDITIVE) ----
@@ -356,13 +370,14 @@ export async function bootstrapDesktop() {
       [seedJs],
       freshInstall ? seedEnv : { ...seedEnv, SEED_ADDITIVE: '1' },
       paths.base,
+      logFd,
     );
   } else if (freshInstall) {
     console.log('[desktop] 首跑 db:seed(全量)...');
-    await run('pnpm', ['db:seed'], seedEnv);
+    await run('pnpm', ['db:seed'], seedEnv, rootDir, logFd);
   } else {
     console.log('[desktop] db:sync(增量补缺,不覆盖各机配置)...');
-    await run('pnpm', ['db:sync'], env);
+    await run('pnpm', ['db:sync'], env, rootDir, logFd);
   }
 
   // 收尾核对

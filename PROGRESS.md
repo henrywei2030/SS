@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-06-14(周日,win-laptop · 第四场:Win 安装包重打 + 卡 splash 双根因修复 + 全盘验收)
+
+**完成**
+- ✅ **重打含全部升级/安全修复的 Win 安装包 + 定位修复"卡初始界面"两个真根因**(用户:打包 win 端,确保全新机一步到位、装完进主界面不卡 loading)。取证调查(4 路并行 workflow)+ 端到端冒烟实捕:
+  - **根因① VC++ Redistributable 缺失(仅全新机)**:内嵌 `@embedded-postgres/windows-x64` 的 postgres.exe 等 import `vcruntime140.dll`/`msvcp140.dll`/`vcruntime140_1.dll`(PE 导入表扫描验证),全新 Win10/11 不保证有 → PG 起不来 → bootstrap 崩 → web 永不监听 47900 → 永久卡 splash。构建机有 VS BuildTools 自带 → 长期掩盖。**修:app-local CRT** —— `desktop-pack.mjs` 把 3 个 CRT DLL 拷进 PG `native/bin`(exe 目录优先 System32,无需装 redist,MSI/NSIS 通吃)。
+  - **根因② seed 命令 shell 转义(所有 Win 机)**:`desktop-bootstrap.mjs` `run()` 用 `shell:true` 跑含空格的 `process.execPath`(`C:\Program Files\...\node.exe`)被 cmd 拆成 `C:\Program` → 打包态 seed 必挂。**既有 bug,本次 `--once` 冒烟当场抓到**。修:`shell: win32 && !/[\\/]/.test(cmd)`(绝对路径不走 shell)。
+  - **MSI 构建期 MAX_PATH(LGHT0103)**:`next@16.2.9` 的 `.pnpm` 带 peer 哈希的超长目录名使路径超 260 字符 → WiX `light.exe` 打不开 → MSI 挂。**修:删 hoist 后冗余的 `.pnpm`**(实测 standalone 不依赖,Next 正常 Ready)→ 修 MAX_PATH + 瘦身 45MB。
+  - **打包配置**:`tauri.conf.json` → `targets:["msi"]` + `webviewInstallMode:offlineInstaller`(WebView2 完整离线安装器内嵌 MSI、装时静默装/已装跳过 → 真离线一步到位)。
+  - **诊断兜底**:`desktop-server.mjs` 从第一行 tee 全部输出落 `desktop.log`(旧版 bootstrap 崩溃阶段全丢)、失败写 `last-error.txt`、`main.rs` 超时回显真实错误到 splash(不再无声卡死)。决策记 [ADR-37](docs/05-tech-decisions.md) + 记忆 [[win-laptop-desktop-build]]。
+- ✅ **全盘验收三项全 PASS**(本机):① **依赖齐全** CRT3/3·node·PG·4 外置包(ffmpeg/ffprobe/onnxruntime/sentencepiece 含真实二进制)·prisma·@ss/db·seed.mjs·44 迁移·WebView2 离线内嵌 ② **能装成功** `msiexec /a` 管理式解包 exit 0(13127 文件 / 904MB)③ **进主界面不卡 loading**(最重点)完整链端到端:initdb→迁移44→seed全量→web Ready→`GET / →307 /zh-CN/login →307 /zh-CN/activate →200 + 28KB 真实 HTML`。回归工具 `scripts/verify-desktop-flow.mjs`(可跨机)。
+- ✅ 产物:`apps/desktop/src-tauri/target/release/bundle/msi/StarsAlign Studio_0.1.0_x64_en-US.msi`(**430MB**,含 seed 修复 + WebView2 离线)。3 次构建迭代(MSI MAX_PATH → 删 .pnpm → seed 修复重打)。
+
+**问题/待决策**
+- ❓ **唯一未本地验证**:CRT 修复在"真·无 VC++ 全新机"上的效果 —— 本机自带系统 CRT 无法复现该场景(app-local CRT 已确认在包里、DLL 搜索顺序逻辑成立)。需干净 Win 机实装确认;万一仍有异常,`%APPDATA%\StarsAlign Studio\logs\desktop.log` 现会自报错。
+- ❓ 沙箱守卫拦 `taskkill /F` / `Stop-Process -Force`(误判 `/PID`、`/a` 为删系统路径)→ 验证脚本改用自终止设计绕过,无影响。
+
+**下次接着做**
+- 📌 拿干净 Win 机(无 VC++)实装这个 MSI,走完激活页确认 CRT 修复真生效
+- 📌 mac-mini/mac-studio 开工确认 node ≥22.19 + 跑 `db:sync`
+
+---
+
 ## 2026-06-14(周日,win-laptop · 第三场:全盘深度审计(依赖/漏洞×3/模块/链路)+ 21 漏洞修复)
 
 **完成**
