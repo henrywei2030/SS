@@ -68,8 +68,9 @@ logLine(
 logLine(`[desktop] node=${process.execPath} cwd=${process.cwd()}`);
 
 async function main() {
-  const { env, stop } = await bootstrapDesktop({ logFd });
+  const { env, stop, reportProgress } = await bootstrapDesktop({ logFd });
   console.log('[desktop] bootstrap 完成,启动 web 服务...');
+  reportProgress?.(95, '启动应用界面…');
 
   const mode = process.env.SS_DESKTOP_WEB_MODE ?? 'dev';
   // 打包态由 main.rs 传 PORT=47900(冷门端口,避开常见 dev 端口冲突);dev 模式走 next dev -p 3000(忽略 PORT)

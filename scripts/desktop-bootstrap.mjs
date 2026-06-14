@@ -265,6 +265,16 @@ async function verifyEmbedded(databaseUrl) {
 export async function bootstrapDesktop({ logFd = null } = {}) {
   const paths = getDesktopPaths();
   ensureDirs(paths);
+  // 启动进度落盘(boot-progress.json:{pct,label})→ main.rs 轮询读取,实时显示在 splash 进度条 + 阶段文案
+  const progressPath = join(paths.logs, 'boot-progress.json');
+  const reportProgress = (pct, label) => {
+    try {
+      writeFileSync(progressPath, JSON.stringify({ pct, label }), 'utf8');
+    } catch {
+      /* ignore */
+    }
+  };
+  reportProgress(5, '准备运行环境…');
   console.log(`[desktop] bootstrap 开始(数据目录 ${paths.base})`);
   const secrets = loadOrCreateSecrets(paths);
 
@@ -284,9 +294,11 @@ export async function bootstrapDesktop({ logFd = null } = {}) {
   });
 
   if (freshInstall) {
+    reportProgress(12, '初始化数据库引擎(首次启动较慢,请稍候)…');
     console.log('[desktop] initdb...');
     await pg.initialise();
   }
+  reportProgress(28, '启动数据库…');
   console.log('[desktop] 启动内嵌 postgres...');
   // 启动退避重试(2026-06-09 审查):relaunch 时上一实例的 pg 可能还在释放 :54329(SIGTERM 后
   //   短暂占端口)→ 直接 start 撞 EADDRINUSE → bootstrap 崩、app 卡在启动。退避重试等旧实例释放
@@ -313,6 +325,7 @@ export async function bootstrapDesktop({ logFd = null } = {}) {
 
   // 建库(幂等)
   await ensureDatabase(secrets.SS_DESKTOP_PG_PASSWORD);
+  reportProgress(42, '准备数据库…');
 
   const databaseUrl = `postgresql://${PG_USER}:${secrets.SS_DESKTOP_PG_PASSWORD}@localhost:${PG_PORT}/${PG_DB}?schema=public`;
 
@@ -344,6 +357,7 @@ export async function bootstrapDesktop({ logFd = null } = {}) {
   const packaged = process.env.SS_DESKTOP_PACKAGED === '1';
 
   // ---- migrate ----
+  reportProgress(55, '应用数据库结构…');
   if (packaged) {
     const migDir = process.env.SS_DESKTOP_MIGRATIONS_DIR || join(rootDir, 'packages/db/prisma/migrations');
     console.log(`[desktop] 应用 migrations(自包含 runner)← ${migDir}`);
@@ -356,6 +370,7 @@ export async function bootstrapDesktop({ logFd = null } = {}) {
 
   // ---- seed:首跑全量(建 admin + provider 占位 + 结构),后续增量补缺(SEED_ADDITIVE) ----
   const seedEnv = { ...env, ADMIN_DEFAULT_PASSWORD: env.ADMIN_DEFAULT_PASSWORD ?? 'admin123!@#' };
+  reportProgress(70, freshInstall ? '导入初始数据(首次启动较慢,请稍候)…' : '同步数据…');
   if (packaged) {
     const seedJs = process.env.SS_DESKTOP_SEED_JS;
     if (!seedJs || !existsSync(seedJs)) {
@@ -385,13 +400,14 @@ export async function bootstrapDesktop({ logFd = null } = {}) {
   console.log(
     `[desktop] ✅ 内嵌库核对:migrations=${stats.migrations} · public 表=${stats.tables} · 用户=${stats.users}`,
   );
+  reportProgress(90, '数据就绪,启动服务…');
 
   const stop = async () => {
     console.log('[desktop] 停止内嵌 postgres...');
     await pg.stop();
   };
 
-  return { pg, env, databaseUrl, freshInstall, paths, stats, stop };
+  return { pg, env, databaseUrl, freshInstall, paths, stats, stop, reportProgress, progressPath };
 }
 
 // =============================================================================

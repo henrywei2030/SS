@@ -295,6 +295,31 @@ copyFileSync(join(root, 'scripts/desktop-bootstrap.mjs'), join(runtimeOut, 'desk
 copyFileSync(join(root, 'scripts/desktop-server.mjs'), join(runtimeOut, 'desktop-server.mjs'));
 log('  ✓ runtime(node_modules + bootstrap 脚本)');
 
+// ---- 3a. patch embedded-postgres 的 chmod EPERM(关键:Program Files 只读装机卡 splash 的真根因)----
+//   initialise()/start() 对 PG 二进制 fs.chmod('755')(Unix 习惯)。装进只读的 C:\Program Files
+//   后,非管理员进程不能改文件属性 → EPERM → initdb 崩 → bootstrap 退出 → app 永久卡 splash。
+//   (2026-06-14 安装实测,last-error.txt 捕获。本机 dev 路径可写从不复现,故此前漏网。)
+//   chmod 在 Windows 对可执行性无意义(源注释也说是 "greedily, in case it is not")→ 吞 EPERM/EACCES。
+{
+  const epIndex = join(runtimeOut, 'node_modules/embedded-postgres/dist/index.js');
+  if (existsSync(epIndex)) {
+    const before = readFileSync(epIndex, 'utf8');
+    const n = (before.match(/yield fs\.chmod\(\w+, '755'\);/g) || []).length;
+    const after = before.replace(
+      /yield fs\.chmod\((\w+), '755'\);/g,
+      "yield fs.chmod($1, '755').catch((e) => { if (e && e.code !== 'EPERM' && e.code !== 'EACCES') throw e; });",
+    );
+    if (after !== before) {
+      writeFileSync(epIndex, after);
+      log(`  ✓ patch embedded-postgres chmod 吞 EPERM(${n} 处,修 Program Files 只读装机卡 splash)`);
+    } else {
+      log('  ⚠ embedded-postgres chmod 未匹配(版本可能变了,需复核 dist/index.js)');
+    }
+  } else {
+    log('  ⚠ 未找到 embedded-postgres/dist/index.js — 无法 patch chmod');
+  }
+}
+
 // ---- 3b. App-local VC++ CRT(关键:上一版安装包"卡初始界面"的根因修复)----
 //   @embedded-postgres/windows-x64 的 postgres.exe/initdb.exe/libpq.dll/wx* DLL 全部 import
 //   vcruntime140.dll / msvcp140.dll / vcruntime140_1.dll;这三个 CRT 既不在包里、全新 Win 机也

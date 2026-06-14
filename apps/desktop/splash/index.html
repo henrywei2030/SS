@@ -40,7 +40,22 @@
         background-clip: text;
         -webkit-text-fill-color: transparent;
       }
-      .hint { font-size: 13px; color: #5baef0; opacity: 0.8; }
+      .hint { font-size: 13px; color: #5baef0; opacity: 0.85; min-height: 18px; max-width: 80%; text-align: center; white-space: pre-wrap; }
+      .bar {
+        width: 300px;
+        max-width: 72%;
+        height: 4px;
+        background: rgba(123, 196, 246, 0.15);
+        border-radius: 2px;
+        overflow: hidden;
+      }
+      .bar-fill {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, #5baef0, #7bc4f6);
+        border-radius: 2px;
+        transition: width 0.45s ease;
+      }
     </style>
   </head>
   <body>
@@ -78,6 +93,7 @@
       </svg>
       <div class="ring"></div>
       <div class="title">星垣工坊 · StarsAlign Studio</div>
+      <div class="bar"><div class="bar-fill" id="bar-fill"></div></div>
       <div class="hint">正在启动本地服务(首次启动需初始化数据库,请稍候)…</div>
     </div>
   </body>

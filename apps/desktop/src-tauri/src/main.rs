@@ -90,6 +90,17 @@ fn set_process_group(cmd: &mut Command) {
     let _ = cmd;
 }
 
+/// ★ 去掉 Windows 扩展长度前缀 \\?\ —— Tauri 的 current_exe()/resource_dir() 在 Windows 常返回带
+/// 此前缀的 verbatim 路径;当脚本/参数传给 node 时,node 解析不了 \\?\ → 把 'C:' 当成一段去 lstat
+/// → EISDIR → sidecar 启动即崩 → 永久卡 splash(2026-06-14 安装实测,sidecar.out.log 捕获)。
+/// 这是卡 splash 的【最前置真根因】,挡在 chmod/stdio 之前,故此前一直没暴露。
+fn strip_unc(p: std::path::PathBuf) -> std::path::PathBuf {
+    match p.to_str() {
+        Some(s) if s.starts_with(r"\\?\") => std::path::PathBuf::from(&s[4..]),
+        _ => p,
+    }
+}
+
 /// 拉起 node sidecar(desktop-server.mjs)。
 fn spawn_sidecar(app: &tauri::AppHandle) -> std::io::Result<Child> {
     let _ = app;
@@ -113,12 +124,13 @@ fn spawn_sidecar(app: &tauri::AppHandle) -> std::io::Result<Child> {
         let exe_dir = exe.parent().ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::Other, "无法定位 exe 目录")
         })?;
-        let node = exe_dir.join(if cfg!(windows) { "node.exe" } else { "node" });
-        let res = app
-            .path()
-            .resource_dir()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?
-            .join("resources");
+        let node = strip_unc(exe_dir.join(if cfg!(windows) { "node.exe" } else { "node" }));
+        let res = strip_unc(
+            app.path()
+                .resource_dir()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?
+                .join("resources"),
+        );
         let mut cmd = Command::new(&node);
         cmd.arg(res.join("runtime/desktop-server.mjs"))
             .current_dir(&res)
@@ -128,27 +140,65 @@ fn spawn_sidecar(app: &tauri::AppHandle) -> std::io::Result<Child> {
             .env("SS_DESKTOP_MIGRATIONS_DIR", res.join("db/migrations"))
             .env("SS_DESKTOP_SEED_JS", res.join("db/seed.mjs"))
             .env("PORT", WEB_PORT.to_string()); // 打包态 web 端口(与 REDIRECT_JS / 健康检查一致)
+        // ★ GUI(windows_subsystem="windows")无控制台 → spawn 的 node 继承的是【无效 stdio 句柄】,
+        //   node 在 libuv 初始化 stdio 时就崩(还没执行任何 JS)→ 无数据目录/无日志/无 last-error,
+        //   表现为永久卡 splash(2026-06-14 安装实测:手动跑好、GUI 拉起即死)。给它有效句柄:
+        //   stdin=null,stdout/stderr → sidecar.out.log(治崩 + 兜底捕获 node 自身启动/崩溃输出)。
+        cmd.stdin(std::process::Stdio::null());
+        if let Some(dir) = logs_dir() {
+            let _ = std::fs::create_dir_all(&dir);
+            if let Ok(f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(dir.join("sidecar.out.log"))
+            {
+                if let Ok(f2) = f.try_clone() {
+                    cmd.stdout(std::process::Stdio::from(f));
+                    cmd.stderr(std::process::Stdio::from(f2));
+                }
+            }
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
         set_process_group(&mut cmd);
         cmd.spawn()
     }
 }
 
-/// 轮询 web 端口直到可连(就绪)或超时。
-fn wait_web_ready(timeout: Duration) -> bool {
-    let start = Instant::now();
-    while start.elapsed() < timeout {
-        // 解析 localhost(可能是 127.0.0.1 和/或 ::1)→ 逐个试连,任一通即就绪。
-        // (server 绑 HOSTNAME=localhost;硬编码 127.0.0.1 在只解析到 ::1 的机器上会误判超时)
-        if let Ok(addrs) = (WEB_HOST, WEB_PORT).to_socket_addrs() {
-            for addr in addrs {
-                if TcpStream::connect_timeout(&addr, Duration::from_millis(800)).is_ok() {
-                    return true;
-                }
+/// 试连 web 端口(localhost 可能解析 127.0.0.1 和/或 ::1,任一通即就绪)。
+fn web_port_open() -> bool {
+    if let Ok(addrs) = (WEB_HOST, WEB_PORT).to_socket_addrs() {
+        for addr in addrs {
+            if TcpStream::connect_timeout(&addr, Duration::from_millis(400)).is_ok() {
+                return true;
             }
         }
-        std::thread::sleep(Duration::from_millis(600));
     }
     false
+}
+
+/// 读 sidecar 写的启动进度(boot-progress.json:{pct,label}),供 splash 实时显示。
+fn read_boot_progress() -> Option<(u64, String)> {
+    let p = logs_dir()?.join("boot-progress.json");
+    let s = std::fs::read_to_string(p).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&s).ok()?;
+    let pct = v.get("pct")?.as_u64()?;
+    let label = v.get("label")?.as_str()?.to_string();
+    Some((pct, label))
+}
+
+/// 把进度更新成 splash 的 JS(进度条宽度 + 阶段文案)。serde_json 转义,防文案破坏 JS。
+fn progress_eval_js(pct: u64, label: &str) -> String {
+    let json = serde_json::to_string(label).unwrap_or_else(|_| "\"\"".to_string());
+    format!(
+        "var f=document.getElementById('bar-fill');if(f)f.style.width='{}%';var h=document.querySelector('.hint');if(h)h.textContent={};",
+        pct.min(100),
+        json
+    )
 }
 
 /// 停止 sidecar:先给进程组发 SIGTERM(优雅停 web + 内嵌 pg),留时间后强杀兜底。
@@ -207,17 +257,35 @@ fn main() {
                 }
             }
 
-            // 2) 后台等 web 就绪 → 把窗口从 splash 跳到本地 web
+            // 2) 后台轮询:实时把启动进度推到 splash(进度条 + 阶段文案);web 就绪→跳转;超时→回显真实错误
             let handle = app.handle().clone();
             std::thread::spawn(move || {
-                let ready = wait_web_ready(HEALTH_TIMEOUT);
-                if let Some(win) = handle.get_webview_window("main") {
-                    if ready {
-                        let _ = win.eval(REDIRECT_JS);
-                    } else {
-                        let js = failure_hint_js();
-                        let _ = win.eval(js.as_str());
+                let start = Instant::now();
+                let mut last_key = String::new();
+                loop {
+                    if web_port_open() {
+                        if let Some(win) = handle.get_webview_window("main") {
+                            let _ = win.eval(REDIRECT_JS);
+                        }
+                        break;
                     }
+                    // 进度变化才 eval(避免每 500ms 重复注入)
+                    if let Some((pct, label)) = read_boot_progress() {
+                        let key = format!("{pct}|{label}");
+                        if key != last_key {
+                            last_key = key;
+                            if let Some(win) = handle.get_webview_window("main") {
+                                let _ = win.eval(progress_eval_js(pct, &label).as_str());
+                            }
+                        }
+                    }
+                    if start.elapsed() > HEALTH_TIMEOUT {
+                        if let Some(win) = handle.get_webview_window("main") {
+                            let _ = win.eval(failure_hint_js().as_str());
+                        }
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(500));
                 }
             });
 
