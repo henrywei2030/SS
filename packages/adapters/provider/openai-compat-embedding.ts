@@ -16,6 +16,7 @@
  * 记账:action 'embedding.generate'(独立可检索;harness 流水线层若需并入
  * prompt.optimize 日预算池,由调用方 skipLedger + 自记 — docs/07 §4.6 记账收口)。
  */
+import './http-defaults.js'; // 进程级默认 dispatcher:关 HTTP/2(undici v8 默认开)
 import { request } from 'undici';
 
 import { ProviderError } from '@ss/shared';

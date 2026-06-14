@@ -27,6 +27,7 @@ const seedanceDispatcher = new Agent({
   pipelining: 1,
   bodyTimeout: 180_000, // 3 分钟 body 接收
   headersTimeout: 180_000, // 3 分钟 headers 接收(POST create + GET query 都用)
+  allowH2: false, // undici v8 默认开 H2,中转站按 HTTP/1.1 调优 → 显式关
 });
 
 import { BaseProvider } from './base.js';

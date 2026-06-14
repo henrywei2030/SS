@@ -29,6 +29,7 @@ const claudeDispatcher = new Agent({
   connect: { timeout: 60_000 },
   bodyTimeout: 300_000,
   headersTimeout: 300_000,
+  allowH2: false, // undici v8 默认开 H2,中转站按 HTTP/1.1 调优 → 显式关
 });
 
 export interface ClaudeProviderConfig {

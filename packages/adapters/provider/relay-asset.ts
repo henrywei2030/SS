@@ -27,6 +27,7 @@
  * "url + asset_type + group_id" 这一最常见命名编写,接其他中转站时若字段
  * 不同,直接 fork 这个文件改字段即可(切勿在此处加 if-else 分支膨胀)。
  */
+import './http-defaults.js'; // 进程级默认 dispatcher:关 HTTP/2(undici v8 默认开)
 import { request } from 'undici';
 
 import { prisma } from '@ss/db';

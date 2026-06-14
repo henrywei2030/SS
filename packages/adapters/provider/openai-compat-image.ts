@@ -14,6 +14,7 @@
  *   - img2img / 参考图(NanoBanana 等 Provider 特殊扩展)
  *   - 三视图 / 全景特殊 mode(W4-MM 模式映射在 router 层做,Provider 只接 prompt 改写)
  */
+import './http-defaults.js'; // 进程级默认 dispatcher:关 HTTP/2(undici v8 默认开)
 import { request } from 'undici';
 
 import { ProviderError } from '@ss/shared';

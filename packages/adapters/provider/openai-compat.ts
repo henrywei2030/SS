@@ -53,6 +53,8 @@ const sharedDispatcher = new Agent({
   // 如 moyu sonnet ~40 tok/s)要全生成完才返 headers,180s 不够(实测 3 集 sonnet 撞 182s)
   bodyTimeout: 300_000,
   headersTimeout: 300_000,
+  // undici v8 默认开 HTTP/2;中转站链路按 HTTP/1.1 调优(连接复用/SSE/长超时)→ 显式关
+  allowH2: false,
 });
 
 // 单次设置 process 级 dispatcher · 所有 undici.request 默认走这个 Agent
