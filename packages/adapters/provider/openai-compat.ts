@@ -176,6 +176,45 @@ function parseOpenAIStream(sse: string): {
   return { content, finishReason, usage, streamError };
 }
 
+// ---------------------------------------------------------------------------
+// 瞬时网络错误判定 + 重试辅助(2026-06-14:moyu 等中转站经本机代理偶发「建连期」
+//   ECONNRESET —— 实测真调用 ~1/6,报 "network socket disconnected before secure
+//   TLS connection"。单次 reset 不该判死整条幂等文本生成,做有限次退避重试,
+//   所有走本 provider 的文本功能(灵感/剧本分析/分镜/QC/拆解)一并受益。)
+// ---------------------------------------------------------------------------
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+// 可安全重试的瞬时错误:网络抛错码(undici/socket)+ HTTP 429/5xx。
+//   4xx(401 无效令牌 / 400 参数错)= 确定性错,绝不重试,立即抛。
+const TRANSIENT_NET_CODES = new Set([
+  'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'ENETUNREACH', 'ENETDOWN',
+  'EHOSTUNREACH', 'EAI_AGAIN', 'ECONNABORTED',
+  'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT',
+]);
+const TRANSIENT_NET_MSG =
+  /socket hang up|other side closed|network socket disconnected|secure TLS connection|reset by peer|connect timeout|fetch failed/i;
+
+export function isTransientNetworkError(e: unknown): boolean {
+  if (!e || typeof e !== 'object') return false;
+  const err = e as {
+    code?: string;
+    httpStatus?: number;
+    message?: string;
+    cause?: { code?: string; message?: string };
+  };
+  // 带 httpStatus 的错误:纯按状态码判定(429/5xx 重试,其余 4xx 一律不重试)
+  if (typeof err.httpStatus === 'number') {
+    return err.httpStatus === 429 || err.httpStatus >= 500;
+  }
+  const code = err.code ?? err.cause?.code;
+  if (code && TRANSIENT_NET_CODES.has(code)) return true;
+  const msg = `${err.message ?? ''} ${err.cause?.message ?? ''}`;
+  return TRANSIENT_NET_MSG.test(msg);
+}
+
 export class OpenAICompatTextProvider extends BaseProvider implements ITextProvider {
   readonly info: ProviderInfo;
 
@@ -243,8 +282,9 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
     body.stream = true;
     body.stream_options = { include_usage: true };
 
-    let resp: OpenAIChatResponse;
-    try {
+    // attemptOnce:单次 HTTP 调用 → 还原成 OpenAIChatResponse 形状(下游零改动)。
+    //   抽成内部函数,供 requestWithRetry 包裹瞬时网络错误重试。
+    const attemptOnce = async (): Promise<OpenAIChatResponse> => {
       const { statusCode, body: respBody } = await request(`${this.cfg.apiUrl}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -267,14 +307,16 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
         } catch {
           /* not json */
         }
-        const errMsg =
-          parsed?.error?.message ?? `HTTP ${statusCode}: ${text.slice(0, 200)}`;
-        throw new ProviderError(this.info.id, errMsg);
+        const errMsg = parsed?.error?.message ?? `HTTP ${statusCode}: ${text.slice(0, 200)}`;
+        // 带上 httpStatus 供 isTransientNetworkError 判定(429/5xx 重试,4xx 立即抛)
+        const httpErr = new ProviderError(this.info.id, errMsg);
+        (httpErr as { httpStatus?: number }).httpStatus = statusCode;
+        throw httpErr;
       }
       // 改流式后 text 是 SSE(data: 行序列),非单个 JSON → 解析还原成 resp 形状,下游零改动。
       const stream = parseOpenAIStream(text);
       if (stream.streamError) {
-        // 200 后流中途报错(上游模型错误等)
+        // 200 后流中途报错(上游模型错误等)— 不当瞬时网络错误重试(可能是确定性内容错)
         throw new ProviderError(this.info.id, stream.streamError);
       }
       if (stream.content || stream.usage || stream.finishReason) {
@@ -286,7 +328,7 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
             (req.imageUrls?.length ?? 0) * 1000,
           completion_tokens: Math.ceil(stream.content.length / 4),
         };
-        resp = {
+        return {
           choices: [
             {
               message: { role: 'assistant', content: stream.content },
@@ -295,12 +337,16 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
           ],
           usage,
         };
-      } else {
-        // 兜底:中转站忽略了 stream(返回普通 JSON completion 而非 SSE)→ 按非流式解析。
-        resp = JSON.parse(text) as OpenAIChatResponse;
       }
+      // 兜底:中转站忽略了 stream(返回普通 JSON completion 而非 SSE)→ 按非流式解析。
+      return JSON.parse(text) as OpenAIChatResponse;
+    };
+
+    let resp: OpenAIChatResponse;
+    try {
+      resp = await this.requestWithRetry(attemptOnce, modelId);
     } catch (e) {
-      // 失败:Provider 内置 ledger 跳过(router 单点写,ADR-25)— skipLedger:true 时不记
+      // 失败(重试用尽 / 非瞬时错):Provider 内置 ledger 跳过(router 单点写,ADR-25)
       await this.recordLedger({
         ctx,
         providerId: modelId,
@@ -362,6 +408,42 @@ export class OpenAICompatTextProvider extends BaseProvider implements ITextProvi
       costCny,
       rawResponse: resp,
     };
+  }
+
+  /**
+   * 瞬时网络错误有限重试(退避)。仅重试瞬时错误(见 isTransientNetworkError):
+   *   网络抛错(ECONNRESET / TLS 握手前断连 / 超时)+ HTTP 429/5xx。
+   * 文本生成幂等(只取最终结果),重试安全;失败的 attempt 不记 ledger(0 成本)。
+   * 4xx(401 无效令牌 等)= 确定性错,立即抛,不浪费往返。
+   */
+  private async requestWithRetry(
+    attempt: () => Promise<OpenAIChatResponse>,
+    modelId: string,
+  ): Promise<OpenAIChatResponse> {
+    const DELAYS = [600, 1800]; // 每次重试前退避(ms);数组长度 = 额外重试次数(共 1+2=3 次)
+    let lastErr: unknown;
+    for (let i = 0; i <= DELAYS.length; i++) {
+      try {
+        return await attempt();
+      } catch (e) {
+        lastErr = e;
+        const delay = DELAYS[i] ?? 0;
+        if (i < DELAYS.length && isTransientNetworkError(e)) {
+          const reason =
+            (e as { code?: string }).code ??
+            (e as { httpStatus?: number }).httpStatus ??
+            (e instanceof Error ? e.message.slice(0, 60) : 'network');
+          console.warn(
+            `[openai-compat] ${modelId} 第 ${i + 1}/${DELAYS.length + 1} 次调用瞬时失败(${reason}),` +
+              `${delay}ms 后重试`,
+          );
+          await sleep(delay);
+          continue;
+        }
+        throw e;
+      }
+    }
+    throw lastErr; // 循环内必 return/throw,这里仅为类型完整
   }
 
   private calcCost(inTokens: number, outTokens: number): number {

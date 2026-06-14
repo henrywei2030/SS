@@ -5,6 +5,29 @@
 
 ---
 
+## 2026-06-14(周日,win-laptop · 第六场:灵感创作 API 失败定位(代理间歇 ECONNRESET)+ OpenAI-compat 文本重试 + 桌面端 Chrome 调试)
+
+**完成**
+- ✅ **灵感创作「生成分集大纲」调用失败 —— 全程取证定位,确证非配置问题**(用户报:介入 api 后灵感创作调用失败)。逐层取证,不臆断:
+  - **配置全对**:直连桌面内嵌库(`secrets.env` 解密连 :54329)查证 —— `moyu-gemini-3-flash`(TEXT,active)挂在中转站 **moyu**(`https://www.moyu.info/v1`,active,key 能 AES-256-GCM 解密),`binding.inspiration.generation.modelId=moyu-gemini-3-flash` 指向正确。不是 api 没接好。
+  - **endpoint 真能用**:用真 key 复现 app 同款流式调用 6 次 → **5 成 1 败**,失败报 `Client network socket disconnected before secure TLS connection was established`(**建连期** ECONNRESET,非流式中途)。
+  - **根因 = 经本机代理到 moyu 的间歇性建连重置 + app 文本生成无重试**:DNS 把 `www.moyu.info` 解析成 `198.18.2.44`(RFC2544 保留段 = Clash/mihomo 类代理 fake-ip)→ 代理节点偶发在建连时 RST(~1/6);而 `openai-compat.ts` 一抛错就记 `success:false` 直接 throw,单次撞上即把整条生成判死。日志实证 `desktop.log:199` `inspiration.generateOutline: 生成大纲失败:[gemini-3-flash-preview] read ECONNRESET`。
+- ✅ **修:OpenAI-compat 文本调用加瞬时网络错误有限重试**([openai-compat.ts](packages/adapters/provider/openai-compat.ts)):抽 `attemptOnce` + `requestWithRetry`(退避 [600,1800]ms,共 3 次)。仅重试**瞬时错误** —— 网络抛错码(ECONNRESET/ETIMEDOUT/EPIPE/undici UND_ERR_* 等)+ HTTP 429/5xx;**4xx(401 无效令牌等)立即抛,不重试不掩盖配置错**(httpStatus 标记判定)。失败 attempt 不记 ledger(0 成本)。**根治所有走中转站的文本功能**(灵感/剧本分析/分镜/QC/拆解)。单测 [openai-compat.test.ts](packages/adapters/provider/openai-compat.test.ts) **20/20** 锁判定;typecheck 绿。
+- ✅ **桌面端在 Chrome 打开**(用户指令):重启 `starsalign-desktop.exe`(复用内嵌库,有用户 moyu 配置)→ :47900 起服务 → Chrome 打开。**顺带揪出 Next standalone 只绑 IPv6 `::1`**(我此前 IPv4 127.0.0.1 探测一直 ECONNREFUSED 的真因;`[::1]:47900` 返 `307→login` 证服务在);Chrome 走 localhost 会 Happy-Eyeballs 回落 ::1 可达。
+
+**问题/待决策**
+- ❓ **用户当前装的是旧包(无重试)** → 重试要重新打包桌面端才生效。眼下缓解:① 代理里 `moyu.info` 设 DIRECT 直连(国内站本不需走代理,fake-ip 强路由引入抖动)② 失败再点一次(~5/6 成功)。
+- ❓ **桌面 standalone 仅 IPv6 绑定**(:47900 on `::1`)→ 外部 IPv4 工具不可达;WebView/Chrome 经 localhost 无碍,但建议让 server 绑双栈(`HOSTNAME=::` 或显式 IPv4+IPv6)更稳 —— backlog。
+- ❓ 上次会话内嵌 PG 留 orphan(:54329 未随 app 退出清掉,本次新实例复用了它)→ 印证「退出钩子加固」backlog。
+- ❓ **Mac 安装包无法在 Windows 构建**(Tauri/macOS 需 Xcode toolchain + 签名,不能交叉编译)→ 须在 mac-mini/mac-studio 上打。
+
+**下次接着做**
+- 📌 打含重试的新 **Win 包**(本场收工时构建)并实装验证灵感创作不再被单次 reset 判死
+- 📌 **Mac 包**:切到 mac 机 `开工` → pull 到本修复 → 跑三步链(`SS_DESKTOP_BUILD=1 pnpm --filter @ss/web build` → `node scripts/desktop-pack.mjs` → `pnpm -C apps/desktop tauri:build`)出 `.dmg`
+- 📌 可选:standalone 绑 0.0.0.0 双栈 + 退出钩子清 orphan PG
+
+---
+
 ## 2026-06-14(周日,win-laptop · 第五场:卡 splash 终极根因(strip_unc)+ 转 NSIS 单用户 + splash 进度条 + 7 项 app 修复)
 
 **完成**
