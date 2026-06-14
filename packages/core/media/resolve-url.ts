@@ -44,13 +44,26 @@ export function isRelayFetchableUrl(url: string | null | undefined): boolean {
   if (/^data:/i.test(url)) return true;
   if (!/^https?:\/\//i.test(url)) return false; // blob:/相对路径 → 远端用不了
   try {
-    const host = new URL(url).hostname.toLowerCase();
+    // 去 IPv6 字面量方括号(否则 [fe80::] / [::1] 绕过下面所有检查)
+    const host = new URL(url).hostname.toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
+    // 本机回环 moyu 拉不到 + SSRF 防御:内网/metadata 段一律视为不可拉(全盘审计 low)。
+    //   refImageUrls 经此 gate 后送 provider 被服务端 fetch,虽多为系统签名 URL,仍防御性拦内网。
+    const INTERNAL = [
+      /^127\./,
+      /^10\./,
+      /^192\.168\./,
+      /^169\.254\./, // link-local + 云 metadata
+      /^0\./,
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
+    ];
     return !(
       host === 'localhost' ||
-      host === '127.0.0.1' ||
       host === '0.0.0.0' ||
       host === '::1' ||
-      host === '[::1]'
+      host === '::' ||
+      host.startsWith('fe80:') ||
+      /^f[cd]/.test(host) ||
+      INTERNAL.some((re) => re.test(host))
     );
   } catch {
     return false;

@@ -31,6 +31,8 @@ import type { Context } from '../context.js';
 import { logOperation } from '../middleware/audit.js';
 import { isEpisodeLockedNow } from '../utils/episode-lock.js';
 import { assertProjectAccess } from '../middleware/access.js';
+// 全盘审计 high(SSRF):用户提供的 ref URL 直送 provider,须先过 SSRF 校验(拦内网/metadata/非 http)
+import { validateApiUrl } from '../utils/url-safety.js';
 
 import { loadGroupOrThrow } from './aigc-shared.js';
 
@@ -111,8 +113,20 @@ export const videoProcedures = {
         generateAudio: z.boolean().optional(),
         addWatermark: z.boolean().optional(),
         webSearchEnabled: z.boolean().optional(),
-        refVideoUrl: z.string().min(1).max(2000).optional(),
-        refAudioUrl: z.string().min(1).max(2000).optional(),
+        // SSRF 防御(全盘审计 high):用户填的参考 URL 会进 provider 请求体被服务端 fetch,
+        //   须是安全公网 http(s)(拦 169.254.169.254 / 内网 / file:// 等),对齐 admin apiUrl 校验。
+        refVideoUrl: z
+          .string()
+          .min(1)
+          .max(2000)
+          .refine((u) => validateApiUrl(u) === null, { error: 'refVideoUrl 必须是安全的公网 http(s) URL' })
+          .optional(),
+        refAudioUrl: z
+          .string()
+          .min(1)
+          .max(2000)
+          .refine((u) => validateApiUrl(u) === null, { error: 'refAudioUrl 必须是安全的公网 http(s) URL' })
+          .optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {

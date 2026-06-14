@@ -58,7 +58,9 @@ export function validateApiUrl(
     return `不支持协议 ${url.protocol}(仅 http/https)`;
   }
 
-  const host = url.hostname.toLowerCase();
+  // 去 IPv6 字面量方括号:url.hostname 对 IPv6 返回 `[::1]`/`[fe80::]`,
+  // 不去掉则下面所有 IPv6/环回的 startsWith/正则检查全被绕过(全盘审计 medium)
+  const host = url.hostname.toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
   const allowLocal = opts.allowLocalhost ?? process.env.NODE_ENV === 'development';
 
   // 显式黑名单 hostname
@@ -81,9 +83,20 @@ export function validateApiUrl(
     }
   }
 
-  // IPv6 内网(简化,链路本地 + ULA)
-  if (host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd')) {
-    return `禁止 IPv6 内网/链路本地:${host}`;
+  // IPv6 内网/环回(host 已去方括号):链路本地 fe80:: / ULA fc00::/7(fc,fd 开头)/ 环回 ::1 / 未指定 ::
+  if (host.includes(':') && (host === '::1' || host === '::' || host.startsWith('fe80:') || /^f[cd]/.test(host))) {
+    return `禁止 IPv6 内网/环回:${host}`;
+  }
+  // IPv4-mapped IPv6(如 ::ffff:169.254.169.254 / ::ffff:127.0.0.1)会绕过上面的 IPv4 黑名单,
+  //   提取内嵌的 IPv4 复查(全盘审计 medium)
+  if (host.includes(':')) {
+    const embedded = host.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/)?.[1];
+    if (
+      embedded &&
+      (LOOPBACK_PATTERNS.some((re) => re.test(embedded)) || PRIVATE_IPV4_PATTERNS.some((re) => re.test(embedded)))
+    ) {
+      return `禁止 IPv4-mapped IPv6 内网:${host}`;
+    }
   }
 
   // 短主机名(无 .)可能是 docker 内部服务名 — 仅 dev 允许
