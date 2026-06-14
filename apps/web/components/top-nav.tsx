@@ -126,7 +126,7 @@ export function TopNav({
   const initial = user.displayName.charAt(0).toUpperCase();
 
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))]">
+    <header className="sticky top-0 z-40 hidden w-full border-b border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] md:block">
       <div className="mx-auto flex h-11 max-w-[1920px] items-center gap-2 px-3">
         {/* Logo */}
         <Link
@@ -176,7 +176,6 @@ export function TopNav({
               ? [
                   // 三十六收工 UX 改造:导演 = storyboard 的 tab(灵感 / 剧本 / 分镜)
                   //   四九收工:灵感创作提到第一顺位(想法 → 多集剧本是创作起点)
-                  //   五六收工:加「剧本拆解」(P1 后端就绪 → P2 前端落地,接 asset.list/update/createRelation 等)
                   {
                     href: `/${locale}/projects/${projectId}/director/storyboard?tab=inspiration`,
                     label: '灵感创作',
@@ -186,12 +185,13 @@ export function TopNav({
                     label: '剧本管理',
                   },
                   {
-                    href: `/${locale}/projects/${projectId}/director/storyboard?tab=breakdown`,
-                    label: '剧本拆解',
-                  },
-                  {
                     href: `/${locale}/projects/${projectId}/director/storyboard?tab=shots`,
                     label: '分镜工坊',
+                  },
+                  {
+                    // v0.2.0:剧本拆解移到分镜之后(拆解吃分镜工坊导出的分镜脚本快照)
+                    href: `/${locale}/projects/${projectId}/director/storyboard?tab=breakdown`,
+                    label: '剧本拆解',
                   },
                 ]
               : []

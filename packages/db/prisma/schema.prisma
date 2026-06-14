@@ -98,6 +98,7 @@ model Project {
   invites  Invitation[]
   inspirationDrafts InspirationDraft[]
   promptKnowledge   PromptKnowledge[] // H0(docs/07):项目私有知识条目(世界观等)
+  storyboardExports StoryboardExport[] // v0.2.0:分镜脚本导出快照(剧本拆解输入)
   style    StyleProfile?     @relation(fields: [styleId], references: [id])
 
   createdAt DateTime  @default(now())
@@ -671,6 +672,30 @@ model ShotGroup {
   @@index([episodeId])
   @@index([status])
   @@map("shot_groups")
+}
+
+// -----------------------------------------------------------------------------
+// 分镜脚本导出快照(v0.2.0 · 导演链路重构 · 方案丙)
+//   分镜工坊全集生成完成后,把选中集的分镜(Scene.content + Shot + ShotGroup)序列化为
+//   结构化「分镜脚本」文本,落一条不可变快照 —— 既是剧本拆解的唯一输入,又可下载/留痕。
+//   破除现状「分镜脚本无实体、纯前端实时拼、无版本」的痛点。
+// -----------------------------------------------------------------------------
+model StoryboardExport {
+  id                String   @id @default(cuid())
+  projectId         String
+  episodeNumbers    Int[]    @default([]) // 本次导出覆盖的集号(集数多选)
+  scriptText        String   @db.Text // 服务端生成的结构化分镜脚本(拆解输入 + 可下载),带 Scene.content 上下文
+  shotCountSnapshot Int      @default(0) // 导出时镜数;重生成分镜后比对判定快照是否过期
+  createdById       String? // 导出者 userId(标量,不建 FK 关系,避开 User 删除级联复杂度)
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
+
+  @@index([projectId])
+  @@index([deletedAt])
+  @@map("storyboard_exports")
 }
 
 // =============================================================================

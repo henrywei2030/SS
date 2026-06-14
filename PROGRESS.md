@@ -5,6 +5,32 @@
 
 ---
 
+## 2026-06-14(周日,mac-studio · 依赖升级接续 + 导演模块 v0.2.0 链路重构 + 3 遍审核 + 手机端方案B暂缓)
+
+**完成**
+- ✅ **开工:依赖大升级接续到本机**。win-laptop 推了 26 commit(next15→16 / zod3→4 / TS5.9→6 / undici6→8 / next-intl3→4 + 安全修复 + 桌面打包)。stash 本地「七二第十波」WIP(经查已被远端 `a69d0d1` 全景反转取代=冗余)→ `reset --hard origin/main` → `pnpm install` + `db:generate`(Prisma 7.8)+ `db:sync` + `db:sync:prompts` → preflight 10/10 + typecheck 16/16 + lint 0 error。本机对齐升级后系统。
+- ✅ **手机端 UI 改造 · 3 方案设计 + 方案B Phase0/1 落地(随后用户暂缓)**。多智能体研究(Mobbin/Muzli/NN/g/Material/Linear)+ 现状理解 → 3 方案(A 极简留白 / **B 沉浸暗色工作室** / C 卡片化 Bento)+ 可视化 mockup → 用户选 B。落地 **Phase0 基座**(globals.css 移动断点/dvh/safe-area/四级表面/辉光/glass-bar + viewport `viewport-fit=cover`/themeColor `#1F1F1F`)+ **Phase1 登录页**(片场暗房辉光/44pt 输入/蓝色辉光 CTA/footer 溢出修,浏览器验证)+ **底部 Tab Bar/中置辉光 FAB/移动 header**(`mobile-nav.tsx`)。**用户指令暂缓** → 完整封存 [docs/09](docs/09-mobile-ui-redesign-plan-B.md) + 每日提醒(scheduled task)+ 项目记忆。
+- ✅ **导演模块 v0.2.0 链路重构(用户三诉求全满足 + E2E 真打)**。多智能体深挖现状 → 3 系统设计方案(选 **方案丙 向导式流水线**)→ 4 阶段:
+  - **阶段A 地基**:新表 `StoryboardExport`(分镜脚本快照,首次让「分镜脚本」有实体承载;migration `add_storyboard_export` 纯增量)+ `storyboard.pipelineStatus`(导演四阶段单一真相,治现状三套口径分散)+ `loadProjectShootingScript`(asset-shared,带 `Scene.content` 构建分镜脚本,缓解镜头碎片化)。运行时真打验证。
+  - **阶段B 导出**:`storyboard.exportScript`(落快照 + 下载双产物)/`listExports` + 分镜工坊导出 Dropdown 加「集数多选 checklist Dialog」+ 全集完成门禁(pipelineStatus 驱动灰显/缺集提示)。截图验证(全 3 集就绪 · 18·20·34 镜)。
+  - **阶段C 拆解换源 + 统一口径**:`breakdownProject` 加 `exportId` 分支 —— **拆解输入从「剧本原文」切到「分镜脚本快照」**(修正用户报的「拆解来源」逻辑错误)。**真打质量优秀**(从无 Scene 块、纯镜头 prompt 的分镜脚本抽出陆鸣/小A 236/196 字深度档案 + 场景/道具,¥0.045)→ **结论:镜头 prompt 自带场景/人物上下文,不需造新 prompt(省 seed/db:sync)**。拆解 pane 文案改「从分镜脚本拆解」+ 快照门禁。**统一美术侧**:删 `art/breakdown-dialog`,「从剧本拆解」3 触点改跳导演;删 `script-pane` 错位「拆解来源」面板(229 行;「灵感转正」经 top-bar-script-actions 独立入口不受影响)。
+  - **阶段D 流水线收口**:TopBar tab 重排 灵感→剧本→**分镜→拆解**(诉求 #1)+ pipelineStatus 驱动阶段状态(✓/🔒)+ 箭头 stepper 串成向导式流水线;HoverNav 同序 + 两入口默认 tab 对齐 inspiration。截图验证。
+  - **E2E 真打全链路**:灵感→剧本→分镜(全3集)→导出分镜脚本快照(72镜)→拆解(8草稿)→applyBreakdown 入库8→syncToArt 同步8→美术工坊可见8。
+- ✅ **3 遍全盘审核 + 17 项优化全应用**(24 agent / 115 万 token + 对抗复核)。**真 bug**:pipelineStatus 漏 `deletedAt:null` 灵感草稿过滤(已修)。删 breakdown-review-dialog 不可达 else 死分支(~85 行 + chunkArr/常量/utils,`exportId` 改必填)+ 死 prop(onSelectEpisode)/死字段(shotCountSnapshot、lastSnapshot.exportId);多处陈旧注释/docstring 纠偏(「从完整剧本拆解」→「从分镜脚本快照」);docs W1-W7-followup/W2-admin-module-spec/DEVELOPMENT 加归档/滞后横幅。typecheck 16/16。
+- ✅ **系统版本 → v0.2.0**(root + web `package.json` + 登录 footer)。**admin 密码恢复 seed 默认 `admin123!@#`**(验证期临时改密后恢复)。
+
+**问题/待决策**
+- ❓ 手机端方案 B 暂缓中(每日提醒已设);恢复见 docs/09。
+- ❓ 导演可选打磨未做(STAGES 单一配置 / `?tab=shots&sub=breakdown` 子 tab 嵌套 / 每阶段 CTA)—— 内部/外观,零功能影响,按需再做。
+- ❓ 单集 `asset.breakdown` + `breakdownAssets`/`asset_step_base` 随 art-dialog 下线成无前端调用方,已标 DEPRECATED 暂保留(仍是 agent tool),待 follow-up 评估删除。
+
+**下次接着做**
+- 📌 导演 v0.2.0 更大项目真打(分镜脚本 200k 截断边界、跨集拆解质量);可选打磨按需。
+- 📌 手机端方案 B 恢复时从 docs/09 §5 接续(复验 Tab Bar → 项目首页 Hero/Bento → 工作区重排)。
+- 📌 别的设备开工:`db:migrate:deploy`(StoryboardExport migration)+ `db:sync`。
+
+---
+
 ## 2026-06-14(周日,win-laptop · 第六场:灵感创作 API 失败定位(代理间歇 ECONNRESET)+ OpenAI-compat 文本重试 + 桌面端 Chrome 调试)
 
 **完成**

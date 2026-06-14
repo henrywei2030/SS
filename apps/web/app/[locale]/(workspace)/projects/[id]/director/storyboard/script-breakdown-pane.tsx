@@ -3,14 +3,14 @@
 /**
  * 五六-2 · 剧本拆解 pane(重写为图2 三板块布局)
  *
- * 定位:由后端 LLM 从「关联的完整剧本」拆解 + 打磨 人物/场景/道具 的文字设定,
+ * 定位:由后端 LLM 从「分镜工坊导出的分镜脚本快照」拆解 + 打磨 人物/场景/道具 的文字设定,
  *   人工再微调,完成后可选「同步到美术工坊」。不是手动建资产。
  *
- * 布局:顶栏(从完整剧本拆解 + 同步全部)+ 三并排板块(人物/场景/道具)。
+ * 布局:顶栏(从分镜脚本快照拆解 + 同步全部)+ 三并排板块(人物/场景/道具)。
  *   每板块 = 左「选择列表」(名称 + role + … 菜单 + 内联 + 新建)| 右「设定内容」编辑器。
  *   人物:基础 + 形象设定 + 人物小传 + 心理(每段「AI 生成」);场景/道具:设定描述 + 生图提示词。
  *
- * 架构:全部文字由后端模型生成(breakdownProject 整本拆 / generateAssetText 定点重生成 /
+ * 架构:全部文字由后端模型生成(breakdownProject 吃分镜脚本快照 / generateAssetText 定点重生成 /
  *   generateProfileField 心理字段),同一份 Asset,syncToArt 闸只翻转不复制。
  */
 import * as React from 'react';
@@ -122,6 +122,14 @@ export function ScriptBreakdownPane({ projectId }: { projectId: string }): React
   const utils = trpc.useUtils();
   const [reviewOpen, setReviewOpen] = React.useState(false);
 
+  // v0.2.0 方案丙:拆解输入 = 分镜工坊导出的「分镜脚本快照」(而非剧本原文)。
+  //   用 pipelineStatus 取最新快照 — 无快照则门禁禁用拆解并引导去分镜工坊导出。
+  const pipeline = trpc.storyboard.pipelineStatus.useQuery({ projectId });
+  const exportInfo = pipeline.data?.export;
+  const hasSnapshot = exportInfo?.hasSnapshot ?? false;
+  const latestExportId = exportInfo?.latestExportId ?? null;
+  const snapEps = exportInfo?.episodeNumbers ?? [];
+
   const syncAll = trpc.asset.syncToArt.useMutation({
     onSuccess: (res) => {
       toast[res.syncedCount === 0 ? 'info' : 'success'](
@@ -148,12 +156,25 @@ export function ScriptBreakdownPane({ projectId }: { projectId: string }): React
       {/* 顶栏 */}
       <div className="flex h-11 shrink-0 items-center justify-between border-b border-[hsl(var(--color-border))] px-3">
         <div className="text-[12px] text-[hsl(var(--color-muted-foreground))]">
-          由模型从「完整剧本」拆解人物/场景/道具文字设定 · 人工微调后同步美术工坊
+          {hasSnapshot
+            ? `从分镜工坊导出的「第${snapEps.join('·')}集分镜脚本」拆解人物/场景/道具 · 人工微调后同步美术工坊`
+            : '还没有分镜脚本快照 — 请先到「分镜工坊」生成分镜并「导出分镜脚本」,再回此拆解'}
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="default" className="h-7 gap-1.5 text-xs" onClick={() => setReviewOpen(true)}>
+          <Button
+            size="sm"
+            variant="default"
+            className="h-7 gap-1.5 text-xs"
+            onClick={() => setReviewOpen(true)}
+            disabled={!hasSnapshot}
+            title={
+              hasSnapshot
+                ? `从第${snapEps.join('·')}集分镜脚本拆解(最新导出)`
+                : '请先到分镜工坊导出分镜脚本'
+            }
+          >
             <ScanText className="size-3.5" />
-            从完整剧本拆解
+            从分镜脚本拆解
           </Button>
           <Button
             size="sm"
@@ -187,13 +208,15 @@ export function ScriptBreakdownPane({ projectId }: { projectId: string }): React
         ))}
       </div>
 
-      {reviewOpen && (
+      {reviewOpen && latestExportId && (
         <BreakdownReviewDialog
           projectId={projectId}
+          exportId={latestExportId}
           onClose={() => setReviewOpen(false)}
           onApplied={() => {
             setReviewOpen(false);
             void utils.asset.list.invalidate();
+            void utils.storyboard.pipelineStatus.invalidate({ projectId });
           }}
         />
       )}
@@ -378,7 +401,7 @@ function TypePanel({
               </div>
             ) : assets.length === 0 ? (
               <div className="p-2 text-[10px] leading-relaxed text-[hsl(var(--color-muted-foreground))]">
-                暂无 · 点上方「从完整剧本拆解」
+                暂无 · 先到分镜工坊导出分镜脚本,再点上方「从分镜脚本拆解」
               </div>
             ) : (
               <ul>

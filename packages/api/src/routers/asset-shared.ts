@@ -61,6 +61,83 @@ export async function loadProjectFullScript(
   return { text: truncated ? full.slice(0, maxChars) : full, scriptCount: scripts.length, truncated };
 }
 
+/**
+ * 聚合项目「分镜脚本」(v0.2.0 导演链路重构 · 方案丙 · 剧本拆解的新输入源)。
+ * 取选中集(不传=全集)的【场结构原文 Scene.content】+【分镜 Shot.content/prompt】,
+ * 序列化为带 ===第N集=== 头的结构化文本 —— 即 storyboard.exportScript 落进
+ * StoryboardExport.scriptText 的内容。
+ *
+ * ⚠️ 关键:带 Scene.content(场结构原文)是缓解「拆分镜脚本比拆剧本原文素材更碎」
+ *   质量风险的核心 —— 镜头是 30 字内碎片,场结构补回人物/地点/情境上下文。
+ * 仅纳入已生成分镜(shotCount>0)的集;按集号升序、场按 positionIdx。
+ */
+export async function loadProjectShootingScript(
+  ctx: Context,
+  projectId: string,
+  episodeNumbers?: number[],
+  maxChars = 200_000,
+): Promise<{ text: string; shotCount: number; episodeNumbers: number[]; truncated: boolean }> {
+  const episodes = await ctx.prisma.episode.findMany({
+    where: {
+      projectId,
+      deletedAt: null,
+      ...(episodeNumbers && episodeNumbers.length > 0 ? { number: { in: episodeNumbers } } : {}),
+    },
+    orderBy: { number: 'asc' },
+    select: {
+      number: true,
+      title: true,
+      scenes: {
+        where: { deletedAt: null },
+        orderBy: { positionIdx: 'asc' },
+        select: { number: true, timeOfDay: true, location: true, place: true, content: true },
+      },
+      shots: {
+        where: { deletedAt: null },
+        orderBy: { positionIdx: 'asc' },
+        select: { number: true, framing: true, angle: true, content: true, prompt: true },
+      },
+    },
+  });
+
+  const covered: number[] = [];
+  let shotCount = 0;
+  const blocks: string[] = [];
+  for (const e of episodes) {
+    if (e.shots.length === 0) continue; // 仅纳入已生成分镜的集
+    covered.push(e.number);
+    shotCount += e.shots.length;
+    const lines: string[] = [`=== 第${e.number}集${e.title ? ' ' + e.title : ''} ===`];
+    if (e.scenes.length > 0) {
+      lines.push('〔场结构〕');
+      for (const sc of e.scenes) {
+        const meta = [sc.timeOfDay, sc.location ?? sc.place].filter(Boolean).join(' ');
+        lines.push(`【${sc.number}${meta ? ' ' + meta : ''}】${sc.content ? ' ' + sc.content : ''}`);
+      }
+    }
+    lines.push('〔分镜〕');
+    for (const s of e.shots) {
+      const fa = [s.framing, s.angle].filter(Boolean).join('/');
+      lines.push(
+        `镜${s.number}${fa ? ` [${fa}]` : ''} ${s.content}${s.prompt ? ` | 提示词: ${s.prompt}` : ''}`,
+      );
+    }
+    blocks.push(lines.join('\n'));
+  }
+  const full = blocks.join('\n\n');
+  const truncated = full.length > maxChars;
+  // 注:shotCount/episodeNumbers 记的是全量 covered 集;truncated 时正文可能未含全部集 ——
+  //   计数仅供进度/日志展示,不影响拆解输入正确性(拆解吃的是下方截断后的 text;末尾有截断标记)。
+  return {
+    text: truncated
+      ? full.slice(0, maxChars) + '\n\n…(分镜脚本过长已截断,后续集未纳入本次拆解)'
+      : full,
+    shotCount,
+    episodeNumbers: covered,
+    truncated,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // PromptEdit — 资产文本字段训练集采集(训练字段从 @ss/shared 拉,跟 storyboard.ts 同源)
 // ---------------------------------------------------------------------------

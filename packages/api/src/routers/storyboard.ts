@@ -21,6 +21,7 @@ import { sceneProcedures } from './storyboard-scene.js';
 import { shotProcedures } from './storyboard-shot.js';
 import { groupProcedures } from './storyboard-group.js';
 import { generateProcedures } from './storyboard-generate.js';
+import { exportProcedures } from './storyboard-export.js';
 
 // ---------------------------------------------------------------------------
 // Router(各 procedure 见同目录 storyboard-<组>.ts;共用 helper / schema / 常量见 storyboard-shared.ts)
@@ -32,4 +33,5 @@ export const storyboardRouter = router({
   ...shotProcedures,
   ...groupProcedures,
   ...generateProcedures,
+  ...exportProcedures,
 });

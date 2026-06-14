@@ -10,8 +10,12 @@ import {
   Compass,
   Lightbulb,
   Users,
+  CheckCircle2,
+  Lock,
+  ChevronRight,
 } from 'lucide-react';
 
+import { trpc } from '@/lib/trpc/client';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { ScriptActions } from './top-bar-script-actions';
@@ -45,38 +49,62 @@ export function TopBar({
   // P0 修:locale fallback 改 'zh-CN' 跟项目其他地方一致(原 'zh' 跟 next-intl 路由不匹配 → 404)
   const params = useParams<{ locale: string }>();
   const locale = params?.locale ?? 'zh-CN';
+
+  // v0.2.0 向导式流水线:用 pipelineStatus 给每阶段标状态(✓完成 / 🔒锁定)。
+  //   锁定=前序未就绪(如拆解需先有分镜脚本快照),仍可点进去 — pane 内有明确引导,不硬挡。
+  const { data: pipeline } = trpc.storyboard.pipelineStatus.useQuery({ projectId });
+  const stageStatus: Record<TabKey, 'done' | 'locked' | undefined> = {
+    inspiration: pipeline?.inspiration.done ? 'done' : undefined,
+    script: pipeline?.script.done ? 'done' : undefined,
+    shots: pipeline?.generate.done ? 'done' : undefined,
+    breakdown: pipeline
+      ? pipeline.breakdown.done
+        ? 'done'
+        : pipeline.export.hasSnapshot
+          ? undefined
+          : 'locked'
+      : undefined,
+  };
+
   return (
     <div className="flex h-11 items-center justify-between border-b border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-3">
-      {/* tab 切换 — 灵感创作在最左(想法→生成剧本的源头) */}
+      {/* v0.2.0 流水线顺序:灵感创作 → 剧本管理 → 分镜工坊 → 剧本拆解(拆解吃分镜脚本,故在分镜之后) */}
       <div className="flex items-center gap-1">
         <TabButton
           active={tab === 'inspiration'}
           onClick={() => onTabChange('inspiration')}
           icon={<Lightbulb className="size-3.5" />}
+          status={stageStatus.inspiration}
         >
           灵感创作
         </TabButton>
+        <StageArrow />
         <TabButton
           active={tab === 'script'}
           onClick={() => onTabChange('script')}
           icon={<FileText className="size-3.5" />}
+          status={stageStatus.script}
         >
           剧本管理
         </TabButton>
-        {/* 五六收工:剧本拆解 — 纯文字定稿(人物档案 / 关联),美术工坊负责生图 */}
-        <TabButton
-          active={tab === 'breakdown'}
-          onClick={() => onTabChange('breakdown')}
-          icon={<Users className="size-3.5" />}
-        >
-          剧本拆解
-        </TabButton>
+        <StageArrow />
         <TabButton
           active={tab === 'shots'}
           onClick={() => onTabChange('shots')}
           icon={<ListChecks className="size-3.5" />}
+          status={stageStatus.shots}
         >
           分镜工坊
+        </TabButton>
+        <StageArrow />
+        {/* v0.2.0:剧本拆解移到分镜之后 — 拆解输入=分镜工坊导出的分镜脚本快照 */}
+        <TabButton
+          active={tab === 'breakdown'}
+          onClick={() => onTabChange('breakdown')}
+          icon={<Users className="size-3.5" />}
+          status={stageStatus.breakdown}
+        >
+          剧本拆解
         </TabButton>
       </div>
 
@@ -117,11 +145,14 @@ function TabButton({
   active,
   onClick,
   icon,
+  status,
   children,
 }: {
   active: boolean;
   onClick: () => void;
   icon: React.ReactNode;
+  /** v0.2.0 流水线阶段状态:done=已就绪✓ / locked=前序未就绪🔒(仍可点,pane 内有引导) */
+  status?: 'done' | 'locked';
   children: React.ReactNode;
 }): React.ReactElement {
   return (
@@ -136,7 +167,23 @@ function TabButton({
     >
       {icon}
       {children}
+      {status === 'done' && (
+        <CheckCircle2 className="size-3 text-[hsl(var(--color-success))]" aria-label="已就绪" />
+      )}
+      {status === 'locked' && (
+        <Lock className="size-3 text-[hsl(var(--color-muted-foreground)/0.7)]" aria-label="前序未就绪" />
+      )}
     </button>
+  );
+}
+
+// v0.2.0:阶段间箭头 — 把四个 tab 串成「向导式流水线」的视觉流向
+function StageArrow(): React.ReactElement {
+  return (
+    <ChevronRight
+      className="size-3 shrink-0 text-[hsl(var(--color-muted-foreground)/0.4)]"
+      aria-hidden
+    />
   );
 }
 

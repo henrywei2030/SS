@@ -15,6 +15,7 @@ import {
   Check,
   CircleSlash,
   Circle,
+  ListChecks,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -33,6 +34,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
@@ -150,6 +152,51 @@ export function ShotsActions({
       onAfterAction();
     },
     onError: (e) => toast.error(`自动整合失败:${e.message}`),
+  });
+
+  // ---- v0.2.0:分镜脚本快照导出(集数多选 + 全集完成门禁 · 供剧本拆解)----
+  const [exportOpen, setExportOpen] = React.useState(false);
+  const [selectedEps, setSelectedEps] = React.useState<Set<number>>(new Set());
+  const [lastSnapshot, setLastSnapshot] = React.useState<{
+    shotCount: number;
+    episodeNumbers: number[];
+    scriptText: string;
+  } | null>(null);
+
+  const pipelineQuery = trpc.storyboard.pipelineStatus.useQuery(
+    { projectId },
+    { enabled: exportOpen },
+  );
+  const pipelineEps = pipelineQuery.data?.episodes ?? [];
+  const generatedEps = pipelineEps.filter((e) => e.hasShots);
+
+  // 打开对话框 + 数据到位时:默认全选已生成集,清掉上次快照结果
+  React.useEffect(() => {
+    if (exportOpen && pipelineQuery.data) {
+      setSelectedEps(
+        new Set(pipelineQuery.data.episodes.filter((e) => e.hasShots).map((e) => e.episodeNumber)),
+      );
+      setLastSnapshot(null);
+    }
+  }, [exportOpen, pipelineQuery.data]);
+
+  const toggleEp = (n: number): void =>
+    setSelectedEps((prev) => {
+      const s = new Set(prev);
+      if (s.has(n)) s.delete(n);
+      else s.add(n);
+      return s;
+    });
+
+  const exportScriptMut = trpc.storyboard.exportScript.useMutation({
+    onSuccess: (res) => {
+      setLastSnapshot(res);
+      toast.success(`分镜脚本快照已导出 · ${res.episodeNumbers.length} 集 / ${res.shotCount} 镜`);
+      void utils.storyboard.pipelineStatus.invalidate({ projectId });
+      void utils.storyboard.listExports.invalidate({ projectId });
+      onAfterAction();
+    },
+    onError: (e) => toast.error(`导出失败:${e.message}`),
   });
 
   const handleExportCurrent = async (format: ExportFormat): Promise<void> => {
@@ -529,8 +576,154 @@ export function ShotsActions({
             <Package className="mr-2 size-3.5" />
             全部集 · CSV(合并)
           </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => setExportOpen(true)}>
+            <ListChecks className="mr-2 size-3.5" />
+            分镜脚本 · 选集导出(供拆解)
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {/* v0.2.0:分镜脚本快照导出 — 集数多选 + 全集完成门禁(供剧本拆解) */}
+      <Dialog open={exportOpen} onOpenChange={(o) => setExportOpen(o)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>导出分镜脚本(供剧本拆解)</DialogTitle>
+            <DialogDescription>
+              选要导出的集 → 生成结构化「分镜脚本」快照,作为剧本拆解的输入。仅已生成分镜的集可选。
+            </DialogDescription>
+          </DialogHeader>
+
+          {pipelineQuery.isLoading ? (
+            <div className="flex items-center gap-2 py-4 text-sm text-[hsl(var(--color-muted-foreground))]">
+              <Loader2 className="size-3.5 animate-spin" /> 加载集状态…
+            </div>
+          ) : generatedEps.length === 0 ? (
+            <div className="rounded-md border border-[hsl(var(--color-warning))]/30 bg-[hsl(var(--color-warning-bg))] p-3 text-sm text-[hsl(var(--color-warning))]">
+              还没有已生成分镜的集 — 请先在分镜工坊生成分镜。
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {pipelineQuery.data?.generate.done ? (
+                <div className="rounded-md border border-[hsl(var(--color-success))]/30 bg-[hsl(var(--color-success-bg))] px-3 py-2 text-[12px] text-[hsl(var(--color-success))]">
+                  全部 {pipelineEps.length} 集分镜已就绪
+                </div>
+              ) : (
+                <div className="rounded-md border border-[hsl(var(--color-warning))]/30 bg-[hsl(var(--color-warning-bg))] px-3 py-2 text-[12px] text-[hsl(var(--color-warning))]">
+                  {pipelineQuery.data?.generate.generated}/{pipelineQuery.data?.generate.total} 集已生成,可仅导出已生成的集
+                  {(pipelineQuery.data?.generate.missingEpisodes.length ?? 0) > 0 &&
+                    ` · 缺第 ${pipelineQuery.data?.generate.missingEpisodes.join('、')} 集`}
+                </div>
+              )}
+
+              <div className="flex items-center justify-between text-[12px] text-[hsl(var(--color-muted-foreground))]">
+                <span>
+                  已选 {selectedEps.size} / {generatedEps.length} 集
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    className="text-[hsl(var(--color-accent))] hover:underline"
+                    onClick={() => setSelectedEps(new Set(generatedEps.map((e) => e.episodeNumber)))}
+                  >
+                    全选已生成
+                  </button>
+                  <button className="hover:underline" onClick={() => setSelectedEps(new Set())}>
+                    清空
+                  </button>
+                </div>
+              </div>
+
+              <div className="max-h-64 space-y-1 overflow-y-auto">
+                {pipelineEps.map((e) => {
+                  const checked = selectedEps.has(e.episodeNumber);
+                  const selectable = e.hasShots;
+                  return (
+                    <label
+                      key={e.episodeId}
+                      className={`flex items-center gap-2 rounded border px-2 py-1.5 text-sm ${
+                        !selectable
+                          ? 'cursor-not-allowed border-[hsl(var(--color-border))] opacity-50'
+                          : checked
+                            ? 'cursor-pointer border-[hsl(var(--color-accent)/0.5)] bg-[hsl(var(--color-accent)/0.06)]'
+                            : 'cursor-pointer border-[hsl(var(--color-border))]'
+                      }`}
+                      title={selectable ? '' : '未生成分镜'}
+                    >
+                      <input
+                        type="checkbox"
+                        disabled={!selectable}
+                        checked={checked}
+                        onChange={() => selectable && toggleEp(e.episodeNumber)}
+                        className="accent-[hsl(var(--color-accent))]"
+                      />
+                      <span className="flex-1">第 {e.episodeNumber} 集</span>
+                      <span className="font-mono text-[11px] text-[hsl(var(--color-muted-foreground))]">
+                        {e.hasShots ? `${e.shotCount} 镜` : '未生成'}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+
+              {lastSnapshot && (
+                <div className="rounded-md border border-[hsl(var(--color-success))]/30 bg-[hsl(var(--color-success-bg))] px-3 py-2 text-[12px] text-[hsl(var(--color-success))]">
+                  快照已生成 · {lastSnapshot.episodeNumbers.length} 集 / {lastSnapshot.shotCount} 镜。
+                  后续可在「剧本拆解」用它拆资产。
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            {lastSnapshot ? (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    downloadFile(
+                      lastSnapshot.scriptText,
+                      `分镜脚本(${lastSnapshot.episodeNumbers.join('·')}集).txt`,
+                      'text/plain;charset=utf-8;',
+                    )
+                  }
+                  className="gap-1.5"
+                >
+                  <Download className="size-3.5" />
+                  下载 .txt
+                </Button>
+                <Button size="sm" onClick={() => setExportOpen(false)}>
+                  完成
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="outline" size="sm" onClick={() => setExportOpen(false)}>
+                  取消
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={selectedEps.size === 0 || exportScriptMut.isPending || generatedEps.length === 0}
+                  onClick={() =>
+                    exportScriptMut.mutate({
+                      projectId,
+                      episodeNumbers: [...selectedEps].sort((a, b) => a - b),
+                    })
+                  }
+                  className="gap-1.5"
+                >
+                  {exportScriptMut.isPending ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <ListChecks className="size-3.5" />
+                  )}
+                  导出 {selectedEps.size} 集快照
+                </Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Button
         size="sm"
         variant="outline"

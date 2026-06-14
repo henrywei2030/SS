@@ -14,5 +14,6 @@ export default async function DirectorHome({
   params: Promise<{ id: string; locale: string }>;
 }): Promise<never> {
   const { id, locale } = await params;
-  redirect(`/${locale}/projects/${id}/director/storyboard?tab=script`);
+  // v0.2.0:与顶栏「导演」HoverNav 主入口对齐到流水线第一阶段(灵感创作),消除两入口默认 tab 不一致
+  redirect(`/${locale}/projects/${id}/director/storyboard?tab=inspiration`);
 }

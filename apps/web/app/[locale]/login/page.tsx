@@ -23,7 +23,7 @@ export default async function LoginPage({
   await requireActivation(locale);
   const sp = await searchParams;
   return (
-    <div className="relative flex min-h-screen flex-col">
+    <div className="relative flex min-h-dvh flex-col bg-studio-glow">
       {/* 极轻微的背景纹理 — dot grid（双主题自适应） */}
       <div
         aria-hidden
@@ -39,7 +39,10 @@ export default async function LoginPage({
       />
 
       {/* 顶部右侧：主题 + 语言 */}
-      <div className="flex justify-end gap-1 p-4">
+      <div
+        className="flex justify-end gap-1 p-4"
+        style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}
+      >
         <ThemeToggle className="h-8 w-8" />
         <LanguageSwitcher />
       </div>
@@ -51,19 +54,22 @@ export default async function LoginPage({
         </div>
       </div>
 
-      {/* 底部状态栏 */}
-      <footer className="flex items-center justify-between border-t border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-1.5 text-[11px] text-[hsl(var(--muted-fg))]">
-        <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1.5">
+      {/* 底部状态栏 — 移动端防溢出:右侧 tagline <sm 隐藏 + 安全区底距 */}
+      <footer
+        className="flex items-center justify-between gap-2 border-t border-[hsl(var(--border))] bg-[hsl(var(--card))] px-4 py-1.5 text-[11px] text-[hsl(var(--muted-fg))]"
+        style={{ paddingBottom: 'max(0.375rem, env(safe-area-inset-bottom))' }}
+      >
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex shrink-0 items-center gap-1.5">
             <span className="size-1.5 rounded-full bg-[hsl(var(--color-success))]" />
             connected
           </span>
           <span className="wordmark-metallic font-semibold tracking-wide">StarsAlign</span>
         </div>
-        <div className="flex items-center gap-3">
-          <span>v0.1.0</span>
-          <span className="opacity-50">·</span>
-          <span>aligning ideas · crafting worlds</span>
+        <div className="flex shrink-0 items-center gap-3">
+          <span>v0.2.0</span>
+          <span className="hidden opacity-50 sm:inline">·</span>
+          <span className="hidden sm:inline">aligning ideas · crafting worlds</span>
         </div>
       </footer>
     </div>

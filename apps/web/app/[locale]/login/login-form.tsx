@@ -69,6 +69,7 @@ export function LoginForm({ redirectTo }: { redirectTo: string | null }): React.
               id="identifier"
               type="text"
               autoComplete="username"
+              className="h-11"
               required
               value={identifier}
               onChange={(e) => setIdentifier(e.target.value)}
@@ -85,13 +86,18 @@ export function LoginForm({ redirectTo }: { redirectTo: string | null }): React.
               id="password"
               type="password"
               autoComplete="current-password"
+              className="h-11"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
           </div>
 
-          <Button type="submit" disabled={loading || !password} className="mt-1 w-full">
+          <Button
+            type="submit"
+            disabled={loading || !password}
+            className="mt-1 h-11 w-full bg-[hsl(var(--color-accent))] text-white hover:bg-[hsl(var(--color-accent))]/90 glow-soft"
+          >
             {loading ? <Loader2 className="size-3.5 animate-spin" /> : null}
             登录
           </Button>

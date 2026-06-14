@@ -26,7 +26,6 @@ import { cn } from '@/lib/utils';
 import { AssetCard } from './asset-card';
 import { AssetEditDialog } from './asset-edit-dialog';
 import { ArtBatchGenerate, type BatchTarget } from './art-batch-generate';
-import { BreakdownDialog } from './breakdown-dialog';
 import { GapDetectionDialog } from './gap-detection-dialog';
 import type { Slot } from './asset-edit-shared';
 
@@ -78,8 +77,12 @@ export function ArtWorkspace({ projectId, locale, initialType }: Props): React.R
 
   const [editingAssetId, setEditingAssetId] = React.useState<string | null>(null);
   const [creating, setCreating] = React.useState(false);
-  const [breakdownOpen, setBreakdownOpen] = React.useState(false);
   const [gapOpen, setGapOpen] = React.useState(false);
+  // v0.2.0:美术侧拆解下线 → 统一跳导演「分镜工坊 → 剧本拆解」(拆解输入=分镜脚本快照,口径与导演一致)
+  const goBreakdown = React.useCallback(
+    () => router.push(`/${locale}/projects/${projectId}/director/storyboard?tab=breakdown`),
+    [router, locale, projectId],
+  );
   const [syncFilter, setSyncFilter] = React.useState<SyncFilter>('all');
 
   const { data, isLoading, refetch } = trpc.asset.list.useQuery({
@@ -354,15 +357,6 @@ export function ArtWorkspace({ projectId, locale, initialType }: Props): React.R
             targets={batchTargets}
             onDone={() => void refetch()}
           />
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-1.5"
-            onClick={() => setBreakdownOpen(true)}
-          >
-            <Sparkles className="size-3.5" />
-            从剧本拆解
-          </Button>
           <Button size="sm" variant="default" className="gap-1.5" onClick={() => setCreating(true)}>
             <Plus className="size-3.5" />
             新建资产
@@ -437,7 +431,7 @@ export function ArtWorkspace({ projectId, locale, initialType }: Props): React.R
             type={currentType}
             syncFilter={syncFilter}
             onClearFilter={() => setSyncFilter('all')}
-            onBreakdown={() => setBreakdownOpen(true)}
+            onBreakdown={goBreakdown}
             onCreate={() => setCreating(true)}
           />
         ) : (
@@ -507,24 +501,13 @@ export function ArtWorkspace({ projectId, locale, initialType }: Props): React.R
           }}
         />
       )}
-      {breakdownOpen && (
-        <BreakdownDialog
-          projectId={projectId}
-          onClose={() => setBreakdownOpen(false)}
-          onSaved={() => {
-            setBreakdownOpen(false);
-            void refetch();
-            toast.success('拆解完成,资产已入库');
-          }}
-        />
-      )}
       {gapOpen && (
         <GapDetectionDialog
           projectId={projectId}
           onClose={() => setGapOpen(false)}
           onOpenBreakdown={() => {
             setGapOpen(false);
-            setBreakdownOpen(true);
+            goBreakdown();
           }}
         />
       )}
@@ -578,12 +561,12 @@ function EmptyState({
     <div className="flex h-full flex-col items-center justify-center text-center">
       <div className="mb-3 text-sm font-medium">还没有任何{label}资产</div>
       <div className="mb-5 text-xs text-[hsl(var(--color-muted-foreground))]">
-        从剧本一键拆解,或手动新建
+        到导演「分镜工坊 → 剧本拆解」从分镜脚本拆解,或手动新建
       </div>
       <div className="flex gap-2">
         <Button size="sm" variant="default" className="gap-1.5" onClick={onBreakdown}>
           <Sparkles className="size-3.5" />
-          从剧本拆解
+          去剧本拆解
         </Button>
         <Button size="sm" variant="outline" className="gap-1.5" onClick={onCreate}>
           <Plus className="size-3.5" />

@@ -42,6 +42,8 @@ export const breakdownProcedures = {
    * 不直接入库,返回 drafts 给前端预览。前端用户审阅后再调 batchCreate。
    * (避免 LLM 乱拆把脏数据直接写库,人工把关一遍)
    */
+  // DEPRECATED v0.2.0:唯一前端调用方 art/breakdown-dialog.tsx 已下线(美术侧「从剧本拆解」改跳导演分镜工坊 breakdownProject)。
+  //   单集轻量拆解 + breakdownAssets/asset_step_base 暂保留(仍注册为 agent tool),待 follow-up 评估删除。
   breakdown: protectedProcedure
     // 第 20 轮 audit / ADR-27:LLM 调用,有真成本,Mastra agent 需 budget 决策
     .meta({
@@ -219,21 +221,48 @@ export const breakdownProcedures = {
         // 2026-06-08「按集分块」:只拆指定集号(前端循环驱动 + 跨块合并去重),
         //   每块小而快彻底绕开非流式中转 250-300s 超时;不传=全集(旧行为)。
         episodeNumbers: z.array(z.number().int().positive()).max(500).optional(),
+        // v0.2.0 方案丙:从「分镜工坊导出的分镜脚本快照」拆解(StoryboardExport.id)。
+        //   传 exportId 时拆解输入 = 分镜脚本(而非剧本原文),优先于 episodeNumbers。
+        exportId: z.string().cuid().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       await assertProjectAccess(ctx, input.projectId);
-      const { text: scriptText, scriptCount } = await loadProjectFullScript(
-        ctx,
-        input.projectId,
-        200_000,
-        input.episodeNumbers,
-      );
-      if (!scriptText.trim()) {
-        throw new TRPCError({
-          code: 'NOT_FOUND',
-          message: '本项目还没有剧本 — 先在「剧本管理」上传,或从「灵感创作」关联剧本',
+
+      // 拆解输入源:exportId(分镜脚本快照)优先,否则回退剧本原文(loadProjectFullScript)
+      let scriptText: string;
+      let scriptCount: number;
+      let sourceMode: 'script' | 'storyboard';
+      if (input.exportId) {
+        const snap = await ctx.prisma.storyboardExport.findFirst({
+          where: { id: input.exportId, projectId: input.projectId, deletedAt: null },
+          select: { scriptText: true, episodeNumbers: true },
         });
+        if (!snap || !snap.scriptText.trim()) {
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message: '分镜脚本快照不存在或为空 — 请重新到分镜工坊导出分镜脚本',
+          });
+        }
+        scriptText = snap.scriptText;
+        scriptCount = snap.episodeNumbers.length;
+        sourceMode = 'storyboard';
+      } else {
+        const loaded = await loadProjectFullScript(
+          ctx,
+          input.projectId,
+          200_000,
+          input.episodeNumbers,
+        );
+        scriptText = loaded.text;
+        scriptCount = loaded.scriptCount;
+        sourceMode = 'script';
+        if (!scriptText.trim()) {
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message: '本项目还没有剧本 — 先在「剧本管理」上传,或从「灵感创作」关联剧本',
+          });
+        }
       }
 
       const project = await ctx.prisma.project.findUnique({
@@ -254,7 +283,7 @@ export const breakdownProcedures = {
         {
           projectId: input.projectId,
           modelId,
-          inputJson: { kind: 'asset.breakdownProject', scriptCount, focusType: input.type, styleSlug: project?.style?.slug },
+          inputJson: { kind: 'asset.breakdownProject', sourceMode, exportId: input.exportId, scriptCount, focusType: input.type, styleSlug: project?.style?.slug },
           failPrefix: '剧本拆解失败',
           wrapError: (e, sanitized) => {
             console.error('[asset.breakdownProject] LLM failed (raw):', e);

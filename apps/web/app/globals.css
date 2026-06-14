@@ -376,3 +376,81 @@ kbd {
 .theme-toggle-icon {
   transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1), opacity 200ms ease;
 }
+
+/* ============================================================================
+ * 移动端基座 · 方案 B 沉浸暗色工作室(2026-06-14 mac-studio)
+ *   现状:globals.css 零 @media、viewport 写死、无 safe-area/dvh/辉光基础设施。此处补齐。
+ *   原则:纯增量 —— 辉光/玻璃/dvh/safe-area 等仅移动组件主动使用,桌面零影响。
+ * ============================================================================ */
+
+/* —— 第四级抬升表面 + 辉光基色(暗色:越抬越亮,以光代影,非阴影) —— */
+:root {
+  --surface-raised: 0 0% 97%;     /* 亮模式浮起表面 */
+  --glow: 217 91% 55%;            /* 辉光基色(亮模式压一档保对比) */
+}
+:root.dark {
+  --surface-raised: 0 0% 21%;     /* 暗模式第四级:比 popover(17%) 更亮的浮层 */
+  --glow: 217 91% 62%;            /* 星垣蓝紫辉光基色 */
+}
+
+/* —— 动态视口高度:治 iOS Safari 100vh 地址栏/键盘弹起错位 —— */
+.min-h-dvh { min-height: 100vh; min-height: 100dvh; }
+.h-dvh { height: 100vh; height: 100dvh; }
+
+/* —— 安全区(刘海/灵动岛/Home Indicator),配合 viewport-fit=cover —— */
+.pt-safe { padding-top: env(safe-area-inset-top); }
+.pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+.pb-safe-bar { padding-bottom: calc(env(safe-area-inset-bottom) + 0.5rem); }
+/* 主内容底部留白:让 fixed 底部 Tab Bar 不遮挡内容(桌面归零) */
+.pb-tabbar { padding-bottom: calc(4rem + env(safe-area-inset-bottom)); }
+@media (min-width: 768px) { .pb-tabbar { padding-bottom: 0; } }
+
+/* —— 触控目标 ≥44pt(iOS HIG) + 去移动端点击蓝块 —— */
+.tap-44 { min-height: 44px; min-width: 44px; }
+@media (hover: none) {
+  * { -webkit-tap-highlight-color: transparent; }
+}
+
+/* —— 玻璃导航条(Tab Bar / 底部 sheet);中低端机无 backdrop-filter 时降级实底 —— */
+.glass-bar {
+  background: hsl(var(--popover) / 0.82);
+  backdrop-filter: blur(18px) saturate(1.25);
+  -webkit-backdrop-filter: blur(18px) saturate(1.25);
+  border-color: hsl(var(--border) / 0.7);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-bar { background: hsl(var(--popover) / 0.98); }
+}
+
+/* —— 星垣蓝紫辉光:仅用于 CTA/FAB/激活态(外科手术式,其余一律降噪) —— */
+.glow-accent {
+  box-shadow: 0 0 0 1px hsl(var(--glow) / 0.5), 0 6px 28px -6px hsl(var(--glow) / 0.5);
+}
+.glow-soft {
+  box-shadow: 0 2px 18px -8px hsl(var(--glow) / 0.4);
+}
+/* 模块色辉光:组件设 style={{ '--m': 'var(--color-mod-art)' }} 即按模块身份发光 */
+.glow-module {
+  box-shadow: 0 0 0 1px hsl(var(--m, var(--glow)) / 0.4), 0 4px 22px -8px hsl(var(--m, var(--glow)) / 0.4);
+}
+
+/* —— 生成中:蓝紫脉冲辉光(替代干转 spinner,呼应「正在创作」的片场感) —— */
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px hsl(var(--glow) / 0.35), 0 0 10px -2px hsl(var(--glow) / 0.3); }
+  50%      { box-shadow: 0 0 0 1px hsl(var(--glow) / 0.7), 0 0 22px 0 hsl(var(--glow) / 0.6); }
+}
+.animate-glow-pulse { animation: glow-pulse 2s ease-in-out infinite; }
+
+/* —— 片场暗房:极暗 radial 辉光背景(登录 / 英雄区氛围) —— */
+.bg-studio-glow {
+  background:
+    radial-gradient(62% 48% at 50% 28%, hsl(var(--glow) / 0.10), transparent 72%),
+    radial-gradient(46% 42% at 82% 86%, hsl(var(--color-mod-art) / 0.07), transparent 72%);
+}
+
+/* —— 无障碍:尊重 prefers-reduced-motion(关脉冲/入场/主题过渡) —— */
+@media (prefers-reduced-motion: reduce) {
+  .animate-glow-pulse,
+  .animate-in-fade { animation: none; }
+  html, body { transition: none; }
+}

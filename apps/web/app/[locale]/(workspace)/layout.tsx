@@ -3,6 +3,7 @@
  */
 import { requireSession } from '@/lib/auth/session';
 import { TopNav } from '@/components/top-nav';
+import { MobileNav } from '@/components/mobile-nav';
 
 export default async function WorkspaceLayout({
   children,
@@ -17,7 +18,8 @@ export default async function WorkspaceLayout({
   return (
     <div className="min-h-screen">
       <TopNav user={session} />
-      <main>{children}</main>
+      <MobileNav user={session} />
+      <main className="pb-tabbar">{children}</main>
     </div>
   );
 }

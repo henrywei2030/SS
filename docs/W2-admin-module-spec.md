@@ -1,5 +1,7 @@
 # W2+ Admin 模块详细规范（自建数据库浏览 + API Key 管理）
 
+> ⚠️ **历史规划文档 · 已 100% 实现**(见 docs/03-roadmap-and-progress.md「W7 后台三件套 ✅」)。保留作设计史料,功能现状以代码为准。
+>
 > 取代 Prisma Studio，提供品牌完全自有的后台管理界面。
 > 浏览器标题：`星垣工坊 · 后台管理 / StarsAlign Studio · Admin`
 > Changelog / About 全部链接到 SS 自己的仓库。

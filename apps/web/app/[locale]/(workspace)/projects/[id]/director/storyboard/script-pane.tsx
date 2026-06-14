@@ -1,23 +1,11 @@
 'use client';
 import * as React from 'react';
-import {
-  Loader2,
-  Edit3,
-  Save,
-  X,
-  Trash2,
-  ScrollText,
-  ChevronDown,
-  ChevronRight,
-  Lightbulb,
-  Link2,
-} from 'lucide-react';
+import { Loader2, Edit3, Save, X, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { trpc } from '@/lib/trpc/client';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
   Dialog,
   DialogContent,
@@ -30,8 +18,6 @@ import {
 interface Props {
   episodeId: string;
   projectId: string;
-  /** 五七-2:拆解来源选「项目剧本」条目时跳到该集 */
-  onSelectEpisode?: (episodeId: string) => void;
 }
 
 // 需求2A:清空全部剧本(项目级)— 软删所有集 + 各集剧本,自动保护已发布/锁定/生成中的集
@@ -98,13 +84,11 @@ function ClearAllProjectButton({ projectId }: { projectId: string }): React.Reac
   );
 }
 
-export function ScriptPane({ episodeId, projectId, onSelectEpisode }: Props): React.ReactElement {
+export function ScriptPane({ episodeId, projectId }: Props): React.ReactElement {
   const { data: versions, isLoading, refetch } = trpc.script.listVersions.useQuery({ episodeId });
   const current = versions?.find((v) => v.isCurrent);
   const [selectedId, setSelectedId] = React.useState<string | undefined>();
   const [showDeleteAll, setShowDeleteAll] = React.useState(false);
-  // 五六-2:拆解来源视图(项目级所有当前剧本 = 剧本拆解的输入)
-  const [showSource, setShowSource] = React.useState(false);
 
   // 切集时重置选中版本,避免拿到上一集的 scriptId 显示串集
   React.useEffect(() => {
@@ -167,16 +151,6 @@ export function ScriptPane({ episodeId, projectId, onSelectEpisode }: Props): Re
           ))}
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <Button
-            variant={showSource ? 'secondary' : 'ghost'}
-            size="sm"
-            onClick={() => setShowSource((v) => !v)}
-            className="h-7 gap-1 text-xs"
-            title="查看本项目所有当前剧本(灵感生成 / 上传)= 剧本拆解的输入来源"
-          >
-            <ScrollText className="size-3" />
-            拆解来源
-          </Button>
           <ClearAllProjectButton projectId={projectId} />
           <Button
             variant="ghost"
@@ -190,15 +164,6 @@ export function ScriptPane({ episodeId, projectId, onSelectEpisode }: Props): Re
           </Button>
         </div>
       </div>
-
-      {/* 五六-2 / 五七-2:拆解来源仓库(灵感顶置草稿 + 项目剧本)*/}
-      {showSource && (
-        <BreakdownSourceView
-          projectId={projectId}
-          onClose={() => setShowSource(false)}
-          onSelectEpisode={onSelectEpisode}
-        />
-      )}
 
       {/* 剧本内容 */}
       {selectedVersionId && (
@@ -236,199 +201,6 @@ export function ScriptPane({ episodeId, projectId, onSelectEpisode }: Props): Re
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 五六-2:拆解来源视图 — 项目级所有当前剧本(灵感生成 / 上传)= 剧本拆解的输入
-// ---------------------------------------------------------------------------
-
-const SOURCE_LABEL: Record<string, string> = {
-  UPLOAD: '上传',
-  AI_GENERATED: '灵感生成',
-  IMPORTED: '导入',
-};
-
-function BreakdownSourceView({
-  projectId,
-  onClose,
-  onSelectEpisode,
-}: {
-  projectId: string;
-  onClose: () => void;
-  onSelectEpisode?: (episodeId: string) => void;
-}): React.ReactElement {
-  const utils = trpc.useUtils();
-  const { data: scripts, isLoading } = trpc.script.list.useQuery({ projectId, onlyCurrent: true });
-  // 五七-2:灵感创作顶置草稿(完整剧本仓库的另一来源)
-  const { data: drafts } = trpc.inspiration.listDrafts.useQuery({ projectId, pinnedOnly: true });
-  const [expandedId, setExpandedId] = React.useState<string | null>(null);
-  const [importDraft, setImportDraft] = React.useState<{ id: string; title: string } | null>(null);
-
-  const link = trpc.script.linkInspirationEpisodes.useMutation({
-    onSuccess: (res) => {
-      const linked = res.total - res.skipped;
-      toast.success(
-        `已关联 ${linked} 集为正式剧本${res.skipped > 0 ? ` · ${res.skipped} 集生成中跳过` : ''}`,
-      );
-      // 集列表 + 内容统一更新
-      void utils.storyboard.listEpisodes.invalidate();
-      void utils.script.listVersions.invalidate();
-      void utils.script.list.invalidate({ projectId });
-    },
-    onError: (e) => toast.error(`关联失败:${e.message}`),
-  });
-
-  // 选中草稿即自动关联转正(用户拍板):取草稿有内容的集 → linkInspirationEpisodes 全集
-  const runImport = async (draft: { id: string; title: string }): Promise<void> => {
-    try {
-      const d = await utils.inspiration.getDraft.fetch({ draftId: draft.id });
-      const eps = (
-        (d?.episodes as unknown as { number: number; content: string }[] | undefined) ?? []
-      ).filter((e) => e.content);
-      if (eps.length === 0) {
-        toast.error('该草稿还没有展开的集内容 — 先去「灵感创作」展开');
-        return;
-      }
-      link.mutate({ draftId: draft.id, episodeNumbers: eps.map((e) => e.number) });
-    } catch (e) {
-      toast.error(`读取草稿失败:${e instanceof Error ? e.message : String(e)}`);
-    }
-  };
-
-  return (
-    <div className="border-b border-[hsl(var(--color-border)/0.6)] bg-[hsl(var(--color-secondary)/0.2)]">
-      <div className="flex items-center justify-between px-4 py-2">
-        <div className="flex items-center gap-1.5 text-xs font-medium">
-          <ScrollText className="size-3.5 text-[hsl(var(--color-accent))]" />
-          拆解来源 · 完整剧本仓库(灵感顶置草稿 + 项目剧本)
-        </div>
-        <button
-          onClick={onClose}
-          className="rounded-md p-1 text-[hsl(var(--color-muted-foreground))] transition-colors hover:bg-[hsl(var(--color-secondary)/0.6)]"
-          aria-label="收起"
-        >
-          <X className="size-3.5" />
-        </button>
-      </div>
-
-      <div className="max-h-72 space-y-3 overflow-y-auto px-4 pb-3">
-        {/* ① 灵感创作(顶置草稿)*/}
-        <div>
-          <div className="mb-1 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
-            <Lightbulb className="size-3" />
-            灵感创作 · 顶置草稿
-          </div>
-          {!drafts || drafts.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-[hsl(var(--color-border)/0.7)] px-2.5 py-2 text-[11px] text-[hsl(var(--color-muted-foreground))]">
-              暂无 — 去「灵感创作」📌 顶置满意的剧本,即可在此一键导入为正式剧本
-            </div>
-          ) : (
-            <div className="space-y-1">
-              {drafts.map((d) => (
-                <div
-                  key={d.id}
-                  className="flex items-center gap-2 rounded-lg border border-[hsl(var(--color-border)/0.7)] bg-[hsl(var(--color-card))] px-2.5 py-1.5 shadow-sm"
-                >
-                  <Lightbulb className="size-3.5 shrink-0 text-[hsl(var(--color-accent))]" />
-                  <span className="truncate text-[12px] font-medium">{d.title}</span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="ml-auto h-6 shrink-0 gap-1 rounded-md px-2 text-[10px]"
-                    onClick={() => setImportDraft({ id: d.id, title: d.title })}
-                    disabled={link.isPending}
-                    title="把该灵感草稿关联为本项目正式剧本"
-                  >
-                    {link.isPending ? (
-                      <Loader2 className="size-3 animate-spin" />
-                    ) : (
-                      <Link2 className="size-3" />
-                    )}
-                    导入为正式剧本
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* ② 项目正式剧本 */}
-        <div>
-          <div className="mb-1 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
-            <ScrollText className="size-3" />
-            项目正式剧本(点击跳到该集)
-          </div>
-          {isLoading ? (
-            <div className="flex items-center gap-1.5 py-2 text-[11px] text-[hsl(var(--color-muted-foreground))]">
-              <Loader2 className="size-3 animate-spin" /> 加载…
-            </div>
-          ) : !scripts || scripts.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-[hsl(var(--color-border)/0.7)] px-2.5 py-2 text-[11px] text-[hsl(var(--color-muted-foreground))]">
-              还没有正式剧本 — 上方导入灵感草稿,或用顶部「上传剧本」
-            </div>
-          ) : (
-            <div className="space-y-1">
-              {scripts.map((s) => {
-                const expanded = expandedId === s.id;
-                return (
-                  <div
-                    key={s.id}
-                    className="overflow-hidden rounded-lg border border-[hsl(var(--color-border)/0.7)] bg-[hsl(var(--color-card))] shadow-sm"
-                  >
-                    <div className="flex items-center gap-2 px-2.5 py-1.5 text-[11px]">
-                      <button
-                        onClick={() => setExpandedId(expanded ? null : s.id)}
-                        className="shrink-0 rounded p-0.5 text-[hsl(var(--color-muted-foreground))] hover:bg-[hsl(var(--color-secondary)/0.5)]"
-                        aria-label={expanded ? '收起正文' : '展开正文'}
-                      >
-                        {expanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-                      </button>
-                      <button
-                        onClick={() => s.episode && onSelectEpisode?.(s.episode.id)}
-                        className="flex min-w-0 flex-1 items-center gap-2 text-left transition-colors hover:text-[hsl(var(--color-accent))]"
-                        title={s.episode ? '跳到该集编辑' : undefined}
-                      >
-                        <span className="truncate font-medium">
-                          {s.episode
-                            ? `第${s.episode.number}集${s.episode.title ? ' · ' + s.episode.title : ''}`
-                            : '项目剧本'}
-                        </span>
-                        <Badge variant="secondary" className="shrink-0 px-1 text-[9px]">
-                          {SOURCE_LABEL[s.source] ?? s.source}
-                        </Badge>
-                      </button>
-                      <span className="ml-auto shrink-0 font-mono text-[10px] text-[hsl(var(--color-muted-foreground))]">
-                        {s.content.length.toLocaleString()} 字 · v{s.version}
-                      </span>
-                    </div>
-                    {expanded && (
-                      <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap border-t border-[hsl(var(--color-border)/0.6)] bg-[hsl(var(--color-background))] px-2.5 py-1.5 text-[10px] leading-relaxed">
-                        {s.content}
-                      </pre>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {importDraft && (
-        <ConfirmDialog
-          title={`关联「${importDraft.title}」为正式剧本?`}
-          description="把该灵感草稿各集转为本项目正式剧本(source=AI_GENERATED,版本化、不删现有);完成后分集列表与内容随之更新。"
-          confirmLabel="关联转正"
-          onClose={() => setImportDraft(null)}
-          onConfirm={() => {
-            const d = importDraft;
-            setImportDraft(null);
-            void runImport(d);
-          }}
-        />
-      )}
     </div>
   );
 }

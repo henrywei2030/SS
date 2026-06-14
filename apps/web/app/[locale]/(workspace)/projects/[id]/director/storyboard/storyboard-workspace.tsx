@@ -147,12 +147,7 @@ export function StoryboardWorkspace({
           ) : !selectedEpisodeId ? (
             <EmptyEpisodeState projectId={projectId} locale={locale} />
           ) : tab === 'script' ? (
-            // 五七-2:传 onSelectEpisode 供「拆解来源」选项目剧本时跳集
-            <ScriptPane
-              episodeId={selectedEpisodeId}
-              projectId={projectId}
-              onSelectEpisode={selectEpisode}
-            />
+            <ScriptPane episodeId={selectedEpisodeId} projectId={projectId} />
           ) : (
             <ShotsPane episodeId={selectedEpisodeId} />
           )}
