@@ -258,8 +258,12 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
           });
         }
         // refImageUrls 当 reference_image(若用户未传 firstFrame,first 张当首帧也可,但优先 reference)
+        // 七二第十波(#2 防御兜底):adapter 层再做一道「去重 URL + 限 9 张」。Seedance 2.0 官方参考
+        //   文件总上限 12(图≤9/视频≤3/音频≤3);上游 submit.ts 已按 maxRefImagesFor 截断,但 duel
+        //   或上游漏配时这里二线兜底,防「同图重复多次 / got N>9」直接整单 InvalidParameter。
         if (req.refImageUrls?.length && !req.firstFrameUrl && !req.lastFrameUrl) {
-          for (const url of req.refImageUrls) {
+          const dedupedRefImages = [...new Set(req.refImageUrls)].slice(0, 9);
+          for (const url of dedupedRefImages) {
             content.push({
               type: 'image_url',
               image_url: { url },
@@ -274,7 +278,10 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
           (c) => c.type === 'image_url' || c.type === 'video_url',
         );
         if (req.refAudioUrls?.length && hasMediaInContent) {
-          for (const url of req.refAudioUrls) {
+          // 七二第十波:去重 + 限 3 段(Seedance 官方音频参考 ≤3)。注意:上游 submit.ts 已对音频做
+          //   isRelayFetchableUrl 可达性过滤(本机/不可达 URL 不进来),这里只做数量兜底。
+          const dedupedRefAudios = [...new Set(req.refAudioUrls)].slice(0, 3);
+          for (const url of dedupedRefAudios) {
             content.push({
               type: 'audio_url',
               audio_url: { url },
@@ -336,7 +343,10 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
       //   故对 data: URL 剥前缀转裸 base64,http(s) 公网 URL 原样保留。
       //   (seedance-2.0 走 image_url 内联格式、不经本分支,base64 直接可用,不受影响。)
       if (req.refImageUrls?.length) {
-        body.images = req.refImageUrls.map((u) =>
+        // 七二第十波(#2 防御):1.x relay(happyhorse/wan)同样去重 URL,防「同图重复 → got N 超限」
+        //   整单 InvalidParameter(用户实测 happyhorse「at most 9, got 15」)。数量上限交上游
+        //   maxRefImagesFor 按 provider 控(各家不同,adapter 不硬截以免误伤 wan)。
+        body.images = [...new Set(req.refImageUrls)].map((u) =>
           /^data:/i.test(u) ? u.slice(u.indexOf(',') + 1) : u,
         );
       }
@@ -415,12 +425,14 @@ export class SeedanceProvider extends BaseProvider implements IVideoProvider {
       });
       const text = await body.text();
       if (statusCode >= 400) {
-        throw new ProviderError(this.info.id, `Create task failed (${statusCode}): ${text.slice(0, 200)}`);
+        // 七二第十波:200→600 字 — 原 200 字把 moyu 嵌套 error.message 截成「...content[2].audio_url.url spe...」
+        //   关键字段名/原因被砍,排查只能靠猜。放宽到 600 字保留完整内层报错。
+        throw new ProviderError(this.info.id, `Create task failed (${statusCode}): ${text.slice(0, 600)}`);
       }
       const json = JSON.parse(text) as Record<string, unknown>;
       providerJobId = this.extractTaskId(json);
       if (!providerJobId) {
-        throw new ProviderError(this.info.id, `Missing task_id in create response: ${text.slice(0, 200)}`);
+        throw new ProviderError(this.info.id, `Missing task_id in create response: ${text.slice(0, 600)}`);
       }
     } catch (e) {
       await this.recordLedger({

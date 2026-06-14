@@ -124,6 +124,79 @@ export const knowledgeRouter = router({
       return created;
     }),
 
+  /** 七二第十波(#5):批量导入外部语料 — 投喂接口。开放 family/style/mood/era 标签 + projectId
+   *  写路径(项目私有世界观,此前只有读取侧)。默认 enabled=false → 进 /admin/knowledge 审核启用
+   *  (D-D 纪律:外部语料不自动进检索池)。source=MANUAL,不动 PromptKnowledgeSource 枚举(免 migration);
+   *  靠 enabled=false + 审核区分。同 dimension+title 已存在则跳过(幂等)。 */
+  importBatch: adminProcedure
+    .input(
+      z.object({
+        entries: z
+          .array(
+            z.object({
+              dimension: dimensionSchema,
+              title: z.string().min(1).max(80),
+              content: z.string().min(1).max(1200),
+              keywordsCsv: z.string().max(400).optional(),
+              family: z.array(z.string().max(40)).max(12).optional(),
+              style: z.array(z.string().max(40)).max(12).optional(),
+              mood: z.array(z.string().max(40)).max(12).optional(),
+              era: z.array(z.string().max(40)).max(12).optional(),
+              projectId: z.string().cuid().optional(),
+            }),
+          )
+          .min(1)
+          .max(500),
+        // 默认 false:外部语料先入候选,审核后启用(可显式传 true 直接生效)
+        enabled: z.boolean().default(false),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      let created = 0;
+      let skipped = 0;
+      for (const e of input.entries) {
+        const title = e.title.trim();
+        const exists = await ctx.prisma.promptKnowledge.findFirst({
+          where: { dimension: e.dimension, title },
+          select: { id: true },
+        });
+        if (exists) {
+          skipped += 1;
+          continue;
+        }
+        const tags: Record<string, unknown> = {};
+        const kw = e.keywordsCsv
+          ?.split(/[,，]/)
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+        if (kw?.length) tags.keywords = kw;
+        if (e.family?.length) tags.family = e.family;
+        if (e.style?.length) tags.style = e.style;
+        if (e.mood?.length) tags.mood = e.mood;
+        if (e.era?.length) tags.era = e.era;
+        await ctx.prisma.promptKnowledge.create({
+          data: {
+            dimension: e.dimension,
+            title,
+            content: e.content.trim(),
+            tagsJson: tags as Prisma.InputJsonValue,
+            projectId: e.projectId,
+            source: 'MANUAL',
+            enabled: input.enabled,
+            createdBy: ctx.user.id,
+          },
+        });
+        created += 1;
+      }
+      await logOperation(ctx, 'admin.knowledge.importBatch', 'promptKnowledge', 'batch', null, {
+        total: input.entries.length,
+        created,
+        skipped,
+        enabled: input.enabled,
+      });
+      return { total: input.entries.length, created, skipped };
+    }),
+
   update: adminProcedure
     .input(
       z.object({

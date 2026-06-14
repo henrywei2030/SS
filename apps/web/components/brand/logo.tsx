@@ -123,8 +123,9 @@ export function LogoLockup({
   tagline = 'ALIGNING IDEAS · CRAFTING WORLDS',
   size = 'md',
 }: LogoLockupProps): React.ReactElement {
-  const markSize = size === 'lg' ? 'size-20' : size === 'md' ? 'size-12' : 'size-9';
-  const wordSize = size === 'lg' ? 'text-[26px]' : size === 'md' ? 'text-[18px]' : 'text-[14px]';
+  // 七二第十波:lg(登录页 hero)图标 size-20→size-24(80→96px,+20%)、字号 26→28px,适度放大更醒目
+  const markSize = size === 'lg' ? 'size-24' : size === 'md' ? 'size-12' : 'size-9';
+  const wordSize = size === 'lg' ? 'text-[28px]' : size === 'md' ? 'text-[18px]' : 'text-[14px]';
   const taglineSize = size === 'lg' ? 'text-[11px]' : 'text-[9px]';
 
   if (layout === 'horizontal') {

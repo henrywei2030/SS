@@ -5,6 +5,31 @@
 
 ---
 
+## 2026-06-15(周一,mac-studio · 七二第十波 · 生成分镜0场根因 + AIGC视频blocker + 风格体系扩9去IP + 参考声线mp3/base64整套打通)
+
+**完成**
+- ✅ **「生成分镜」点了出 0 场根因 + 间歇 JSON 失败重试(用户报)**。① **0 场真凶 = replaceExisting 顺序 bug** — [storyboard-generate.ts](packages/api/src/routers/storyboard-generate.ts) 级联软删放在「取场/拆场」之后,把刚 parse 的新场/旧场全删却不重建 → shot 挂到已删 scene 成孤儿 → UI 按 scene 渲染 = 0 场。**铁证**:DB 查所有 episode 都「场=0 镜>0」(孤儿),ep1 4 场全软删/18 shot 全挂已删场。修:删除挪到取场**之前**(Scene partial-unique 保证安全)。② **间歇「LLM 未返回 JSON」** — gemini-3-flash 偶发瞬时空/非 JSON([generate.ts](packages/core/storyboard/generate.ts) 加非截断时重试 1 次 + 三分支可操作 warning)。**真打 E2E 验证**:ep1 重生成 → 4 场 live、26 shot 分布 4 场、0 孤儿、UI「4 场 26 镜」。
+- ✅ **版本字段一致性 + logo 放大(用户报)**。[health/route.ts](apps/web/app/api/health/route.ts) fallback `0.1.0`→`0.2.0`(desktop standalone 无 npm env 时不再误报);全仓核对 app 版本字段全 0.2.0(内部包 @ss/* 保 0.1.0 不动)。logo:[logo.tsx](apps/web/components/brand/logo.tsx) LogoLockup lg `size-20→size-24`(80→96px)+ 字号 26→28px,登录页实测 102px。
+- ✅ **AIGC 五诉求(并行调研 workflow + 真打)**:
+  - **#1 视频全失败 blocker** — 根因 `content[2].audio_url.url` = 参考声线(.m4a + cdnUrl=null → localhost MinIO URL)moyu 拉不到。[submit.ts](packages/core/video-generation/submit.ts) 给 refAudioUrls 补 `isRelayFetchableUrl` 可达性过滤(图片早有、音频漏网;A 路 + duel-B 路对齐)+ [seedance.ts](packages/adapters/provider/seedance.ts) 错误 slice 200→600。
+  - **#2 参考图去重** — 上游早已 Set 去重+限量;adapter 加防御 dedup + 图≤9/音≤3 兜底(治 duel 旁路与「got 15」)。
+  - **#3 分镜 prompt 规范化 + @bug** — 「剧本内容」混入 @人名(SYSTEM_PROMPT @纪律没限定字段域):extractShots 只对 content 剥 @(不动 prompt 的 @图片N)+ 清存量 81 条;SYSTEM_PROMPT/seed 双写规范化(@ 收窄到 prompt 字段、**名词一致性铁律**利于拆解归并、为 seedance 精简冗余维度/单一主运镜)。
+  - **#4 风格体系**(用户决策:接上联动 + 4+5 风格 + 现在做)— 改名 2D 动漫/3D 国漫/AI 真人 → **2D / 3D / AI 伪真人**(StyleProfile name + styleKind + projectType + zhStyle + KIND_LABELS + 中英 i18n 全同步);**并行 agent 撰写 9 新风格**(日式/美式动漫/游戏CG/水墨/赛博朋克/手绘水彩/黏土定格/像素/油画)**全部去 IP 化**(连旧 3 个的原神/Arcane/吉卜力/京阿尼也清),DB 实测 12 风格零 IP 残留;**接通断链**(项目 styleId 全 NULL → 风格 prompt 从不生效):建项目按 type 自动绑 + 创建/编辑加风格选择器(listStyles)+ 回填存量 2 项目。
+  - **#5 知识库**(用户决策:两者都做)— [admin.knowledge.importBatch](packages/api/src/routers/admin/knowledge.ts) + /admin/knowledge「批量导入」贴 JSON 弹窗(开放 family/style/mood/era + projectId 写路径,默认停用待审核,E2E 实测落库)+ seed 10 条 Seedance 2.0 最佳实践语料(83→93)。
+- ✅ **「自动附带参考声线」真正打通(用户追加 · 比原计划更好)**。原计划靠 relay 同步 + 公网存储(仅生产)。**真打发现 moyu/Seedance audio_url 支持 base64 内联**(同参考图;1s mp3 报「duration≥1.8s」证已解码,3s mp3+图 → create 成功 providerJobId)→ 改 **base64 内联为通用主路径**(dev/生产都通,不依赖公网存储)。落地:① TTS/规范化产物 m4a→**mp3**([generate-sample.ts](packages/core/voice/generate-sample.ts) + [asset-crud.ts](packages/api/src/routers/asset-crud.ts) + ffmpeg `buildNormalizeAudioArgs` 按扩展走 libmp3lame(ffmpeg-static 实测含)+ naming + 测试)② [compile.ts](packages/core/video-generation/compile.ts) 本地声线读字节内联 `data:audio/mpeg;base64`(替代够不到的 localhost 签名 URL)+ **格式守门(只 mp3/wav,旧 m4a 跳过防回归)+ 时长守门(≥1.8s)** ③ [resolve-url.ts](packages/core/media/resolve-url.ts) isRelayFetchableUrl 放行 data: + asset:// ④ `voice.sample.syncToRelay` 默认回 `false`(base64 已通用,relay/asset:// 降为生产省重传可选)⑤ **存量 8 个 m4a 声线就地转码 mp3**。**真打验证**:base64 mp3(3s)+ 图 → Seedance create 成功;真实组 1sk3m5 新代码 compile = 4 公网图 + 2 base64 mp3(7 项 content)合法。
+
+**问题/待决策**
+- ❓ **worker 跑旧代码(本会话已查实并重启)** — 后台视频 worker(tsx watch)从早先启动起没热加载跨包源码改动,用户那次生成用的是修复前逻辑(200 字旧 slice 报错为证)。已重启 dev server(worker `ready`),新代码生效。**其他设备开工后也需重启 worker 才吃到本轮 core/adapters 改动**。
+- ❓ 整条视频 worker 链路真打出片未跑(用户自行 retry;每条 component 已分别验证)。
+- ❓ 参考声线生产环境可选优化:开 `voice.sample.syncToRelay` 走 asset:// 省每次 base64 重传(需公网存储)。
+
+**下次接着做**
+- 📌 **各设备开工跑 `pnpm db:sync:prompts`**(风格改名/9 新风格/分镜 prompt 规范化/知识 10 条都是结构层)+ **重启 worker** 吃本轮代码。
+- 📌 用户真打确认视频出片(worker 已修,真实组内容已验证合法)。
+- 📌 手机端方案 B 仍暂缓(每日提醒);Win 安装包仍待 win-laptop 打。
+
+---
+
 ## 2026-06-14(周日,mac-studio · 依赖升级接续 + 导演模块 v0.2.0 链路重构 + 3 遍审核 + 手机端方案B暂缓)
 
 **完成**

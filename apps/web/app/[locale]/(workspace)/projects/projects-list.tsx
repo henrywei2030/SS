@@ -127,6 +127,7 @@ export function ProjectsList(): React.ReactElement {
                       type: p.type,
                       aspect: p.aspect,
                       description: p.description,
+                      styleId: p.styleId,
                     });
                   }}
                   className="flex size-7 items-center justify-center rounded-md text-[hsl(var(--color-muted-foreground))] opacity-0 transition hover:bg-[hsl(var(--color-secondary))] hover:text-[hsl(var(--color-foreground))] focus:opacity-100 focus:outline-none group-hover:opacity-100"

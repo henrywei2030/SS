@@ -612,7 +612,8 @@ export const crudProcedures = {
       const tmp = mkdtempSync(join(tmpdir(), 'ss-voice-norm-'));
       try {
         const inPath = join(tmp, 'in-audio');
-        const outPath = join(tmp, 'out.m4a');
+        // 七二第十波:规范化产物 .m4a→.mp3(参考音频投喂 Seedance/中转站只认 mp3;normalizeAudio 按扩展走 libmp3lame)
+        const outPath = join(tmp, 'out.mp3');
         if (media.storageKey.startsWith('external://')) {
           const res = await fetch(media.storageKey.slice('external://'.length), {
             signal: AbortSignal.timeout(60_000),
@@ -634,9 +635,9 @@ export const crudProcedures = {
           scope: 'project',
           projectId: asset.projectId,
           kind: 'audio',
-          ext: 'm4a',
+          ext: 'mp3',
         });
-        await storage.putObject(key, outBuf, { contentType: 'audio/mp4' });
+        await storage.putObject(key, outBuf, { contentType: 'audio/mpeg' });
         const normalizedName = normalizedVoiceFilename(media.filename ?? 'voice');
         // 六八:按开关 best-effort 同步中转站素材库(规范化产物是实际投喂 provider 的版本)
         const syncSetting = await ctx.prisma.systemSetting.findUnique({
@@ -655,7 +656,7 @@ export const crudProcedures = {
             // 六八命名规范:原名_规范化(版本链可读)+ 归人物类便于素材库筛选
             filename: normalizedName,
             assetCategory: 'CHARACTER',
-            mimeType: 'audio/mp4',
+            mimeType: 'audio/mpeg',
             sizeBytes: outBuf.length,
             storageKey: key,
             parentId: media.id, // 版本链:原音频保留,可在素材库回溯

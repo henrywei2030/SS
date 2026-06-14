@@ -1,8 +1,8 @@
 {
   "projectType": {
-    "AI_REAL": "AI 真人",
-    "ANIM_3D": "3D 国漫",
-    "ANIM_2D": "2D 动漫",
+    "AI_REAL": "AI 伪真人",
+    "ANIM_3D": "3D",
+    "ANIM_2D": "2D",
     "POSTER": "海报",
     "CUSTOM": "自定义"
   },
@@ -84,9 +84,9 @@
     "FORBIDDEN": "禁用"
   },
   "styleKind": {
-    "AI_REAL": "AI 真人",
-    "ANIM_3D": "3D 国漫",
-    "ANIM_2D": "2D 动漫",
+    "AI_REAL": "AI 伪真人",
+    "ANIM_3D": "3D",
+    "ANIM_2D": "2D",
     "CUSTOM": "自定义"
   }
 }

@@ -53,15 +53,15 @@ export function assetCategoryFromType(
     : 'OTHER';
 }
 
-/** 人物 TTS 声线样本:`林小满_参考声音.m4a`(规则源自用户命名约定「xxx_参考声音」) */
+/** 人物 TTS 声线样本:`林小满_参考声音.mp3`(七二第十波:m4a→mp3,参考音频投喂只认 mp3/wav) */
 export function voiceSampleFilename(assetName: string): string {
-  return `${sanitizeMediaName(assetName) || '角色'}_参考声音.m4a`;
+  return `${sanitizeMediaName(assetName) || '角色'}_参考声音.mp3`;
 }
 
-/** 规范化音频(版本链):原名去扩展名 + `_规范化.m4a` */
+/** 规范化音频(版本链):原名去扩展名 + `_规范化.mp3`(七二第十波:m4a→mp3) */
 export function normalizedVoiceFilename(originalFilename: string): string {
   const base = originalFilename.replace(/\.[a-zA-Z0-9]+$/, '');
-  return `${sanitizeMediaName(base) || '参考声音'}_规范化.m4a`;
+  return `${sanitizeMediaName(base) || '参考声音'}_规范化.mp3`;
 }
 
 /**

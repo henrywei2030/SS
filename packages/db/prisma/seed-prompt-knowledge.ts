@@ -630,4 +630,79 @@ export const SEED_PROMPT_KNOWLEDGE: SeedKnowledgeEntry[] = [
     content: '有形象参考图时文字与图保持一致,文字只补图无法表达的动作与情绪 — 文字与图打架时模型输出撕裂',
     tags: { family: ['happyhorse'] },
   },
+  // ===========================================================================
+  // 七二第十波(2026-06):Seedance 2.0 prompt 最佳实践蒸馏(海外官方/社区调研)
+  //   来源:apiyi/seedance2.ai prompt guide · github awesome-seedance-2-prompts ·
+  //   make-prompt-seedance2 · volcengine 肖像版权安全。family 标 seedance 对症。
+  // ===========================================================================
+  {
+    slug: 'pk_sd2_single_camera_move',
+    dimension: D.CAMERA,
+    title: 'Seedance 单一主运镜',
+    content: '一条提示词只给一个主运镜(推/拉/摇/跟/环绕/航拍/手持/固定择一),多个运镜叠加会互相打架、画面漂移 — 运镜复杂度留给分镜切换而非单镜堆叠',
+    tags: { family: ['seedance'], keywords: ['运镜', '镜头'] },
+  },
+  {
+    slug: 'pk_sd2_intent_over_steps',
+    dimension: D.ACTION,
+    title: 'Seedance 写意图不写琐碎步骤',
+    content: 'Seedance 2.0 有世界知识,描述导演意图与视觉方向即可,过度分解琐碎动作步骤反降质 — 写「熟练颠勺爆炒」而非逐帧拆「抬锅/翻面/落锅」',
+    tags: { family: ['seedance'] },
+  },
+  {
+    slug: 'pk_sd2_camera_intent',
+    dimension: D.CAMERA,
+    title: '运镜语义意图',
+    content: '推近=沉浸/逼近真相,拉远=揭示环境/孤立,环绕=多面展示/动感,跟拍=伴随紧张,固定=克制蓄力 — 选运镜先问叙事动机',
+    tags: { family: ['seedance'], keywords: ['运镜'] },
+  },
+  {
+    slug: 'pk_sd2_motion_pace_words',
+    dimension: D.CONSTRAINT,
+    title: '节奏词替代裸"快"',
+    content: '描述运动用 slow/smooth/stable/gradual/gentle(缓稳渐进)等节奏词;裸用 "fast/快速" 易掉帧崩画面 — 要快感用「急促短促的动作」描述具体动作而非速度形容词',
+    tags: { family: ['seedance'], keywords: ['动作', '速率'] },
+  },
+  {
+    slug: 'pk_sd2_lighting_leverage',
+    dimension: D.LIGHTING,
+    title: '光照是性价比最高的质量杠杆',
+    content: '光照描述是所有要素里对成片质感提升最大的一项 — 每个镜头务必写足光位/方向/质感/色温(柔和窗光/逆光勾边/体积光丁达尔),宁详勿略',
+    tags: { keywords: ['光', '光影'] },
+  },
+  {
+    slug: 'pk_sd2_ref_asset_lock',
+    dimension: D.SUBJECT,
+    title: '@素材锁角色一致性',
+    content: 'prompt 里用 @名字 引用人物/场景/道具,下游据此注入参考图锁外观;同一主体跨镜全程同名同描述,是跨镜一致性与后期拆解归并的根基',
+    tags: { family: ['seedance'], keywords: ['一致性', '主体'] },
+  },
+  {
+    slug: 'pk_sd2_style_lock',
+    dimension: D.STYLE,
+    title: '风格锚点防漂移',
+    content: '强风格须锁定锚点词并贯穿全程(二维动漫锁 cel-shading+flat color、3D 锁 stylized render+SSS),一条 prompt 不混搭两种子风格 — 否则模型在风格间漂移、跨镜不一致',
+    tags: { keywords: ['风格'] },
+  },
+  {
+    slug: 'pk_sd2_no_ip_celebrity',
+    dimension: D.CONSTRAINT,
+    title: '规避 IP/明星/品牌(肖像版权安全)',
+    content: '不写明星真名/真人肖像、不点名受版权作品与角色、不用真实品牌商标 — 改用「视觉手法」描述(吉卜力式→hand-painted watercolor;皮克斯式→smooth 3D+SSS;某游戏→stylized cel-shaded 3D);人物用原创虚构名',
+    tags: { keywords: ['禁用', '版权', '合规'] },
+  },
+  {
+    slug: 'pk_sd2_content_safety',
+    dimension: D.CONSTRAINT,
+    title: '内容安全规避类目',
+    content: '规避暴力血腥、色情成人、政治人物/符号、违禁品(毒品武器)、未成年不当、宗教冒犯等敏感内容 — 冲突/打斗用动作张力与受力反馈表现,不渲染血腥',
+    tags: { keywords: ['禁用', '合规', '安全'] },
+  },
+  {
+    slug: 'pk_sd2_scene_three',
+    dimension: D.SCENE,
+    title: '场景三要素:地点+光照+氛围',
+    content: '环境描述 = 具体地点 + 光照(方向/质感/色温) + 氛围(雾/尘/湿润/温度感),三者齐备模型才建得出有空气感的空间 — 缺光照=平板,缺氛围=塑料',
+    tags: { family: ['seedance'], keywords: ['场景', '环境'] },
+  },
 ];

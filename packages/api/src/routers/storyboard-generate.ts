@@ -228,7 +228,37 @@ export const generateProcedures = {
         throw new TRPCError({ code: 'NOT_FOUND', message: '本集尚未上传剧本' });
       }
 
-      // 2. 取场（若还没拆场则先 parse + 入库）
+      // 2. 若 replaceExisting:级联软删现有 shots + groups + scenes + 关联的 AssetUsageBinding
+      //    防 W4 audit 永远报"悬空 binding" + 旧 sceneId 引用断裂
+      //    ⚠️ 七二第十波修:必须在「取场/拆场」之前删 —— 原顺序(先取场再删)会把刚 parse
+      //    入库的新场 / 已存旧场一并软删却不重建,导致后续循环跑的是已软删的内存场对象、
+      //    shot 挂到已删 scene → 界面「0 场」。改为先删空,再让 §3 的「0 场→重新 parse」补出全新场。
+      if (input.replaceExisting) {
+        const now = new Date();
+        await ctx.prisma.$transaction([
+          ctx.prisma.shot.updateMany({
+            where: { episodeId: ep.id, deletedAt: null },
+            data: { deletedAt: now },
+          }),
+          ctx.prisma.shotGroup.updateMany({
+            where: { episodeId: ep.id, deletedAt: null },
+            data: { deletedAt: now },
+          }),
+          ctx.prisma.scene.updateMany({
+            where: { episodeId: ep.id, deletedAt: null },
+            data: { deletedAt: now },
+          }),
+          // 本集相关的 AssetUsageBinding 一并清(防止 binding 引用已删 shot/scene)
+          ctx.prisma.assetUsageBinding.updateMany({
+            where: { episodeId: ep.id, deletedAt: null },
+            data: { deletedAt: now },
+          }),
+        ]);
+      }
+
+      // 3. 取场（replaceExisting 已删空 → 必走 parse 重建全新场;非 replace 沿用已存场）
+      //    Scene 用 partial unique(WHERE deletedAt IS NULL)→ 同 number/positionIdx 的软删旧场
+      //    不阻塞重建。
       let scenes = await ctx.prisma.scene.findMany({
         where: { episodeId: ep.id, deletedAt: null },
         orderBy: { positionIdx: 'asc' },
@@ -252,31 +282,6 @@ export const generateProcedures = {
             }),
           ),
         );
-      }
-
-      // 3. 若 replaceExisting:级联软删现有 shots + groups + scenes + 关联的 AssetUsageBinding
-      //    防 W4 audit 永远报"悬空 binding" + 旧 sceneId 引用断裂
-      if (input.replaceExisting) {
-        const now = new Date();
-        await ctx.prisma.$transaction([
-          ctx.prisma.shot.updateMany({
-            where: { episodeId: ep.id, deletedAt: null },
-            data: { deletedAt: now },
-          }),
-          ctx.prisma.shotGroup.updateMany({
-            where: { episodeId: ep.id, deletedAt: null },
-            data: { deletedAt: now },
-          }),
-          ctx.prisma.scene.updateMany({
-            where: { episodeId: ep.id, deletedAt: null },
-            data: { deletedAt: now },
-          }),
-          // 本集相关的 AssetUsageBinding 一并清(防止 binding 引用已删 shot/scene)
-          ctx.prisma.assetUsageBinding.updateMany({
-            where: { episodeId: ep.id, deletedAt: null },
-            data: { deletedAt: now },
-          }),
-        ]);
       }
 
       // 4. 项目风格 — 完整带过 StyleProfile 三段 prompt + forbidden,与 W4 拼接公式对齐

@@ -1,8 +1,8 @@
 {
   "projectType": {
-    "AI_REAL": "AI Live-action",
-    "ANIM_3D": "3D Animation",
-    "ANIM_2D": "2D Animation",
+    "AI_REAL": "AI Pseudo-real",
+    "ANIM_3D": "3D",
+    "ANIM_2D": "2D",
     "POSTER": "Poster",
     "CUSTOM": "Custom"
   },
@@ -84,9 +84,9 @@
     "FORBIDDEN": "Forbidden"
   },
   "styleKind": {
-    "AI_REAL": "AI Live-action",
-    "ANIM_3D": "3D Animation",
-    "ANIM_2D": "2D Animation",
+    "AI_REAL": "AI Pseudo-real",
+    "ANIM_3D": "3D",
+    "ANIM_2D": "2D",
     "CUSTOM": "Custom"
   }
 }

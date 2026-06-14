@@ -171,6 +171,15 @@ export const projectRouter = router({
     }),
 
   /** 创建项目 */
+  /** 七二第十波(#4 项目↔风格联动):风格列表 — 供建项目/编辑项目的风格选择器用。
+   *  非 admin 可读(只返展示必要字段),与 admin.style.list(管理用,adminProcedure)分开。 */
+  listStyles: protectedProcedure.query(async ({ ctx }) => {
+    return ctx.prisma.styleProfile.findMany({
+      orderBy: [{ isBuiltIn: 'desc' }, { name: 'asc' }],
+      select: { id: true, name: true, slug: true, kind: true },
+    });
+  }),
+
   create: protectedProcedure
     // 第 20 轮 audit / ADR-27:Mastra agent 创建新项目接入点
     .meta({
@@ -183,9 +192,30 @@ export const projectRouter = router({
     })
     .input(createProjectSchema)
     .mutation(async ({ ctx, input }) => {
+      // 七二第十波(#4 项目↔风格联动 — 根因修复):此前建项目从不绑 style → project.styleId 永远
+      //   NULL → 风格三段 prompt(scene/character/prop)对分镜与资产生成链全程不生效(摆设)。
+      //   现:用户未显式选 styleId 时,按 project.type 自动绑对应内置风格,让风格 prompt 真正进链路。
+      //   POSTER/CUSTOM 无对口内置风格 → 不强绑(留 NULL,用户可后续在风格选择器里改)。
+      let styleId = input.styleId;
+      if (!styleId) {
+        const TYPE_DEFAULT_STYLE_SLUG: Partial<Record<typeof input.type, string>> = {
+          AI_REAL: 'ai_real',
+          ANIM_3D: 'anim_3d',
+          ANIM_2D: 'anim_2d',
+        };
+        const slug = TYPE_DEFAULT_STYLE_SLUG[input.type];
+        if (slug) {
+          const st = await ctx.prisma.styleProfile.findUnique({
+            where: { slug },
+            select: { id: true },
+          });
+          styleId = st?.id;
+        }
+      }
       const project = await ctx.prisma.project.create({
         data: {
           ...input,
+          styleId,
           ownerId: ctx.user.id,
           members: {
             create: {

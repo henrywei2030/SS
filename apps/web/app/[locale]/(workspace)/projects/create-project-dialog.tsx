@@ -28,7 +28,11 @@ export interface EditableProject {
   type: string;
   aspect: string;
   description?: string | null;
+  styleId?: string | null;
 }
+
+// 七二第十波(#4):styleId 空串 = 「按类型自动绑」哨兵(创建时后端按 type 自动选内置风格)
+const AUTO_STYLE = '';
 
 export function CreateProjectDialog({
   open,
@@ -61,6 +65,9 @@ export function CreateProjectDialog({
   const [type, setType] = React.useState<ProjectType>('AI_REAL');
   const [aspect, setAspect] = React.useState<AspectRatio>('9:16');
   const [description, setDescription] = React.useState('');
+  // 七二第十波(#4):风格选择。AUTO_STYLE('') = 按类型自动绑;否则显式指定 styleId。
+  const [styleId, setStyleId] = React.useState<string>(AUTO_STYLE);
+  const { data: styles } = trpc.project.listStyles.useQuery(undefined, { enabled: open });
 
   // 打开时同步表单:编辑模式预填当前值,创建模式重置为默认(原创建对话框每次打开清空)
   React.useEffect(() => {
@@ -69,6 +76,7 @@ export function CreateProjectDialog({
     setType((project?.type as ProjectType) ?? 'AI_REAL');
     setAspect((project?.aspect as AspectRatio) ?? '9:16');
     setDescription(project?.description ?? '');
+    setStyleId(project?.styleId ?? AUTO_STYLE);
   }, [open, project]);
 
   function onSubmit(e: React.FormEvent): void {
@@ -80,6 +88,8 @@ export function CreateProjectDialog({
       type,
       aspect,
       description: isEdit ? description : description || undefined,
+      // styleId 为 AUTO_STYLE('') 时不传 → 创建走后端 type→风格 自动绑;编辑时不传则保持原值不动
+      ...(styleId ? { styleId } : {}),
     };
     if (isEdit && project) {
       update.mutate({ id: project.id, data });
@@ -137,6 +147,24 @@ export function CreateProjectDialog({
                 ))}
               </select>
             </div>
+          </div>
+          <div className="grid gap-2">
+            <Label>美术风格 / Style</Label>
+            <select
+              value={styleId}
+              onChange={(e) => setStyleId(e.target.value)}
+              className="flex h-9 rounded-lg border border-[hsl(var(--color-border))] bg-[hsl(var(--color-input))] px-3 text-sm"
+            >
+              <option value={AUTO_STYLE}>按类型自动 / Auto by type</option>
+              {styles?.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-[hsl(var(--color-muted-foreground))]">
+              风格决定生成时注入的人物/场景/道具美术 prompt。「按类型自动」= 按上面的类型绑定对应内置风格。
+            </p>
           </div>
           <div className="grid gap-2">
             <Label>简介 / Description</Label>

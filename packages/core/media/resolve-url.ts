@@ -42,6 +42,9 @@ export function isRelayFetchableUrl(url: string | null | undefined): boolean {
   if (!url) return false;
   // data: 内联 base64 — moyu 直接解码使用,无需 server-side 拉取(seedance 真打实证可用)→ 放行
   if (/^data:/i.test(url)) return true;
+  // 七二第十波:asset://asset-XXX — 中转站素材库私有引用(relay-asset.ts),relay provider 视频/图像
+  //   生成端原生识别、从自家素材库取,无需公网拉取 → 放行(否则开了 syncToRelay 的声线/图反被误滤)。
+  if (/^asset:\/\//i.test(url)) return true;
   if (!/^https?:\/\//i.test(url)) return false; // blob:/相对路径 → 远端用不了
   try {
     // 去 IPv6 字面量方括号(否则 [fe80::] / [::1] 绕过下面所有检查)

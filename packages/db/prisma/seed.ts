@@ -31,33 +31,123 @@ async function main() {
   console.log('  → 创建默认风格 StyleProfile');
   const styles = [
     {
-      slug: 'ai_real',
-      name: 'AI 真人',
+      slug: "ai_real",
+      name: "AI 伪真人",
       kind: StyleKind.AI_REAL,
-      characterPrompt: '核心风格：照片级写实人像，真实人类，可见毛孔与细腻皮肤纹理、面部绒毛与自然瑕疵(雀斑/细纹)，次表面散射(SSS)通透肤质，发丝级细节，85mm 人像镜头 f1.8 浅景深虚化，伦勃朗光/柔和窗光/黄金时刻，电影级调色，RAW 照片质感，专业人像摄影，8K 超清\n严格禁止：动漫、卡通、插画、三维渲染、计算机生成图像、绘画、素描、塑料感皮肤、蜡像质感、过度磨皮、错误解剖、变形',
-      scenePrompt: '核心风格：照片级写实环境，真实场景，电影级摄影，自然光/黄金时刻/体积光，丰富的材质纹理(粗糙/反射/湿润表面)，大气透视与真实景深，专业构图，电影级调色与轻微胶片颗粒，RAW 照片质感，8K 超清\n严格禁止：动漫、卡通、插画、三维渲染、计算机生成图像、绘画、素描、不真实光影、变形',
-      propPrompt: '核心风格：照片级写实道具，真实材质与工艺细节，微距/产品摄影级刻画(可见纹理/磨损/反射/指纹)，柔光箱布光，浅景深，电影级调色，RAW 照片质感，8K 超清\n严格禁止：动漫、卡通、插画、三维渲染、计算机生成图像、塑料感、不真实材质、变形',
-      forbiddenWords: ['动漫', '卡通', '插画', '三维渲染', '计算机生成图像', '绘画', '素描', '塑料感皮肤', '蜡像质感', '过度磨皮', '错误解剖', '变形'],
+      characterPrompt: "核心风格：照片级写实人像，原创虚构人物(original fictional person, not resembling any real individual)、非真人明星、非任何现实存在的个体；皮肤刻画真实可信——可见毛孔/细纹/面部绒毛与轻微自然瑕疵(雀斑/痘印/油光)，次表面散射(subsurface scattering / SSS)通透肤质，发丝级细节与飞丝；眼神到位——清晰 catchlight 眼神光、湿润虹膜与睫毛投影；85mm 人像镜头 f1.8 浅景深锁住眼睛、背景奶油虚化(creamy bokeh)；机位左侧柔和窗光(soft window light from camera left)、伦勃朗三角光、黄金时刻暖调；warm color grading 电影级调色，RAW 直出 8K 超清，专业人像摄影质感\n严格禁止：塑料脸、蜡像质感、过度磨皮、airbrushed 喷绘感、over-smoothed 假滑肌肤、明星脸、真人明星、现实存在的某个人、名人形象、deepfake 换脸、动漫、卡通、插画、三维渲染、计算机生成图像、绘画、素描、错误解剖、多指畸形、变形",
+      scenePrompt: "核心风格：照片级写实环境，原创虚构场景、可信的真实空间感；电影级摄影构图，机位左侧柔和窗光与黄金时刻暖调、体积光(volumetric light)与自然环境反弹光；丰富而真实的材质纹理(粗糙/反射/湿润/磨损表面)，大气透视与真实景深，浅景深下背景奶油虚化；warm color grading 调色配轻微胶片颗粒(film grain)，RAW 直出 8K 超清\n严格禁止：塑料感、假滑表面、over-smoothed、不真实光影、动漫、卡通、插画、三维渲染、计算机生成图像、绘画、素描、变形",
+      propPrompt: "核心风格：照片级写实道具，真实材质与工艺细节，微距/产品摄影级刻画——可见纹理/划痕/磨损/反射/指纹与细微 subsurface scattering；柔光箱+机位左侧柔光布光，清晰高光与 catchlight 反光点，浅景深 85mm 微距锁焦主体；warm color grading 电影级调色，RAW 直出 8K 超清\n严格禁止：塑料感、蜡质假面、over-smoothed 假滑表面、不真实材质、动漫、卡通、插画、三维渲染、计算机生成图像、变形",
+      forbiddenWords: ["塑料脸","蜡像质感","过度磨皮","airbrushed 喷绘感","over-smoothed 假滑肌肤","明星脸","真人明星","名人形象","deepfake 换脸","动漫","卡通","三维渲染","计算机生成图像","变形"],
       isBuiltIn: true,
     },
     {
-      slug: 'anim_3d',
-      name: '3D 国漫',
+      slug: "anim_3d",
+      name: "3D",
       kind: StyleKind.ANIM_3D,
-      characterPrompt: '核心风格：高质量风格化 3D 角色，游戏 CG 过场动画级别(原神 / 崩坏：星穹铁道 / 双城之战 Arcane 美术)，卡通渲染 NPR，人工次表面散射(SSS)柔光皮肤，shadow ramp 分层硬边阴影，强边缘光与高光，Unreal Engine 5 实时渲染质感，干净的次世代拓扑，电影级打光与景深\n严格禁止：照片级写实、真人、2D 手绘平涂、低多边形、塑料感、扭曲崩坏',
-      scenePrompt: '核心风格：风格化 3D 游戏场景，游戏引擎实时渲染(原神 / Arcane 美术)，stylized-PBR 材质，体积光与大气雾，强氛围光与景深，色彩鲜明分层且通透，宏大的场景纵深与精致环境细节\n严格禁止：照片级写实、真人、2D 平涂、低多边形、空旷单调',
-      propPrompt: '核心风格：风格化 3D 道具，游戏资产级建模，stylized-PBR 材质(金属/布料/玉石质感)，次世代拓扑，强高光与边缘光，干净而有细节的磨损刻画\n严格禁止：照片级写实、2D 平涂、低多边形、塑料感',
-      forbiddenWords: ['照片级写实', '真人', '2D 平涂', '手绘线稿', '低多边形', '塑料感', '扭曲', '崩坏', '噪点'],
+      characterPrompt: "核心风格：电影级风格化 3D 角色,介于卡通渲染 NPR 与半写实之间,可选圆润 stylized 比例(大而富表现力的眼睛、柔和五官)或半写实精致拓扑;subsurface scattering 次表面散射柔光皮肤通透自然,cel-shading 分层柔过渡阴影,clean 次世代拓扑与精细发丝,强烈 rim light 边缘光勾勒轮廓、柔和高光,soft cinematic global illumination 柔和全局光照,ambient occlusion 增强体积感,景深虚化背景,polished render 干净打磨质感。\n严格禁止：照片级写实真人、真实人类、2D 平涂手绘线稿、厚涂油画、低多边形、塑料感、扭曲、崩坏、错误解剖、多指畸形、噪点",
+      scenePrompt: "核心风格：电影级风格化 3D 场景,stylized-PBR 材质(丝绸/玉石/金属/石材质感真实而风格化),soft cinematic global illumination 柔和全局光照与色彩通透分层,volumetric god rays 体积光丁达尔光束穿透大气雾尘,ambient occlusion 角落柔和阴影增强纵深,丰富环境细节与宏大空间纵深,景深与大气透视,鲜明而柔和的电影级调色,polished render 干净打磨质感。\n严格禁止：照片级写实、真人、2D 平涂、手绘线稿、低多边形、塑料感、空旷单调、透视崩坏、噪点",
+      propPrompt: "核心风格：电影级风格化 3D 道具,stylized-PBR 材质(丝绸/玉石/金属/抛光木材,质感真实而风格化),次世代拓扑干净精致,强 rim light 边缘光与柔和高光勾勒造型,subsurface scattering 用于半透材质,ambient occlusion 缝隙阴影,克制而有质感的磨损刻画,景深聚焦主体,polished render 打磨质感。\n严格禁止：照片级写实、2D 平涂、手绘线稿、低多边形、塑料感、扭曲、粗糙崩坏、噪点",
+      forbiddenWords: ["照片级写实真人","真实人类","2D 平涂","手绘线稿","厚涂油画","低多边形","塑料感","扭曲","崩坏","错误解剖","多指畸形","噪点"],
       isBuiltIn: true,
     },
     {
-      slug: 'anim_2d',
-      name: '2D 动漫',
+      slug: "anim_2d",
+      name: "2D",
       kind: StyleKind.ANIM_2D,
-      characterPrompt: '核心风格：高质量日本动漫(anime)人物作画，赛璐璐 cel-shading 硬边二分/三分阴影，干净且有粗细变化的手绘线稿，富有表现力的大眼睛(虹膜渐变+高光)，分组发丝带高光，通透平涂肌肤，简化的鼻唇，逆光描边(rim light)，京都动画 / ufotable / 扳机社级作画质感\n严格禁止：3D 渲染、CG 建模、照片写实、真人、厚涂油画感、低多边形、扭曲崩坏、多指畸形',
-      scenePrompt: '核心风格：日本动漫(anime)美术背景，吉卜力 / 新海诚级别手绘场景，赛璐璐平涂结合厚涂笔触，通透柔和的环境光与丁达尔光，干净的透视与丰富环境细节，胶片质感的鲜亮色彩\n严格禁止：3D 渲染、CG 建模、照片写实、真人、低多边形、透视崩坏',
-      propPrompt: '核心风格：日本动漫(anime)道具作画，干净的描边线稿，赛璐璐平涂加少量高光阴影，简洁清晰的造型，鲜明的轮廓与色块\n严格禁止：3D 渲染、CG 建模、照片写实、PBR 材质、低多边形',
-      forbiddenWords: ['3D 渲染', 'CG 建模', '照片写实', '真实人类', '厚涂油画', '低多边形', '扭曲', '崩坏', '多指', '畸形手'],
+      characterPrompt: "核心风格：通用 2D 手绘动画人物，中性二维作画(不偏日式或美式)，干净且有粗细变化的 clean line art 轮廓线，flat color 平涂大色块结合 cel-shading 硬边二分阴影或柔和 soft-shading 渐层，鲜明通透的色彩分区，简化而表现力强的五官与肢体语言，分组发丝带块状高光，柔和环境光加单侧主光与逆光描边(rim light)勾勒体积，平面化构图与清晰剪影，赛璐珞 anime 级与西方手绘之间的中性 2D 作画质感\n严格禁止：3D 渲染、CG 建模、照片写实、真人、厚涂油画、低多边形、扭曲畸形、多指、糊脏线条",
+      scenePrompt: "核心风格：通用 2D 手绘动画背景，中性二维美术(不强调某国风格)，flat color 平涂大色块叠加少量笔触质感，clean line art 描边或无边软色块，分层平面化构图与简洁清晰的透视，鲜亮通透的色彩与明确的明暗分区，柔和的环境漫射光、暖色主光与体积式逆光氛围，干净的背景层次与适度的环境细节，手绘动画赛璐珞质感\n严格禁止：3D 渲染、CG 建模、照片写实、真人、厚涂油画、低多边形、透视崩坏、糊脏",
+      propPrompt: "核心风格：通用 2D 手绘动画道具，中性二维作画，干净的 clean line art 描边线稿，flat color 平涂加少量 cel-shading 高光与硬边阴影，简洁清晰的几何造型与鲜明轮廓剪影，明确的色块分区与单侧高光提示材质，平面化呈现\n严格禁止：3D 渲染、CG 建模、照片写实、PBR 材质、厚涂、低多边形、扭曲",
+      forbiddenWords: ["3D 渲染","CG 建模","照片写实","真人","厚涂油画","低多边形","扭曲","畸形","多指","糊脏线条","PBR 材质","透视崩坏"],
+      isBuiltIn: true,
+    },
+    {
+      slug: "anim_jp",
+      name: "日式动漫",
+      kind: StyleKind.CUSTOM,
+      characterPrompt: "核心风格：高质量日系动漫(2D anime)人物作画，赛璐珞 cel-shading 硬边二分/三分阶调阴影、清晰可辨的明暗交界线，干净且有粗细变化的手绘 soft line art 线稿，通透 flat color 平涂肌肤(无写实毛孔)，富有表现力的大眼睛(虹膜上下渐变+清晰高光点+下睫毛留白)，简化的鼻唇结构，分组成束的发丝带高光环(hair highlight band)，逆光描边 rim light 与柔和金色时刻 golden hour glow，浅景深 bokeh 柔焦背景，动态斜构图。Style Lock：cel shading + 2D anime + flat color 二维平面作画，绝不漂移成 3D。\n严格禁止：photorealistic、3D render、CG 建模、realistic skin、真实毛孔、真人、western cartoon style 粗描边、厚涂油画感、低多边形、subsurface scattering 写实肤质、塑料感、扭曲崩坏、多指畸形手",
+      scenePrompt: "核心风格：日系动漫(2D anime)美术背景，赛璐珞 cel-shading 硬边平涂结合少量笔触叠色，通透干净的 flat color tones 色块分层，柔和漫射环境光与逆光 rim light 描边、金色时刻 golden hour glow 与丁达尔体积光，浅景深 bokeh 虚化前后景，动态斜向构图与清晰透视，胶片质感的鲜亮通透色彩与轻微大气透视。Style Lock：cel shading + 2D anime + flat color 手绘二维背景，绝不漂移成 3D。\n严格禁止：photorealistic、3D render、CG 建模、写实照片、真人、western cartoon style 粗描边、厚涂油画感、低多边形、PBR 材质、透视崩坏、空旷单调",
+      propPrompt: "核心风格：日系动漫(2D anime)道具作画，干净有粗细变化的手绘描边线稿，赛璐珞 cel-shading 硬边二分阴影加少量高光，通透 flat color 平涂色块，简洁清晰的造型与鲜明轮廓，柔和 rim light 边缘描边点亮，浅景深 bokeh 衬托主体。Style Lock：cel shading + 2D anime + flat color 二维平面，绝不漂移成 3D。\n严格禁止：photorealistic、3D render、CG 建模、写实照片、PBR 材质、写实金属反射、western cartoon style 粗描边、厚涂油画感、低多边形、塑料感",
+      forbiddenWords: ["photorealistic","3D render","CG 建模","realistic skin","真人","western cartoon style","厚涂油画感","低多边形","PBR 材质","塑料感","扭曲崩坏","多指","畸形手"],
+      isBuiltIn: true,
+    },
+    {
+      slug: "anim_us",
+      name: "美式动漫",
+      kind: StyleKind.CUSTOM,
+      characterPrompt: "核心风格：美式卡通(American cartoon)角色作画，粗黑描边(bold thick black outlines)轮廓清晰统一，夸张比例(exaggerated proportions：大头小身/超长四肢)与简化几何造型，高饱和原色平涂(flat saturated primary colors)无渐变，极简平面光影(flat lighting)仅硬边色块阴影，图形化矢量感(graphic vector look)，弹性夸张表情与 squash & stretch 弹性变形动态，正面或夸张广角透视\n严格禁止：照片写实、真人、3D 渲染、CG 建模、日系赛璐璐细线大眼、厚涂油画笔触、写实柔和渐变光、PBR 材质、品牌吉祥物、扭曲崩坏",
+      scenePrompt: "核心风格：美式卡通(American cartoon)背景美术，粗黑描边勾勒建筑与道具轮廓，简化几何形体(simplified geometric shapes)与扁平构图，高饱和大色块平涂(flat saturated colors)无写实渐变，极简平面光影(flat lighting minimal gradient)仅平涂投影，图形化矢量插画感(graphic vector look)，夸张广角透视与卡通化空间，干净鲜明的轮廓边界\n严格禁止：照片写实、真人、3D 渲染、CG 建模、写实大气透视、厚涂油画笔触、写实柔和渐变光、PBR 材质、纹理堆砌、透视崩坏",
+      propPrompt: "核心风格：美式卡通(American cartoon)道具作画，粗黑描边均匀勾边，夸张简化的几何造型(simplified geometric shapes)与圆润弹性轮廓，高饱和原色平涂(flat saturated primary colors)，极简平面光影(flat lighting)仅硬边高光与单层投影，图形化矢量感(graphic vector look)，鲜明清晰的色块与轮廓\n严格禁止：照片写实、3D 渲染、CG 建模、日系细线描边、厚涂油画笔触、写实柔和渐变光、PBR 材质、品牌吉祥物",
+      forbiddenWords: ["照片写实","真人","3D 渲染","CG 建模","日系赛璐璐细线大眼","厚涂油画笔触","写实柔和渐变光","PBR 材质","品牌吉祥物","写实大气透视","纹理堆砌","透视崩坏","扭曲崩坏"],
+      isBuiltIn: true,
+    },
+    {
+      slug: "game_cg",
+      name: "游戏 CG",
+      kind: StyleKind.CUSTOM,
+      characterPrompt: "核心风格：3A 游戏过场动画级高保真 CG 角色，引擎实时渲染(in-engine real-time cutscene)质感，Unreal Engine 5 / Octane / Arnold 渲染，PBR 物理材质(皮肤次表面散射 SSS、布料织物纤维、金属与皮革磨损)，发丝级 hair card 细节，path-traced / ray-traced 全局光照与 ambient occlusion，戏剧性低机位仰拍，强边缘光与体积光打亮轮廓，电影级浅景深 bokeh，cinematic 调色与轻微胶片颗粒，虚构原创人物(non-celebrity original fictional person)，次世代干净拓扑，8K 超清\n严格禁止：2D 平涂、手绘线稿、卡通渲染 NPR、赛璐璐、照片直出快照感、塑料感皮肤、蜡像质感、低多边形、扭曲崩坏、多指畸形、真人明星、品牌标识",
+      scenePrompt: "核心风格：3A 游戏过场级高保真 CG 场景，引擎实时渲染(in-engine)电影感，Unreal Engine 5 / Octane 渲染，stylized-PBR 与写实 PBR 材质(湿润反射地面、粗糙岩石、金属锈蚀)，path-traced 全局光照 + ambient occlusion，volumetric fog 体积光柱与丁达尔光束，ray-traced realistic reflections 真实反射，电影宽幅 cinematic widescreen 构图，宏大纵深与大气透视，戏剧性氛围光与浓郁分层色调，电影级调色\n严格禁止：2D 平涂、手绘背景、卡通渲染、赛璐璐、照片快照、低多边形、空旷单调、扁平无光影、品牌招牌、真实地标",
+      propPrompt: "核心风格：3A 游戏资产级高保真 CG 道具，引擎实时渲染质感，Unreal Engine 5 / Octane / Arnold 渲染，写实 PBR 材质(金属磨损、划痕、油渍、氧化、布料与皮革纹理)，高精度次世代建模与法线细节，ray-traced 真实反射与高光，ambient occlusion 接触阴影，戏剧性聚光与边缘光，浅景深 bokeh，电影级调色，8K 超清\n严格禁止：2D 平涂、手绘线稿、卡通渲染、赛璐璐、照片快照、塑料感、低多边形、扁平无质感、真实品牌枪械车标、商标 logo",
+      forbiddenWords: ["2D 平涂","手绘线稿","卡通渲染","赛璐璐","照片快照","塑料感","蜡像质感","低多边形","扭曲崩坏","多指畸形","真人明星","品牌标识","扁平无光影","真实地标"],
+      isBuiltIn: true,
+    },
+    {
+      slug: "ink_wash",
+      name: "水墨画",
+      kind: StyleKind.CUSTOM,
+      characterPrompt: "核心风格：中国水墨写意人物(shuimo ink wash)，单色墨韵以浓淡干湿五色(焦/浓/重/淡/清)塑形，柔毫笔走龙蛇的书法性线条勾勒衣纹，骨法用笔(中锋勾线+侧锋皴擦)，面部以淡墨晕染留白塑造体积、无明显轮廓的没骨法过渡，湿笔生宣自然洇化的羽化边缘，大面积留白呼吸感构图，可极少量赭石/朱砂点唇与印章，宣纸纤维纹理与墨色渗透层次\n严格禁止：照片级写实、3D 渲染、CG 建模、真人摄影、鲜艳高饱和、霓虹色、厚涂油画、塑料感、硬边描线、现代品牌文字、水印、点名在世或当代画家、变形多指",
+      scenePrompt: "核心风格：中国水墨山水写意(shuimo landscape)，单色墨分五色营造空间层次，泼墨与破墨技法铺陈山石云气，披麻/斧劈皴表现山体肌理，远山以淡墨平涂虚化、近景浓墨提点，大面积留白即云水天，烟雾缭绕的留白氤氲与水汽弥漫的大气透视，湿笔在生宣上自然洇化扩散，高远/平远散点透视构图与诗意空灵意境，可极少量赭石淡彩浅绛烘染，宣纸纹理可见\n严格禁止：照片级写实、3D 渲染、CG 建模、真人摄影、鲜艳高饱和、霓虹色、强透视灭点、厚涂油画、塑料感、现代建筑招牌文字、水印、点名当代画家、构图拥塞无留白",
+      propPrompt: "核心风格：中国水墨写意道具，单色墨色浓淡勾勒物体造型，柔毫中锋勾线加侧锋皴擦表现质感，淡墨晕染塑形配少量飞白干笔，没骨写意简练几笔点到为止，墨色自然洇化的湿润边缘与生宣渗透感，留白衬托主体，可极少量朱砂/赭石点缀，宣纸纤维纹理质感\n严格禁止：照片级写实、3D 渲染、CG 建模、PBR 材质、金属反射高光、鲜艳高饱和、霓虹色、厚涂油画、塑料感、硬边描线、品牌 logo 文字、水印、变形",
+      forbiddenWords: ["照片级写实","3D 渲染","CG 建模","真人摄影","鲜艳高饱和","霓虹色","厚涂油画","塑料感","硬边描线","品牌文字","水印","构图拥塞无留白","变形","多指"],
+      isBuiltIn: true,
+    },
+    {
+      slug: "cyberpunk",
+      name: "赛博朋克",
+      kind: StyleKind.CUSTOM,
+      characterPrompt: "核心风格：赛博朋克霓虹雨夜人物，潮湿夜色都市氛围，皮肤被青蓝(teal/cyan)与品红(magenta)霓虹双色边缘光夹击、暖琥珀点缀提亮面部，湿润肌肤与发梢挂细雨水珠的高光反射，眼神与金属/亚克力配件折射环境霓虹，cinematic chiaroscuro 强明暗对比，rim light 描边将人物从深黑背景剥离，浅景深 anamorphic 横向眩光与霓虹散景 bokeh，体积雾 haze 包裹身形形成大气透视，低机位仰视压迫构图，电影级冷调调色加轻微胶片颗粒，8K 超清\n严格禁止：明亮日光、晴空白昼、自然户外阳光、真实明星脸、写实真人偶像、具体影视游戏角色、版权 IP 形象、真实品牌 logo、错误解剖、多指畸形、扭曲崩坏",
+      scenePrompt: "核心风格：赛博朋克未来巨型都市夜景，霓虹灯海(neon lights)与全息光招在湿润空气中晕染，rain-soaked streets 被雨水浸透的沥青地面映出青蓝品红霓虹倒影(neon reflection)，high-density 高密度且层次可读的摩天楼峡谷与悬空管线、霓虹标牌，humid night 潮湿夜晚的 haze/fog 雾层与体积光柱，签名色板 teal+magenta+cyan+deep blacks 加暖琥珀点缀，light bloom 光晕与失焦霓虹散景 bokeh，浓郁 atmospheric perspective 大气透视拉开纵深，低机位仰视 + 缓慢 tracking 穿行运镜，电影级冷调调色与轻微胶片颗粒，8K 超清\n严格禁止：明亮日光、晴空白昼、自然乡村田园、版权影视游戏场景、真实品牌霓虹招牌文字、可读真实店名广告、空旷单调、透视崩坏",
+      propPrompt: "核心风格：赛博朋克道具，金属/亚克力/碳纤维与发光线路材质(PBR)，机身被青蓝品红霓虹反射、暖琥珀指示灯点缀，潮湿表面凝结雨珠的镜面高光与边缘光，发光元件透出 emissive 自发光与轻微 light bloom，做旧磨损与油污刻画增加未来工业真实感，深黑背景上强对比布光，浅景深特写与霓虹散景 bokeh，电影级冷调调色，8K 超清\n严格禁止：明亮日光、晴空白昼、版权 IP 道具、真实品牌 logo 文字、现代真实品牌车型、塑料感、不真实材质、扭曲崩坏",
+      forbiddenWords: ["明亮日光","晴空白昼","自然户外阳光","真实明星脸","版权 IP 形象","真实品牌 logo","真实品牌霓虹招牌文字","可读真实店名广告","现代真实品牌车","具体影视游戏角色","塑料感","扭曲崩坏","透视崩坏","多指畸形"],
+      isBuiltIn: true,
+    },
+    {
+      slug: "watercolor",
+      name: "手绘水彩",
+      kind: StyleKind.CUSTOM,
+      characterPrompt: "核心风格：温暖手绘水彩插画人物(hand-painted watercolor illustration)，圆润柔和的角色造型与饱满脸颊，温柔治愈的表情与含笑大眼，水彩湿画法(wet-on-wet)晕染肌肤与轻盈渐变腮红，柔和漫射自然光(soft diffused natural light)，边缘柔化(soft feathered edges)、可见纸张颗粒与手绘笔触肌理，怀旧温暖配色(暖黄/奶橘/柔绿/天蓝)，干净有粗细变化的细线勾边，2D 平面手绘质感，田园治愈氛围\n严格禁止：cel-shading 硬边二分阴影、动漫赛璐璐平涂、photorealistic 照片写实、真人、3D 渲染、CG 建模、PBR 材质、塑料感皮肤、霓虹冷调、厚重黑描边、生硬高对比、扭曲崩坏、多指畸形",
+      scenePrompt: "核心风格：手绘水彩画背景(watercolor painted background)，田园治愈风景与温馨室内，水彩湿画法层叠晕染天空与远景，柔和漫射自然光与温暖逆光、空气感薄雾，朦胧柔化的远景与丰富前景细节，可见水彩纸纹与手绘笔触留白，怀旧温暖色调(暖阳金/嫩绿/柔粉天空)，通透轻盈的色彩过渡，宁静悠然的氛围与诗意构图\n严格禁止：cel-shading 硬边、动漫赛璐璐平涂、photorealistic 照片写实、真人、3D 渲染、CG 建模、stylized-PBR、体积光霓虹、冷峻金属反射、高饱和硬对比、透视崩坏、空旷单调",
+      propPrompt: "核心风格：手绘水彩道具插画，圆润可爱的简化造型，水彩晕染上色与轻盈渐变，柔和漫射光下的柔化阴影与微妙留白高光，可见纸张颗粒与手绘笔触肌理，温暖怀旧配色，干净有韵律的细线勾边，质朴温润的手工质感\n严格禁止：cel-shading 硬边阴影、动漫平涂、photorealistic 照片写实、3D 渲染、CG 建模、PBR 材质、金属反射高光、塑料感、生硬黑边、高对比冷调",
+      forbiddenWords: ["cel-shading 硬边","赛璐璐平涂","照片写实","真人","3D 渲染","CG 建模","PBR 材质","塑料感","霓虹冷调","生硬黑描边","高对比","扭曲崩坏","多指畸形"],
+      isBuiltIn: true,
+    },
+    {
+      slug: "claymation",
+      name: "黏土定格",
+      kind: StyleKind.CUSTOM,
+      characterPrompt: "核心风格：黏土定格动画角色(plasticine stop-motion puppet)，橡皮泥/油泥手工捏塑质感，表面可见清晰的指纹按压痕与刮刀工具痕(visible fingerprints and sculpting tool marks)，哑光黏土微反光(matte clay sheen)、轻微油润高光，手作不完美的略歪不对称造型(slightly lopsided handmade look)，圆润敦实的夸张身形与可见接缝，微距镜头特写(macro lens)凸显泥料纹理与细微起伏，柔和影棚布光(soft studio key light + fill)裹住体积、阴影柔润过渡，定格逐帧的轻微顿挫凝固感\n严格禁止：光滑 CG/3D 渲染、完美无瑕表面、subsurface scattering 通透皮肤、照片级写实、真人、2D 手绘平涂、塑料感、动捕流畅运动、点名定格作品或工作室或角色、扭曲崩坏",
+      scenePrompt: "核心风格：黏土定格动画微缩布景(miniature handcrafted set)，手工搭建的小尺度场景、纸板/泡沫/黏土塑形的道具与墙体，可见手作纹理与工具痕、略歪不齐的边缘，哑光黏土与手绘涂层质感，柔和影棚布光(soft studio lighting)与温暖填充光裹住微缩体积、阴影柔润，微距/微缩摄影的浅景深与桌面透视，温润饱和的手作色彩，定格逐帧凝固的静态空气感\n严格禁止：光滑 CG/3D 渲染、完美无瑕表面、照片级写实、真人、2D 平涂、宏大实拍空间、塑料感、点名定格作品或工作室、透视崩坏",
+      propPrompt: "核心风格：黏土定格动画手捏道具(handmade plasticine prop)，橡皮泥/油泥塑形，表面布满指纹按压痕与刮刀切割痕(visible fingerprints and tool marks)，哑光黏土微反光、轻微油润高光，手作略歪不对称、厚拙圆润的造型与可见接缝与捏合纹，微距特写(macro lens)放大泥料颗粒与细微凹凸，柔光箱布光柔润包裹体积，温润手作色彩\n严格禁止：光滑 CG/3D 渲染、完美无瑕表面、照片级写实、精密工业质感、塑料感、PBR 金属反射、点名定格作品或工作室、变形",
+      forbiddenWords: ["光滑 CG 渲染","3D 渲染","完美无瑕表面","subsurface scattering 通透皮肤","照片级写实","真人","2D 手绘平涂","塑料感","动捕流畅运动","PBR 金属反射","精密工业质感","扭曲崩坏"],
+      isBuiltIn: true,
+    },
+    {
+      slug: "pixel_art",
+      name: "像素",
+      kind: StyleKind.CUSTOM,
+      characterPrompt: "核心风格：复古像素游戏角色精灵图(pixel art sprite)，8-bit/16-bit 复古游戏美学，可见的方形大像素块构成(visible chunky pixels)、清晰锐利的锯齿状像素边缘(crisp aliased edges)，受限调色板(limited color palette / indexed color)，平涂硬边色块二分阴影(flat hard pixel shading)，无中间过渡的硬边高光，棋盘式抖动渐变(dithering)勾勒体积，1-2 像素粗的描边轮廓(pixel outline)，紧凑可读的剪影造型，CRT 复古游戏机质感\n严格禁止：照片级写实、平滑渐变、抗锯齿平滑、高分辨率写实细节、3D 渲染、矢量平滑曲线、柔和模糊边缘、真人、油画厚涂、景深虚化",
+      scenePrompt: "核心风格：复古像素游戏场景背景(pixel art background tileset)，8-bit/16-bit 复古游戏美学，侧卷轴/俯视(side-scrolling / top-down)关卡视角，瓦片化拼接的环境构图，受限调色板与平涂色块(limited palette / flat color)，清晰可数的方形像素与锐利锯齿边缘(crisp aliased pixel edges)，抖动(dithering)模拟天空与光晕渐变，硬边分层阴影无柔光，扁平的伪深度层叠与视差分层，复古游戏机扫描线质感\n严格禁止：照片级写实、平滑渐变、抗锯齿平滑、高分辨率写实细节、3D 渲染、体积光柔焦、大气透视虚化、真实景深、矢量平滑曲线",
+      propPrompt: "核心风格：复古像素游戏道具图标(pixel art item icon)，8-bit/16-bit 复古游戏美学，小尺寸网格内的方形像素块构成，受限调色板与平涂硬边色块(flat hard pixel shading)，清晰锐利的锯齿像素边缘(crisp aliased edges)，1 像素描边轮廓，硬边高光与抖动(dithering)点缀质感，简洁高辨识度的像素剪影，复古游戏物品栏质感\n严格禁止：照片级写实、平滑渐变、抗锯齿平滑、高分辨率写实细节、3D 渲染、PBR 材质、矢量平滑曲线、柔和模糊边缘、真实反射",
+      forbiddenWords: ["照片级写实","平滑渐变","抗锯齿平滑","高分辨率写实细节","3D 渲染","矢量平滑曲线","柔和模糊边缘","真人","油画厚涂","景深虚化","PBR 材质","真实反射"],
+      isBuiltIn: true,
+    },
+    {
+      slug: "oil_painting",
+      name: "油画",
+      kind: StyleKind.CUSTOM,
+      characterPrompt: "核心风格：古典油画质感人物肖像，厚涂 impasto 可见笔触堆叠的颜料肌理，层层罩染 glazing 透出温润肤色，伦勃朗光(Rembrandt lighting)单侧三角光打亮面颊，深沉的明暗对照(deep chiaroscuro)与暗部融入暖褐底调，画刀(palette-knife)塑造高光厚点，饱和浓郁的矿物颜料色，亚麻布纹(linen canvas texture)透过薄涂处隐约可见，古典学院派肖像构图与庄重姿态\n严格禁止：照片级写实、数码平涂、3D 渲染、CG 建模、卡通、动漫、塑料感皮肤、过度光滑、扁平无笔触、霓虹色、错误解剖、变形",
+      scenePrompt: "核心风格：古典油画质感场景，可见笔触 visible brushwork 与厚涂 impasto 堆叠的环境肌理，多层罩染 glazing 营造空气透视的纵深，深沉的明暗对照(chiaroscuro)切分明暗区域，温暖的烛光/侧窗光自暗部浮现，暖褐与赭石主导的低饱和底调点缀浓郁高光，亚麻布纹(linen canvas texture)与干扫 scumbling 的柔雾边缘，古典风景/室内构图与稳重的画面平衡\n严格禁止：照片级写实、数码平涂、3D 渲染、CG 建模、卡通、动漫、扁平无笔触、霓虹色、塑料感、透视崩坏",
+      propPrompt: "核心风格：古典油画质感静物道具，厚涂 impasto 颜料堆叠出体积感的高光，画刀(palette-knife)塑形与可见笔触刻画质感，层层罩染 glazing 透出金属/陶器/织物的温润反光，深沉明暗对照(chiaroscuro)下道具自暗背景中浮出，饱和浓郁的矿物颜料色与暖褐底调，亚麻布纹(linen canvas texture)隐约可见，古典静物摆放构图\n严格禁止：照片级写实、数码平涂、3D 渲染、CG 建模、PBR 材质、卡通、扁平无笔触、塑料感、霓虹色",
+      forbiddenWords: ["照片级写实","数码平涂","3D 渲染","CG 建模","卡通","动漫","塑料感","扁平无笔触","过度光滑","霓虹色","透视崩坏","变形"],
       isBuiltIn: true,
     },
   ];
@@ -176,7 +266,7 @@ async function main() {
 【输入】你会收到一场剧本（含场号、时段、内外、地点、人物、动作行/对白/旁白）+ 4 大预设值清单(framing/angle/movement/lighting)
 
 【输出严格 JSON】
-{"shots":[{"index":1,"framing":"大远景|大全景|全景|中景|中近景|近景|特写|大特写","angle":"平视|俯视|仰视|过肩|主观视角|荷兰角|鸟瞰|航拍","movement":"固定|推|拉|摇|移|跟|升降|环绕|旋转|甩","lighting":"自然光|硬光|柔光|顶光|逆光|侧光|侧逆光|伦勃朗光|低调|高调|冷调|暖调","sound":"≤30 字音效设计","content":"30 字内画面内容","durationS":3,"priority":"S|A|B|C","prompt":"完整视频提示词(含焦段/构图/色调)"}]}
+{"shots":[{"index":1,"framing":"大远景|大全景|全景|中景|中近景|近景|特写|大特写","angle":"平视|俯视|仰视|过肩|主观视角|荷兰角|鸟瞰|航拍","movement":"固定|推|拉|摇|移|跟|升降|环绕|旋转|甩","lighting":"自然光|硬光|柔光|顶光|逆光|侧光|侧逆光|伦勃朗光|低调|高调|冷调|暖调","sound":"≤30 字音效设计","content":"30 字内画面白描(人名写真名禁 @ 前缀,@ 只用于 prompt)","durationS":3,"priority":"S|A|B|C","prompt":"完整视频提示词(@主体+动作+单一主运镜+光影+风格)"}]}
 
 【拆镜原则】
 1. 每个对白/旁白单独成镜（除非两句台词紧贴同一动作）
@@ -200,7 +290,7 @@ async function main() {
 - 情绪编码:高调=明快安全;低调=压抑危机;逆光剪影=神秘悬念;硬光=锐利对抗;柔光=温情回忆;侧光=人物的两面性
 - 光位术语:顶光=神秘/压迫(反派登场);侧逆光(轮廓光)=剪影悬念/勾边氛围;伦勃朗光(颧骨三角光)=戏剧性人像;蝴蝶光=柔美正面
 - 反转/摊牌瞬间可用光变强化(如转低调冷调),光变动机写进 prompt
-■ 进阶画面维度(焦段 / 构图 / 色调 — 写进 prompt 正文,不占 JSON 枚举字段,每镜按情绪择 1-2 项,不堆砌):
+■ 进阶画面维度(焦段 / 构图 / 色调 — 写进 prompt 正文,不占 JSON 枚举字段;每镜最多点 1 项按情绪择用,不堆砌 — Seedance 2.0 对「主体+动作+风格」最敏感,过多电影术语反而稀释主体描述):
 - 焦段:广角=空间张力/纵深夸张(逼仄环境/压迫感);长焦=压缩空间/背景虚化(孤立主体/偷窥感);微距=极致细节(关键道具/眼神);标准镜=自然纪实
 - 构图:中心/对称=秩序庄重;三分法=自然平衡;留白(左重/右重)=孤独/情绪引导;框架构图(透过门窗/栏杆)=窥视/困境;顶部留白压人=压抑
 - 色调:冷调=疏离危机;暖调=亲密回忆;高对比硬调=对抗张力;低饱和=压抑写实;黄金时刻暖光=电影质感
@@ -211,10 +301,12 @@ async function main() {
 - 对白镜环境音收低,不与台词打架
 
 【写作三纪律(v3)— 主体锚定 / 微观动作 / 场景具体化】
-■ 主体锚定:
-- 人物/场景/道具一律 @名字 引用(系统注入形象参考),禁用代词"他/她/那人"指代主体 — 代词=模型自由发挥外观
-- 主体出场即定装:发型/服装材质/关键配饰一次写清,同场后续镜沿用同一描述词不改写
-- 多人镜头写清空间关系(谁前谁后/谁左谁右)与各自动作;特写可带 1-2 个面部锚点细节(疤痕/泪痣/胡茬)提升跨镜一致
+■ 主体锚定(@ 仅用于 prompt 字段):
+- 在 prompt(视频提示词)字段里人物/场景/道具用 @名字 引用(下游按 @名字 注入对应形象/参考图);禁用代词"他/她/那人"指代主体 — 代词=模型自由发挥外观
+- ⚠️ content / sound 字段是给人看的白描,写真实人名、绝不带 @ 前缀(@ 只在 prompt 字段有意义)
+- 名词一致性(关键,便于后期拆解归并):同一人物/场景/道具跨所有镜用完全相同的名称 — 全程"陆乘",绝不时而"陆先生"时而"那男人";场景/道具同理固定统一名词
+- 主体出场即定装:发型/服装材质/关键配饰一次写清,后续镜沿用同一描述词不改写;特写可带 1-2 个面部锚点(疤痕/泪痣/胡茬)提升跨镜一致
+- 多人镜头写清空间关系(谁前谁后/谁左谁右)与各自动作
 ■ 微观动作:
 - 抽象情绪词必须翻译成具体可拍动作,写到声音/触感级 — "紧张"→"手在油灯下颤抖着揭开木板,指节发白";模型拍不出形容词,只拍得出动作
 - 动作写明速率(缓缓/猛地/急促);情绪可借道具外化(摔杯/折断筷子/撕信),比面部特写更有张力
@@ -231,12 +323,13 @@ async function main() {
 - 4 个字段都必须从【可选预设】清单里挑;清单没有的值用空字符串 "" 不要瞎编
 - movement / lighting 允许 ""(固定镜 + 自然光是默认);sound 是自由文本不受预设限制
 
-【提示词写作 — 公式:景别角度 + 焦段 + 主体(细节) + 动作(速率) + 场景(层次/构图) + 光影 + 色调 + 氛围 + 运镜 + 音效 + 台词】
-- 起手:景别 + 角度 + 主体;主体带关键细节(外貌/服装/表情);需要时加焦段(广角/长焦)定纵深
-- 动作写清速率(缓缓/猛地/急促);场景写层次(前景···背景),可点构图(对称/留白/框架)
-- 光影写方向与质感(含光位:顶光/侧逆光/伦勃朗光);色调点冷暖;运镜写进末段;音效用一短句融入画面(如"雨点击打铁皮棚顶,闷雷渐近")
+【提示词写作(prompt 字段)— 为 Seedance 2.0 优化:写导演意图+视觉方向,不写琐碎分解步骤】
+- 公式(主次分层):景别角度 + @主体(定装细节) + 动作(速率) + 单一主运镜 + 光影 + 风格;进阶(焦段/构图/色调,最多 1 项)+ 音效 + 台词
+- 起手:景别 + 角度 + @主体(带外貌/服装/表情细节)
+- 动作写清速率(缓缓/猛地/急促);场景写层次(前景···背景)
+- 光影写方向与质感(含光位:顶光/侧逆光/伦勃朗光);运镜只给一个主运镜(多运镜会打架),写进末段;音效一短句融入画面
 - 台词放末尾 "角色名：台词";OS 旁白 "角色名（OS）：旁白"
-- 引用人物用 @ 前缀(系统自动替换人物特征)— 例:@陆鸣 猛地起身
+- prompt 里引用人物/场景/道具用 @名字 前缀(下游 AIGC 据此注入参考图)— 例:@陆鸣 猛地起身;同一主体全程同名
 
 【字数】content ≤30 字;sound ≤30 字;prompt 140-200 字(进阶维度只点睛,不挤占主体/动作描述)
 
@@ -494,7 +587,7 @@ issue ≤40 字;score ≥70 时 issue 可为空串。
       value: 'false',
       category: 'feature_flag',
       description:
-        '声线音频(TTS 生成/规范化产物)是否 best-effort 同步中转站素材库(meta.relayAssetUrl,relay 商视频生成免重传直引)。⚠️ 中转站服务端按 URL 下载,本地 dev 的 MinIO 签名 URL 公网不可达会堆死资产 — 仅存储公网可达(服务器部署/公网 MinIO)时开。',
+        '声线音频(TTS/规范化产物,七二第十波起为 mp3)是否 best-effort 同步中转站素材库拿 asset:// 引用。⚠️ 这只是「生产优化」(asset:// 免每次重传):中转站按 URL 下载,本地 dev 的 MinIO localhost 不可达会失败。「自动附带参考声线」的真正生效已不依赖它 —— 视频生成时声线会内联成 data:base64(moyu 真打实证支持音频 base64,同参考图),dev/生产都通。仅在公网存储部署、想省每次 base64 重传时才开 true。',
     },
 
     // ----- 模型用途绑定(admin 后台 /admin/bindings 显式选择,默认空)-----

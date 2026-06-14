@@ -15,7 +15,9 @@ import { NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const VERSION = process.env.npm_package_version ?? '0.1.0';
+// 七二第十波:fallback 跟随 app 版本(v0.2.0)。desktop standalone 走 `node server.js`、
+//   无 npm_package_version env → 靠此 fallback 报正确版本,否则 /api/health 误报旧版。
+const VERSION = process.env.npm_package_version ?? '0.2.0';
 const START_AT = Date.now();
 
 export function GET(): NextResponse {

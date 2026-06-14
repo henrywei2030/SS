@@ -119,14 +119,16 @@ export async function processVoiceSampleJob(data: unknown): Promise<void> {
         : { voice: job.seedVoice.replace(/^builtin:/, '') }),
     });
 
-    // 4. WAV → M2-3 规范化(掐静音 + 响度归一 -16 LUFS + 截 15s)→ m4a
+    // 4. WAV → M2-3 规范化(掐静音 + 响度归一 -16 LUFS + 截 15s)→ mp3
+    //    七二第十波:产物从 .m4a(audio/mp4)改 .mp3 —— Seedance 2.0 / 中转站素材库参考音频只认
+    //    mp3/wav,声线要能作 reference_audio 喂模型,必须 mp3(normalizeAudio 按 .mp3 扩展走 libmp3lame)。
     const rawWav = join(tmp, 'raw.wav');
     await writeFile(rawWav, encodeWavPcm16(result.channels, result.sampleRate));
-    const outM4a = join(tmp, 'sample.m4a');
-    await normalizeAudio({ input: rawWav, output: outM4a });
-    const outBuf = await readFile(outM4a);
+    const outMp3 = join(tmp, 'sample.mp3');
+    await normalizeAudio({ input: rawWav, output: outMp3 });
+    const outBuf = await readFile(outMp3);
     // 六八小修:meta 记成品时长(规范化掐静音+截 15s 后),原 result.durationS 是合成原始时长
-    const probed = await probeMedia(outM4a).catch(() => null);
+    const probed = await probeMedia(outMp3).catch(() => null);
     const finalDurationS =
       Math.round((probed?.durationS ?? result.durationS) * 10) / 10;
 
@@ -135,9 +137,9 @@ export async function processVoiceSampleJob(data: unknown): Promise<void> {
       scope: 'project',
       projectId: asset.projectId,
       kind: 'audio',
-      ext: 'm4a',
+      ext: 'mp3',
     });
-    await getStorageAdapter().putObject(key, outBuf, { contentType: 'audio/mp4' });
+    await getStorageAdapter().putObject(key, outBuf, { contentType: 'audio/mpeg' });
     // 六八:声音设定描述(profileJson.voiceLabel)记入 meta 可追溯;
     //   Nano 不支持音色 instruct,描述的生成期作用在「推荐种子声线」(recommend-seed.ts)
     const voiceDescription = extractVoiceLabel(asset.profileJson);
@@ -162,7 +164,7 @@ export async function processVoiceSampleJob(data: unknown): Promise<void> {
         // 六八命名规范:主体_用途(素材库一眼可读,与人物设定绑定)
         filename: voiceSampleFilename(asset.name),
         assetCategory: 'CHARACTER',
-        mimeType: 'audio/mp4',
+        mimeType: 'audio/mpeg',
         sizeBytes: outBuf.length,
         storageKey: key,
         meta: {

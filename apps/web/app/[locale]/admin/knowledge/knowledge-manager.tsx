@@ -48,6 +48,9 @@ export function KnowledgeManager(): React.ReactElement {
   const [removeTarget, setRemoveTarget] = React.useState<{ id: string; title: string } | null>(
     null,
   );
+  // 七二第十波(#5):批量导入外部语料 — 贴 JSON 数组
+  const [importOpen, setImportOpen] = React.useState(false);
+  const [importText, setImportText] = React.useState('');
 
   const listInput = {
     ...(dimension ? { dimension } : {}),
@@ -97,6 +100,31 @@ export function KnowledgeManager(): React.ReactElement {
     },
     onError: (e) => toast.error(`蒸馏失败:${e.message}`),
   });
+  const importBatch = trpc.admin.knowledge.importBatch.useMutation({
+    onSuccess: (r) => {
+      toast.success(`导入完成:新增 ${r.created} 条 / 跳过 ${r.skipped} 重复(共 ${r.total})— 默认停用,请在下方审核启用`);
+      setImportOpen(false);
+      setImportText('');
+      invalidate();
+    },
+    onError: (e) => toast.error(`导入失败:${e.message}`),
+  });
+  const runImport = (): void => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(importText);
+    } catch {
+      toast.error('JSON 解析失败,请检查格式(应为对象数组)');
+      return;
+    }
+    const entries = Array.isArray(parsed) ? parsed : (parsed as { entries?: unknown })?.entries;
+    if (!Array.isArray(entries) || entries.length === 0) {
+      toast.error('需要一个非空数组(或 { entries: [...] })');
+      return;
+    }
+    // 后端 zod 会逐条校验 dimension/title/content,这里只做最浅的形状兜底
+    importBatch.mutate({ entries: entries as never, enabled: false });
+  };
 
   const saveDraft = (): void => {
     if (!editDraft) return;
@@ -131,6 +159,13 @@ export function KnowledgeManager(): React.ReactElement {
             className="rounded border border-[hsl(var(--color-border))] px-3 py-1.5 text-sm hover:bg-[hsl(var(--color-muted))]"
           >
             ＋ 新建条目
+          </button>
+          <button
+            onClick={() => setImportOpen(true)}
+            className="rounded border border-[hsl(var(--color-border))] px-3 py-1.5 text-sm hover:bg-[hsl(var(--color-muted))]"
+            title="批量贴 JSON 数组导入外部语料(默认停用,审核后启用)"
+          >
+            ⬆️ 批量导入
           </button>
           <button
             onClick={() => mine.mutate({})}
@@ -333,6 +368,40 @@ export function KnowledgeManager(): React.ReactElement {
                 className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               >
                 {create.isPending || update.isPending ? '保存中…' : '保存'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 七二第十波(#5):批量导入外部语料 */}
+      {importOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl rounded-lg border border-[hsl(var(--color-border))] bg-[hsl(var(--color-card))] p-4 shadow-xl">
+            <h2 className="mb-1 text-lg font-semibold">批量导入语料</h2>
+            <p className="mb-3 text-xs text-[hsl(var(--color-muted-foreground))]">
+              贴一个 JSON 数组(或 {'{ entries: [...] }'})。每条字段:dimension(SUBJECT/ACTION/SCENE/LIGHTING/CAMERA/STYLE/QUALITY/CONSTRAINT)、title、content 必填;可选
+              keywordsCsv、family/style/mood/era(字符串数组)、projectId(项目私有世界观)。导入后默认<b>停用</b>,需在下方逐条审核启用。同维度+标题重复自动跳过。
+            </p>
+            <textarea
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+              className="min-h-[14rem] w-full rounded border border-[hsl(var(--color-border))] bg-[hsl(var(--color-background))] px-2 py-1.5 font-mono text-xs leading-relaxed"
+              placeholder={`[\n  {\n    "dimension": "STYLE",\n    "title": "霓虹雨夜赛博色板",\n    "content": "teal+magenta 双色霓虹边缘光,湿地面反射,体积雾,low-key 高对比",\n    "keywordsCsv": "赛博朋克,霓虹,雨夜",\n    "style": ["cyberpunk"]\n  }\n]`}
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setImportOpen(false)}
+                className="rounded border border-[hsl(var(--color-border))] px-3 py-1.5 text-sm hover:bg-[hsl(var(--color-muted))]"
+              >
+                取消
+              </button>
+              <button
+                onClick={runImport}
+                disabled={importBatch.isPending || !importText.trim()}
+                className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {importBatch.isPending ? '导入中…' : '导入(默认停用)'}
               </button>
             </div>
           </div>

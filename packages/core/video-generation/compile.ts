@@ -237,7 +237,7 @@ export async function compileVideoPromptForGroup(
           where: { id: { in: Array.from(mediaIds) } },
           // Phase 1.5 P0-5:meta 含 relayAssetUrl 时 provider=relay-* 优先用 asset://(免重传)
           // 六八:storageKey 供声线媒体签名 URL 兜底(TTS 本地生成的音频无 cdnUrl)
-          select: { id: true, cdnUrl: true, meta: true, storageKey: true },
+          select: { id: true, cdnUrl: true, meta: true, storageKey: true, mimeType: true },
         })
       : [];
   // Phase 1.5 P0-5:provider 是 relay-* (OpenAI 兼容中转站)时优先用 meta.relayAssetUrl
@@ -275,25 +275,40 @@ export async function compileVideoPromptForGroup(
     };
   });
 
-  // 六八:声线媒体 URL 三级兜底 — relayAssetUrl(relay 商)> cdnUrl > 12h 签名 URL。
-  //   TTS 本地生成 / 上传的音频常只有 MinIO storageKey(cdnUrl=null),没有兜底则声线
-  //   永远解析不出(旧五七-3 链同样死在这里)。签名口径与 media.upload 喂中转站一致;
-  //   远端 provider 能否真拉到取决于存储是否公网可达 — 本地 dev + 远端商的投喂
-  //   由「seedance 配音真打债」跟进 relay 素材同步。仅人物声线做签名兜底,图片引用语义不变。
+  // 声线媒体 URL 解析 — relayAssetUrl(relay 商,已在 mediaMap)> cdnUrl(已在 mediaMap)> data:base64。
+  //   七二第十波(参考声线真正可用):TTS 本地声线常只有 MinIO storageKey(cdnUrl=null,无 relay 同步),
+  //   旧逻辑签 12h MinIO URL → 但那是 localhost,中转站 server-side 拉不到 → 被 isRelayFetchableUrl 滤掉
+  //   = 声线永远丢。改为读取字节内联成 data:audio/...;base64 URL —— moyu 对参考音频与参考图一样支持
+  //   base64 解码(真打实证:base64 mp3 已被接受、仅因时长 <1.8s 被拒),dev/生产都通、不依赖公网存储。
+  //   约束:Seedance r2v 参考音频时长须 ≥1.8s(实测报错下限),过短直接跳过(该人物进 voiceMissing)。
+  const MIN_REF_AUDIO_S = 1.8;
   const voiceSignedMap = new Map<string, string>();
   for (const b of dbBindings) {
     const vid = b.asset.type === 'CHARACTER' ? b.asset.voiceMediaId : null;
     if (!vid || mediaMap.get(vid) || voiceSignedMap.has(vid)) continue;
     const m = medias.find((x) => x.id === vid);
     if (!m?.storageKey || m.storageKey.startsWith('placeholder://')) continue;
+    // 格式守门:Seedance/中转站参考音频只认 mp3/wav。旧 m4a(audio/mp4)声线若 base64 送出会被 400 →
+    //   必须跳过(否则重新引入「content[].audio_url 400」回归);该人物按缺声线处理,提示重新生成 mp3 声线。
+    const mime = m.mimeType ?? '';
+    if (!/^audio\/(mpeg|mp3|wav|x-wav|wave)$/i.test(mime)) continue;
+    // 时长守门:meta.durationS < 1.8s 的声线 Seedance r2v 必拒,跳过(该人物按缺声线处理)
+    const durS =
+      m.meta && typeof m.meta === 'object' && !Array.isArray(m.meta)
+        ? Number((m.meta as Record<string, unknown>).durationS)
+        : NaN;
+    if (Number.isFinite(durS) && durS < MIN_REF_AUDIO_S) continue;
     if (m.storageKey.startsWith('external://')) {
       voiceSignedMap.set(vid, m.storageKey.slice('external://'.length));
       continue;
     }
     try {
-      voiceSignedMap.set(vid, await getStorageAdapter().getSignedUrl(m.storageKey, 12 * 3600));
+      // 读字节 → data:base64(moyu 内联解码,无需公网可达;mime 缺省按 mp3)
+      const buf = await getStorageAdapter().getObjectBuffer(m.storageKey);
+      const mime = m.mimeType || 'audio/mpeg';
+      voiceSignedMap.set(vid, `data:${mime};base64,${buf.toString('base64')}`);
     } catch {
-      // 签名失败(存储不可用等)→ 该人物进 voiceMissing,UI 提示
+      // 读取失败(存储不可用等)→ 该人物进 voiceMissing,UI 提示
     }
   }
 

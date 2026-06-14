@@ -324,7 +324,7 @@ export async function concatVideos(
 
 export interface NormalizeAudioArgs {
   input: string;
-  /** 输出建议 .m4a(aac) */
+  /** 输出路径;扩展名决定编码:.mp3→libmp3lame(声线参考用),.m4a/其它→aac */
   output: string;
   /** 响度目标(LUFS),默认 -16(配音参考通用档) */
   targetLufs?: number;
@@ -341,14 +341,19 @@ export function buildNormalizeAudioArgs(a: NormalizeAudioArgs): string[] {
   const lufs = a.targetLufs ?? -16;
   const maxS = a.maxDurationS ?? 15;
   const trim = 'silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.15';
+  // 七二第十波:按输出扩展名选音频编码 —— .mp3 → libmp3lame(Seedance 2.0 / 中转站素材库参考音频
+  //   只可靠认 mp3/wav,声线参考必须 mp3);其余(.m4a/.aac)沿用 aac 向后兼容。
+  //   ⚠️ 只影响参考音频规范化;视频音轨(buildMixBgmArgs)仍是 aac,勿混。
+  const codecArgs = /\.mp3$/i.test(a.output)
+    ? ['-c:a', 'libmp3lame', '-b:a', '128k']
+    : ['-c:a', 'aac', '-b:a', '128k'];
   return [
     '-y',
     '-i', a.input,
     '-af', `${trim},areverse,${trim},areverse,loudnorm=I=${lufs}:TP=-1.5:LRA=11`,
     '-t', String(maxS),
     '-vn',
-    '-c:a', 'aac',
-    '-b:a', '128k',
+    ...codecArgs,
     a.output,
   ];
 }

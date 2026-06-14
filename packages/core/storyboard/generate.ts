@@ -111,7 +111,7 @@ export const SYSTEM_PROMPT = `你是电影摄影指导(DoP)出身的短剧分镜
       "movement": "固定" | "推" | "拉" | "摇" | "移" | "跟" | "升降" | "环绕" | "旋转" | "甩",
       "lighting": "自然光" | "硬光" | "柔光" | "顶光" | "逆光" | "侧光" | "侧逆光" | "伦勃朗光" | "低调" | "高调" | "冷调" | "暖调",
       "sound": "≤30 字音效设计(环境底+动效+强调,可写音桥/静默)",
-      "content": "30 字内描述这一镜的画面内容",
+      "content": "30 字内画面白描(纯中文,人名写真名、禁止 @ 前缀;@ 只用于 prompt 字段)",
       "durationS": 1-5,
       "priority": "S" | "A" | "B" | "C",
       "prompt": "视频生成的完整提示词"
@@ -141,7 +141,7 @@ export const SYSTEM_PROMPT = `你是电影摄影指导(DoP)出身的短剧分镜
 - 情绪编码:高调=明快安全;低调=压抑危机;逆光剪影=神秘悬念;硬光=锐利对抗;柔光=温情回忆;侧光=人物的两面性
 - 光位术语:顶光=神秘/压迫(反派登场);侧逆光(轮廓光)=剪影悬念/勾边氛围;伦勃朗光(颧骨三角光)=戏剧性人像;蝴蝶光=柔美正面
 - 反转/摊牌瞬间可用光变强化(如转低调冷调),光变动机写进 prompt
-■ 进阶画面维度(焦段 / 构图 / 色调 — 写进 prompt 正文,不占 JSON 枚举字段,每镜按情绪择 1-2 项,不堆砌):
+■ 进阶画面维度(焦段 / 构图 / 色调 — 写进 prompt 正文,不占 JSON 枚举字段;**每镜最多点 1 项**按情绪择用,不堆砌 — Seedance 2.0 对「主体+动作+风格」最敏感,过多电影术语反而稀释主体描述):
 - 焦段:广角=空间张力/纵深夸张(逼仄环境/压迫感);长焦=压缩空间/背景虚化(孤立主体/偷窥感);微距=极致细节(关键道具/眼神);标准镜=自然纪实
 - 构图:中心/对称=秩序庄重;三分法=自然平衡;留白(左重/右重)=孤独/情绪引导;框架构图(透过门窗/栏杆)=窥视/困境;顶部留白压人=压抑
 - 色调:冷调=疏离危机;暖调=亲密回忆;高对比硬调=对抗张力;低饱和=压抑写实;黄金时刻暖光=电影质感
@@ -152,10 +152,12 @@ export const SYSTEM_PROMPT = `你是电影摄影指导(DoP)出身的短剧分镜
 - 对白镜环境音收低,不与台词打架
 
 【写作三纪律(v3)— 主体锚定 / 微观动作 / 场景具体化】
-■ 主体锚定:
-- 人物/场景/道具一律 @名字 引用(系统注入形象参考),禁用代词"他/她/那人"指代主体 — 代词=模型自由发挥外观
-- 主体出场即定装:发型/服装材质/关键配饰一次写清,同场后续镜沿用同一描述词不改写
-- 多人镜头写清空间关系(谁前谁后/谁左谁右)与各自动作;特写可带 1-2 个面部锚点细节(疤痕/泪痣/胡茬)提升跨镜一致
+■ 主体锚定(@ 仅用于 prompt 字段):
+- 在 prompt(视频提示词)字段里,人物/场景/道具用 @名字 引用(下游按 @名字 注入对应形象/参考图);禁用代词"他/她/那人"指代主体 — 代词=模型自由发挥外观
+- ⚠️ content / sound 字段是给人看的白描,写真实人名、**绝不带 @ 前缀**(@ 只在 prompt 字段有意义)
+- 名词一致性(关键,便于后期拆解归并):同一人物/场景/道具跨所有镜必须用**完全相同的名称** — 全程"陆乘",绝不时而"陆先生"时而"那男人";场景/道具同理用固定统一名词,让拆解能把同一主体准确归并
+- 主体出场即定装:发型/服装材质/关键配饰一次写清,后续镜沿用同一描述词不改写;特写可带 1-2 个面部锚点(疤痕/泪痣/胡茬)提升跨镜一致
+- 多人镜头写清空间关系(谁前谁后/谁左谁右)与各自动作
 ■ 微观动作:
 - 抽象情绪词必须翻译成具体可拍动作,写到声音/触感级 — "紧张"→"手在油灯下颤抖着揭开木板,指节发白";模型拍不出形容词,只拍得出动作
 - 动作写明速率(缓缓/猛地/急促);情绪可借道具外化(摔杯/折断筷子/撕信),比面部特写更有张力
@@ -172,13 +174,13 @@ export const SYSTEM_PROMPT = `你是电影摄影指导(DoP)出身的短剧分镜
 - 4 个字段都**必须**从【可选预设】清单里挑;清单里没有的值用空字符串 "" 不要瞎编
 - movement / lighting 允许 ""(固定镜 + 自然光是默认);sound 是自由文本不受预设限制
 
-【提示词写作 — 公式:景别角度 + 焦段 + 主体(细节) + 动作(速率) + 场景(层次/构图) + 光影 + 色调 + 氛围 + 运镜 + 音效 + 台词】
-- 起手:景别 + 角度 + 主体;主体带关键细节(外貌/服装/表情);需要时加焦段(广角/长焦)定纵深
-- 动作写清速率(缓缓 / 猛地 / 急促)；场景写层次(前景 ··· 背景),可点构图(对称/留白/框架)
-- 光影写方向与质感(含光位:顶光/侧逆光/伦勃朗光);色调点冷暖;运镜写进末段;音效用一短句融入画面(如"雨点击打铁皮棚顶,闷雷渐近")
-- 台词放在末尾，格式 "角色名：台词"
-- OS 旁白格式 "角色名（OS）：旁白文字"
-- 引用人物用 @ 前缀（系统会自动替换为人物特征）— 例：@陆乘 猛地起身
+【提示词写作(prompt 字段)— 为 Seedance 2.0 优化:写导演意图 + 视觉方向,不写琐碎分解步骤】
+- 公式(主次分层,核心必写、进阶点睛):**景别角度 + @主体(定装细节) + 动作(速率) + 单一主运镜 + 光影 + 风格** ;进阶(焦段/构图/色调,最多 1 项)+ 音效 + 台词
+- 起手:景别 + 角度 + @主体;主体带关键细节(外貌/服装/表情)
+- 动作写清速率(缓缓 / 猛地 / 急促);场景写层次(前景 ··· 背景)
+- 光影写方向与质感(含光位:顶光/侧逆光/伦勃朗光);运镜只给**一个主运镜**(多运镜会打架),写进末段;音效用一短句融入画面(如"雨点击打铁皮棚顶,闷雷渐近")
+- 台词放在末尾，格式 "角色名：台词";OS 旁白格式 "角色名（OS）：旁白文字"
+- prompt 里引用人物/场景/道具用 @名字 前缀(下游 AIGC 据此注入对应参考图)— 例:@陆乘 猛地起身;同一主体全程同名
 
 【字数控制】
 - content：30 字以内;sound：30 字以内
@@ -208,22 +210,29 @@ export async function generateStoryboard(
   // W7 audit R4:DB-driven prompt(admin 可编辑),失败 fallback hardcoded
   const systemPrompt = await loadPromptTemplate('storyboard_main', SYSTEM_PROMPT);
 
-  const result = await provider.generate(
-    {
-      system: systemPrompt,
-      prompt: userPrompt,
-      // 四九收工:4096→16000 — 复杂场 / 上传的长场景 shots JSON 易超 4096 被截断 →
-      //   sonnet 把 JSON 包 markdown,截断后残缺 → 解析失败 "LLM 未返回 JSON"
-      maxTokens: 16000,
-      temperature: 0.3,
-      jsonSchema: {},
-      // 三十六收工 P0 复审:assistant prefill `{"shots":[` 反让 Sonnet/Gemini 把它当对话续接
-      // 续 "好的,继续输出分镜表..." 然后写 markdown。
-      // 真凶不是 prefill 不够长,而是 prefill 本身错了。
-      // 改为不传 prefill — 用 response_format=json_object 即可让 Sonnet 4.6 / Gemini 3 Flash / Haiku 都产 JSON。
-    },
-    input.ctx,
-  );
+  const req = {
+    system: systemPrompt,
+    prompt: userPrompt,
+    // 四九收工:4096→16000 — 复杂场 / 上传的长场景 shots JSON 易超 4096 被截断 →
+    //   sonnet 把 JSON 包 markdown,截断后残缺 → 解析失败 "LLM 未返回 JSON"
+    maxTokens: 16000,
+    temperature: 0.3,
+    jsonSchema: {},
+    // 三十六收工 P0 复审:assistant prefill `{"shots":[` 反让 Sonnet/Gemini 把它当对话续接
+    // 续 "好的,继续输出分镜表..." 然后写 markdown。真凶不是 prefill 不够长,而是 prefill 本身错了。
+    // 改为不传 prefill — 用 response_format=json_object 即可让 Sonnet 4.6 / Gemini 3 Flash / Haiku 都产 JSON。
+  };
+
+  // 七二第十波修:gemini-3-flash 等 flash 模型偶发**瞬时**返回空 content / 非 JSON(非截断、
+  //   finish_reason≠length),5 级 fallback + jsonrepair 也救不了空串 → 用户「场 X: LLM 未返回 JSON」。
+  //   对「未截断却没解析出 JSON」重试 1 次(截断重试无意义,同样会截);成本两发累计计费。
+  let result = await provider.generate(req, input.ctx);
+  let cost = result.costCny;
+  if (!result.json && !result.truncated) {
+    const retry = await provider.generate(req, input.ctx);
+    cost += retry.costCny;
+    if (retry.json) result = retry; // 重试成功才采纳;仍失败保留首发(供 warning/raw 诊断)
+  }
 
   const shots = extractShots(
     result.json,
@@ -240,10 +249,14 @@ export async function generateStoryboard(
 
   let warning: string | undefined;
   if (!result.json) {
-    // 全盘审查 #5:区分"被 maxTokens 截断"(调大上限 / 减内容可重试成功)vs"模型格式问题"
+    // 全盘审查 #5 + 七二第十波:三分支区分,文案可操作
+    //   ① 截断 → 调大 maxTokens / 减内容  ② 空内容(已重试)→ 疑似安全拦截 / 模型异常,改措辞重试
+    //   ③ 非空但非 JSON(已重试)→ 模型格式问题,重试
     warning = result.truncated
       ? 'LLM 输出被 maxTokens 截断、JSON 不完整 — 请减少单场内容或调高分镜 maxTokens 上限后重试'
-      : 'LLM 未返回 JSON';
+      : !result.text || result.text.trim().length === 0
+        ? 'LLM 两次均返回空内容(可能触发安全拦截 / 模型瞬时异常)— 请重试,或调整本场敏感措辞'
+        : 'LLM 未按 JSON 格式输出(已重试一次仍失败)— 请重试';
   } else if (shots.length === 0) {
     warning = 'LLM 输出无可解析 shots（已计费但本场未生成分镜）';
   } else if (result.truncated) {
@@ -253,7 +266,7 @@ export async function generateStoryboard(
 
   return {
     shots: taggedShots,
-    cost: result.costCny,
+    cost, // 七二第十波:含重试发的累计成本(单发时 = result.costCny)
     modelId,
     raw: result.json,
     warning,
@@ -372,7 +385,14 @@ function extractShots(
         typeof r.sound === 'string' && r.sound.trim().length > 0
           ? r.sound.trim().slice(0, 60)
           : undefined;
-      const content = typeof r.content === 'string' ? r.content : '';
+      // 七二第十波(#3-b):剧本内容(content)里的 @人名 是 LLM 越界产物 —— SYSTEM_PROMPT 的「主体
+      //   锚定:@名字 引用」纪律本意只约束 prompt(视频提示词,@ 用于下游注入参考图),但作用域没写死,
+      //   LLM 把 @ 也带进了 content。content 是给人看的纯白描、不做任何 token 注入,@ 纯噪声。
+      //   这里剥掉 content 里「@ + 人名」的 @ 前缀(保留人名);**绝不动 prompt**(其 @图片N 是必要 token)。
+      const content = (typeof r.content === 'string' ? r.content : '').replace(
+        /@(?=[一-龥A-Za-z])/g,
+        '',
+      );
       const prompt = typeof r.prompt === 'string' ? r.prompt : '';
       const durationS =
         typeof r.durationS === 'number' && r.durationS > 0
@@ -414,12 +434,23 @@ function zhLocation(l: ParsedScene['location']): string {
   return { INDOOR: '内', OUTDOOR: '外', MIXED: '内外' }[l];
 }
 
+// 七二第十波(#4):覆盖全部 12 内置风格 + 去 IP 化措辞(不点名工作室/作品)。
+//   新增 slug 若漏配会 `?? slug` 退化成英文 slug 塞进 LLM,故扩全。
 function zhStyle(slug: string): string {
   return (
     {
-      ai_real: 'AI 真人短剧（照片级写实）',
-      anim_3d: '3D 国漫（皮克斯级渲染）',
-      anim_2d: '2D 动漫（赛璐璐上色）',
+      ai_real: 'AI 伪真人(照片级写实、原创虚构人物非明星)',
+      anim_3d: '3D(电影级风格化三维渲染)',
+      anim_2d: '2D(通用二维手绘动画)',
+      anim_jp: '日式动漫(赛璐珞 cel-shading、大眼平涂)',
+      anim_us: '美式卡通(粗黑描边、夸张比例、高饱和平涂)',
+      game_cg: '游戏 CG(3A 引擎实时渲染过场质感)',
+      ink_wash: '中国水墨写意(留白、墨分五色)',
+      cyberpunk: '赛博朋克(霓虹雨夜未来都市)',
+      watercolor: '手绘水彩(温暖治愈、纸纹笔触)',
+      claymation: '黏土定格(手捏泥料、指纹工具痕)',
+      pixel_art: '像素(8/16-bit 复古游戏美术)',
+      oil_painting: '古典油画(厚涂笔触、伦勃朗光)',
     }[slug] ?? slug
   );
 }

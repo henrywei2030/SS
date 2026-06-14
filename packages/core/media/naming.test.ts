@@ -48,14 +48,14 @@ describe('assetCategoryFromType', () => {
 });
 
 describe('文件名 builders(主体_用途 格式)', () => {
-  it('人物声线样本:名_参考声音.m4a', () => {
-    expect(voiceSampleFilename('林小满')).toBe('林小满_参考声音.m4a');
-    expect(voiceSampleFilename('')).toBe('角色_参考声音.m4a');
+  it('人物声线样本:名_参考声音.mp3', () => {
+    expect(voiceSampleFilename('林小满')).toBe('林小满_参考声音.mp3');
+    expect(voiceSampleFilename('')).toBe('角色_参考声音.mp3');
   });
 
-  it('规范化音频:原名去扩展名_规范化.m4a', () => {
-    expect(normalizedVoiceFilename('林小满_参考声音.m4a')).toBe('林小满_参考声音_规范化.m4a');
-    expect(normalizedVoiceFilename('voice.wav')).toBe('voice_规范化.m4a');
+  it('规范化音频:原名去扩展名_规范化.mp3', () => {
+    expect(normalizedVoiceFilename('林小满_参考声音.m4a')).toBe('林小满_参考声音_规范化.mp3');
+    expect(normalizedVoiceFilename('voice.wav')).toBe('voice_规范化.mp3');
   });
 
   it('生成图:主体_槽位中文_MMDD-序.png(中文主体保留)', () => {

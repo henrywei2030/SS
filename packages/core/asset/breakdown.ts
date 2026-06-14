@@ -396,12 +396,22 @@ function zhProjectType(t: string): string {
   );
 }
 
+// 七二第十波(#4):与 storyboard/generate.ts 的 zhStyle 同步 —— 覆盖全部 12 内置风格 + 去 IP 化。
 function zhStyle(slug: string): string {
   return (
     {
-      ai_real: 'AI 真人短剧(照片级写实)',
-      anim_3d: '3D 国漫(皮克斯级渲染)',
-      anim_2d: '2D 动漫(赛璐璐上色)',
+      ai_real: 'AI 伪真人(照片级写实、原创虚构人物非明星)',
+      anim_3d: '3D(电影级风格化三维渲染)',
+      anim_2d: '2D(通用二维手绘动画)',
+      anim_jp: '日式动漫(赛璐珞 cel-shading、大眼平涂)',
+      anim_us: '美式卡通(粗黑描边、夸张比例、高饱和平涂)',
+      game_cg: '游戏 CG(3A 引擎实时渲染过场质感)',
+      ink_wash: '中国水墨写意(留白、墨分五色)',
+      cyberpunk: '赛博朋克(霓虹雨夜未来都市)',
+      watercolor: '手绘水彩(温暖治愈、纸纹笔触)',
+      claymation: '黏土定格(手捏泥料、指纹工具痕)',
+      pixel_art: '像素(8/16-bit 复古游戏美术)',
+      oil_painting: '古典油画(厚涂笔触、伦勃朗光)',
     }[slug] ?? slug
   );
 }

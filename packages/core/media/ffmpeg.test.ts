@@ -143,6 +143,17 @@ describe('buildNormalizeAudioArgs(纯函数)', () => {
     expect(af).toContain('loudnorm=I=-16');
     expect(args.join(' ')).toContain('-t 15');
     expect(args).toContain('-vn');
+    // .m4a / 无扩展 → aac(向后兼容)
+    expect(args.join(' ')).toContain('-c:a aac');
+  });
+
+  it('七二第十波:.mp3 输出走 libmp3lame(参考音频投喂 Seedance/中转站只认 mp3)', () => {
+    const mp3 = buildNormalizeAudioArgs({ input: 'v.wav', output: 'sample.mp3' });
+    expect(mp3.join(' ')).toContain('-c:a libmp3lame');
+    expect(mp3.join(' ')).not.toContain('-c:a aac');
+    // 非 mp3 仍 aac
+    const m4a = buildNormalizeAudioArgs({ input: 'v.wav', output: 'sample.m4a' });
+    expect(m4a.join(' ')).toContain('-c:a aac');
   });
 
   it('targetLufs / maxDurationS 可调', () => {

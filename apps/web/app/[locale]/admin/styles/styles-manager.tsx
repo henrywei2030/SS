@@ -6,10 +6,11 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { ErrorBanner } from '@/components/ui/error-banner';
 import { adminMutationHandlers } from '@/lib/admin-mutation';
 
+// 七二第十波(#4):标签命名对齐 2D / 3D / AI 伪真人;新增风格 kind=CUSTOM(显示自定义,真实名走 name)
 const KIND_LABELS: Record<string, string> = {
-  AI_REAL: 'AI 真人',
-  ANIM_3D: '3D 国漫',
-  ANIM_2D: '2D 动漫',
+  AI_REAL: 'AI 伪真人',
+  ANIM_3D: '3D',
+  ANIM_2D: '2D',
   CUSTOM: '自定义',
 };
 

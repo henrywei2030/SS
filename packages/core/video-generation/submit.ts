@@ -518,7 +518,19 @@ export async function submitVideoGeneration(
     );
   }
   // 五七-3:去重(角色形象绑定自动带的 voiceMediaId 可能与显式 SOUND_VOICE 绑定重复)
-  const refAudioUrls = Array.from(new Set(allAudioUrls));
+  const refAudioUrlsDeduped = Array.from(new Set(allAudioUrls));
+  // 七二第十波(#1 视频生成全失败根因 — content[2].audio_url.url InvalidParameter):
+  //   音频此前唯独漏了可达性过滤(图片 :479、首帧 :545 都过了 isRelayFetchableUrl)。本地 TTS
+  //   声线落 .m4a(audio/mp4)且 cdnUrl=null → resolveMediaFetchUrl 退化成本机 MinIO 签名 URL
+  //   (localhost),moyu server-side 拉不到 → 整单 400。与图片同口径丢弃本机/不可达 URL + 记警,
+  //   不让一段够不到的声线连累整条视频生成。(根治声线可用性见 voice/generate-sample.ts 改产 mp3。)
+  const refAudioUrls = refAudioUrlsDeduped.filter(isRelayFetchableUrl);
+  const unreachableAudioCount = refAudioUrlsDeduped.length - refAudioUrls.length;
+  if (unreachableAudioCount > 0) {
+    console.warn(
+      `[generateVideo] group ${grp.number} 丢弃 ${unreachableAudioCount} 个中转站够不到的参考声线 URL(本机 MinIO/localhost,如本地 TTS 声线)— moyu 拉不到,不作参考音频`,
+    );
+  }
   // 六八:缺声线人物记警(不阻断 — 没有声线也允许生成,但日志可查"为什么这条没带某人声音")
   if (voiceMissing.length > 0) {
     console.warn(
@@ -671,6 +683,8 @@ export async function submitVideoGeneration(
           createdBy: userId,
         },
       });
+      // 七二第十波:对决 B 路与 A 路对齐 —— 参考图/声线/首帧都过 isRelayFetchableUrl 可达性门
+      //   (此前 B 路漏过滤,本机/不可达 URL 会让 B 家整单失败,与 A 路口径不一致)。
       const refImageUrlsB = Array.from(
         new Set([
           ...duelCompiled.compiled.references
@@ -679,8 +693,10 @@ export async function submitVideoGeneration(
             .filter((u): u is string => !!u),
           ...duelCompiled.characterImageRefs.map((r) => r.mediaUrl),
         ]),
+      )
+        .filter(isRelayFetchableUrl)
         // 七二第九波:对决第二家同样按 provider 上限截断参考图
-      ).slice(0, maxRefImagesFor(duelProviderId!));
+        .slice(0, maxRefImagesFor(duelProviderId!));
       const rawAudioB = [
         ...duelCompiled.compiled.references
           .filter((r) => r.kind === 'AUDIO')
@@ -690,7 +706,9 @@ export async function submitVideoGeneration(
       ];
       const refAudioUrlsB =
         capsParamsB.supportsRefAudio === true
-          ? Array.from(new Set([...rawAudioB, ...(args.refAudioUrl ? [args.refAudioUrl] : [])]))
+          ? Array.from(
+              new Set([...rawAudioB, ...(args.refAudioUrl ? [args.refAudioUrl] : [])]),
+            ).filter(isRelayFetchableUrl)
           : [];
       let firstFrameUrlB: string | undefined;
       if (firstShot?.startFrameMediaId && capsParamsB.supportsFirstFrame === true) {
@@ -699,7 +717,7 @@ export async function submitVideoGeneration(
           select: { cdnUrl: true, storageKey: true },
         });
         const uB = mB ? await resolveMediaFetchUrl(mB, { expiresInSeconds: 12 * 3600 }) : null;
-        if (uB) firstFrameUrlB = uB;
+        if (uB && isRelayFetchableUrl(uB)) firstFrameUrlB = uB;
       }
       const payloadB: VideoGenJobData = {
         attemptId: duelAttempt.id,
