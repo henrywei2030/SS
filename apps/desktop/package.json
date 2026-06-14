@@ -1,6 +1,6 @@
 {
   "name": "@ss/desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "StarsAlign Studio · Tauri 桌面端壳子(W7 收尾骨架,Phase 1.5 真编译)",
   "scripts": {
