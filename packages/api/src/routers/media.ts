@@ -207,7 +207,11 @@ export const mediaRouter = router({
     .input(
       z.object({
         filename: z.string().min(1).max(255),
-        fileBase64: z.string().min(1), // data:image/...;base64,xxx OR pure base64
+        // 全盘审计 high:base64 无上限 → 超大输入 OOM DoS。加 ~25MB base64(≈18MB 二进制)上限
+        fileBase64: z
+          .string()
+          .min(1)
+          .max(25 * 1024 * 1024, { error: '文件过大(base64 上限约 25MB)' }), // data:image/...;base64,xxx OR pure base64
         kind: KIND_ENUM,
         scope: SCOPE_ENUM.default('PROJECT'),
         projectId: z.string().cuid().optional(),

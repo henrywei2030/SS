@@ -9,6 +9,23 @@
  */
 import mammoth from 'mammoth';
 
+// 全盘审计 high:DOCX 本质是 ZIP,mammoth.extractRawText 解压无大小上限 → 压缩炸弹可在
+//   text.length 检查之前就 OOM。解压前扫 ZIP 中央目录(PK\x01\x02 头),累加各条目声明的
+//   uncompressed size(offset 24, 4B LE),超阈值即拒。
+const ZIP_CENTRAL_DIR_SIG = Buffer.from([0x50, 0x4b, 0x01, 0x02]);
+function assertDocxNotZipBomb(buffer: Buffer): void {
+  const MAX_UNCOMPRESSED = 80 * 1024 * 1024; // 80MB:真实剧本 docx 远小于,压缩炸弹远大于
+  let total = 0;
+  let pos = buffer.indexOf(ZIP_CENTRAL_DIR_SIG);
+  while (pos >= 0 && pos + 28 <= buffer.length) {
+    total += buffer.readUInt32LE(pos + 24); // 该条目解压后字节数
+    if (total > MAX_UNCOMPRESSED) {
+      throw new Error('DOCX 解压后体积异常过大(疑似压缩炸弹),已拒绝');
+    }
+    pos = buffer.indexOf(ZIP_CENTRAL_DIR_SIG, pos + 4);
+  }
+}
+
 export interface ExtractResult {
   text: string;
   /** 文件格式标识，便于审计 / 训练数据集回溯 */
@@ -67,6 +84,7 @@ export async function extractScriptText(
           `[script-extract] binding.script.docx.parser="${docxParser}" 未接入,回退 mammoth(当前仅实现 mammoth)`,
         );
       }
+      assertDocxNotZipBomb(buffer); // 防 zip bomb 在 mammoth 解压时 OOM(全盘审计 high)
       const result = await mammoth.extractRawText({ buffer });
       text = result.value;
       break;

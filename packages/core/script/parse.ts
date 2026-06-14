@@ -337,6 +337,13 @@ export function parseEpisodeBoundaries(text: string): EpisodeBoundary[] {
   }
   if (current) frames.push(current);
 
+  // 全盘审计 high:防恶意构造大量 "第N集" 头 → N×parseScriptText + 上层 N×DB 插入风暴。
+  //   真实剧集远小于此上限。
+  const MAX_EPISODES = 500;
+  if (frames.length > MAX_EPISODES) {
+    throw new Error(`检测到 ${frames.length} 集,超过上限 ${MAX_EPISODES} — 疑似异常文件,已拒绝`);
+  }
+
   if (frames.length === 0) {
     return [
       {
