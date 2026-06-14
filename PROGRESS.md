@@ -18,6 +18,7 @@
   - **E2E 真打全链路**:灵感→剧本→分镜(全3集)→导出分镜脚本快照(72镜)→拆解(8草稿)→applyBreakdown 入库8→syncToArt 同步8→美术工坊可见8。
 - ✅ **3 遍全盘审核 + 17 项优化全应用**(24 agent / 115 万 token + 对抗复核)。**真 bug**:pipelineStatus 漏 `deletedAt:null` 灵感草稿过滤(已修)。删 breakdown-review-dialog 不可达 else 死分支(~85 行 + chunkArr/常量/utils,`exportId` 改必填)+ 死 prop(onSelectEpisode)/死字段(shotCountSnapshot、lastSnapshot.exportId);多处陈旧注释/docstring 纠偏(「从完整剧本拆解」→「从分镜脚本快照」);docs W1-W7-followup/W2-admin-module-spec/DEVELOPMENT 加归档/滞后横幅。typecheck 16/16。
 - ✅ **系统版本 → v0.2.0**(root + web `package.json` + 登录 footer)。**admin 密码恢复 seed 默认 `admin123!@#`**(验证期临时改密后恢复)。
+- ✅ **Mac 安装包打包 v0.2.0 + 独立运行深度验证**(用户指令)。链路 `SS_DESKTOP_BUILD=1 web standalone → desktop-pack 总装 → tauri build --bundles dmg`(`--bundles dmg` 覆盖 Win 留下的 nsis 目标;Rust 增量 ~10s)。**`verify-desktop-flow` PASS**:打包后资源独立启动全链(内嵌 PG→迁移45→seed→standalone Next16→主界面 200,非 splash),证大升级(next16/prisma7.8/undici8/zod4)**未破坏安装包自包含性**(node_modules 查不到 pg/undici/zod 是 Next 编进 server chunks 的假阴性)。桌面版本号三处(tauri.conf/Cargo.toml/desktop package.json)→ **v0.2.0**(commit `11e0071`),产 `StarsAlign Studio_0.2.0_aarch64.dmg`(269M · Apple Silicon · 未签名),删旧 0.1.0。
 
 **问题/待决策**
 - ❓ 手机端方案 B 暂缓中(每日提醒已设);恢复见 docs/09。
@@ -28,6 +29,7 @@
 - 📌 导演 v0.2.0 更大项目真打(分镜脚本 200k 截断边界、跨集拆解质量);可选打磨按需。
 - 📌 手机端方案 B 恢复时从 docs/09 §5 接续(复验 Tab Bar → 项目首页 Hero/Bento → 工作区重排)。
 - 📌 别的设备开工:`db:migrate:deploy`(StoryboardExport migration)+ `db:sync`。
+- 📌 **Win 安装包**:win-laptop `开工`(拉 v0.2.0 commit `11e0071`)→ 三步链(nsis 目标)出 `.exe`;mac 包 `_aarch64.dmg` 与 win 包 `_x64-setup.exe` **勿混**。
 
 ---
 

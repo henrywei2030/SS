@@ -1,6 +1,6 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-06-14(**mac-studio**:依赖大升级接续 + 导演模块 **v0.2.0** 链路重构【拆解换源=分镜脚本快照 / 向导式流水线 stepper / 美术侧拆解统一下线】+ 3 遍审核 17 项优化 + 手机端方案 B Phase0/1【暂缓封存】 · 详见 [PROGRESS](PROGRESS.md))
+> 最后更新:2026-06-14(**mac-studio**:依赖大升级接续 + 导演模块 **v0.2.0** 链路重构【拆解换源=分镜脚本快照 / 向导式流水线 stepper / 美术侧拆解统一下线】+ 3 遍审核 17 项优化 + Mac dmg v0.2.0 打包(独立运行验证 PASS)+ 手机端方案 B Phase0/1【暂缓封存】 · 详见 [PROGRESS](PROGRESS.md))
 > 上一版:2026-06-14(win-laptop 第六场:灵感创作 API 失败定位【代理 ECONNRESET】+ OpenAI-compat 文本重试 + 桌面端 Chrome 调试)
 > 仓库:https://github.com/henrywei2030/SS
 > **🚀 一键启动**:`pnpm start`(详见 [README.md](README.md#快速启动) / [CLAUDE.md](CLAUDE.md#设备登记))
