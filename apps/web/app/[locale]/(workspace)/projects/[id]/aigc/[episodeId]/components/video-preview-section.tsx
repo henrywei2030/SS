@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 
 import { trpc } from '@/lib/trpc/client';
+import { useConfirm } from '@/components/ui/confirm-dialog';
 import { useAigcProgress } from '@/lib/hooks/use-aigc-progress';
 import { useVideoSettings } from '@/lib/hooks/use-video-settings';
 import { ASPECT_RATIOS, type AspectRatio } from '@ss/shared/constants';
@@ -128,6 +129,9 @@ export function VideoPreviewSection({
   // (项目_第E集_分镜G_第K次.mp4)带出,原前端 buildDownloadFilename 退役。
   const utils = trpc.useUtils();
 
+  // 桌面端(WebView2)会吞 native 确认弹窗 → 用应用内 ConfirmDialog
+  const { confirm, confirmDialog } = useConfirm();
+
   // M3c:按 QC 分排序开关(默认时间序;开了高分在前,未评分压底保持时间序 — sort 稳定)
   const [sortByQc, setSortByQc] = React.useState(false);
 
@@ -220,6 +224,7 @@ export function VideoPreviewSection({
   const selectedTake = visibleTakes.find((t) => t.id === selectedTakeId);
 
   return (
+    <>
     <section>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">
@@ -622,13 +627,13 @@ export function VideoPreviewSection({
               <button
                 onClick={() => {
                   // 2026-05-27 用户反馈:删除 = 软删(rejected=true)前端 filter,DB 保审计
-                  if (
-                    window.confirm(
-                      '确定从历史中删除这次视频抽卡?\n(DB 保留审计记录,前端不再显示)',
-                    )
-                  ) {
-                    onReject(selectedTake.id);
-                  }
+                  confirm({
+                    title: '确定从历史中删除这次视频抽卡?',
+                    description: 'DB 保留审计记录,前端不再显示',
+                    danger: true,
+                    confirmLabel: '删除',
+                    onConfirm: () => onReject(selectedTake.id),
+                  });
                 }}
                 disabled={rejectPending}
                 className="inline-flex h-7 items-center gap-1 rounded-md border border-[hsl(var(--color-border))] px-2 hover:bg-[hsl(var(--color-danger)/0.1)] hover:text-[hsl(var(--color-danger))] disabled:opacity-50"
@@ -697,8 +702,16 @@ export function VideoPreviewSection({
                         <button
                           onClick={() => {
                             if (rival.status === 'SUCCESS') {
-                              if (!window.confirm(`采纳 ${provName(t.providerId)},把对方标废片?`)) return;
-                              onReject(rival.id);
+                              confirm({
+                                title: `采纳 ${provName(t.providerId)},把对方标废片?`,
+                                danger: true,
+                                confirmLabel: '采纳',
+                                onConfirm: () => {
+                                  onReject(rival.id);
+                                  handleSelectHistoryTake(t.id);
+                                },
+                              });
+                              return;
                             }
                             handleSelectHistoryTake(t.id);
                           }}
@@ -840,13 +853,13 @@ export function VideoPreviewSection({
                 <button
                   type="button"
                   onClick={() => {
-                    if (
-                      window.confirm(
-                        '确定从历史中删除这次抽卡?\n(DB 保留审计记录,前端不再显示)',
-                      )
-                    ) {
-                      onReject(t.id);
-                    }
+                    confirm({
+                      title: '确定从历史中删除这次抽卡?',
+                      description: 'DB 保留审计记录,前端不再显示',
+                      danger: true,
+                      confirmLabel: '删除',
+                      onConfirm: () => onReject(t.id),
+                    });
                   }}
                   disabled={rejectPending}
                   title="从历史删除(DB 保审计)"
@@ -861,6 +874,8 @@ export function VideoPreviewSection({
         </div>
       )}
     </section>
+      {confirmDialog}
+    </>
   );
 }
 

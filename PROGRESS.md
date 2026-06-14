@@ -5,6 +5,31 @@
 
 ---
 
+## 2026-06-14(周日,win-laptop · 第五场:卡 splash 终极根因(strip_unc)+ 转 NSIS 单用户 + splash 进度条 + 7 项 app 修复)
+
+**完成**
+- ✅ **真机安装实测 → 揪出卡 splash 的【最前置真根因】+ 转单用户安装**(用户:已装在本机仍卡 loading,请监控启动)。实时盯真实 GUI 启动 + `sidecar.out.log`(诊断兜底)层层逼出:
+  - **根因③(最深 · strip_unc)**:Tauri 的 `resource_dir()` 在 Windows 返回带 `\\?\` 扩展长度前缀的 verbatim 路径,`main.rs` 把它当脚本路径传给 node → **node 解析不了 `\\?\` → `EISDIR lstat 'C:'` → sidecar 启动即崩 → 永久卡 splash**。它挡在 chmod/stdio 之前,且我之前所有手动测试都用干净显式路径,完美绕开 → 一直没复现。**修:`main.rs` 加 `strip_unc()` 去前缀**(node/res 都去),传给 node 的脚本/env 路径全干净。
+  - **根因④(stdio)**:GUI(`windows_subsystem="windows"`)无控制台,spawn 的 node 继承【无效 stdio 句柄】→ node libuv 初始化 stdio 即崩(还没执行 JS)→ 无数据目录/无日志。**修:`main.rs` 给 sidecar 显式有效句柄**(stdin=null、stdout/stderr→`sidecar.out.log`、`CREATE_NO_WINDOW`)—— 既治崩又兜底捕获 node 自身崩溃。
+  - **根因②(chmod,仅 per-machine 只读位置)**:`embedded-postgres` `initialise/start` 对 PG 二进制 `fs.chmod('755')`,装进只读的 Program Files → EPERM → 崩。**修双保险**:① `desktop-pack.mjs` patch embedded-postgres `dist/index.js` 三处 chmod 吞 EPERM/EACCES;② **转 NSIS 单用户安装**(`tauri.conf` `targets:["nsis"]` + `bundle.windows.nsis.installMode:"currentUser"`)→ 装到**可写**的 `%LOCALAPPDATA%`、**无需管理员**、从根上消除只读类错误(Program Files × 会自我修改的 app 是必然冲突,别硬扛)。决策 [ADR-38](docs/05-tech-decisions.md)。
+  - **决定性验证**:静默装真包到 LocalAppData → 用安装版 node+脚本走完整链:`initdb→PG→迁移44→seed→核对→web Ready`,`boot-progress.json` 推到 95%;真机 GUI exe 跑通,`GET / →307 login →307 activate →200`(28KB 主界面)。**之前在 Program Files 崩的同一条路,可写位置后全程跑通。**
+- ✅ **splash 实时进度条 + 阶段文案**(用户:把运行进程和进度条放进启动界面):`desktop-bootstrap.mjs` 各阶段写 `boot-progress.json`(5%准备→12%initdb→28%启动DB→55%结构→70%seed→90%就绪→95%web)→ `main.rs` 轮询读取 eval 进 splash(进度条 + 文案)→ `splash/index.html` 加进度条元素。再不是干转圈。
+- ✅ **7 项 app 修复(用户列表)+ 系统性 confirm sweep**(typecheck 16/16):
+  - **系统性根因**:**Tauri WebView2 静默吞掉 native `window.confirm/alert/prompt`** → 凡用原生弹窗把关的删除/破坏性操作在桌面端"点了没反应"。新增 `useConfirm()` hook(confirm-dialog.tsx),全站 sweep **7 文件**(provider model-row/relay-card、视频 video-preview×3、美术 asset-edit、审核 audit、分镜 shots-pane×2、API用量 api-usage alert→toast)→ 全换应用内 `ConfirmDialog`/sonner toast。**修好 #1b(provider 删除)+ #2(视频删除)+ 一类桌面坑**。
+  - **#1a** seed.ts 清空 7 个默认直连 provider → 新机/桌面首装零内置直连(冒烟实测「✓ 0 个 Provider」)。**#4** 新建项目 placeholder「重生1983」→「请为你的项目命名」。**#6** 顶栏「数据/团队/管理」收进右上用户下拉(分组+滚动,去重旧「管理」单项),顶栏只剩 导演/美术/AIGC/素材库。**#7** 进项目后顶栏「Projects」自动显示项目名(`params.id` 判定 + `project.get`,可点返回)。
+  - **#3 性能**:`local.ts verifyToken` 加进程内 30s 短缓存(治每次导航 RSC+tRPC 双查 user 表,桌面内嵌 PG 冷查是主延迟源)+ `provider.tsx` QueryClient `placeholderData:keepPreviousData`+staleTime 60s(切换不闪空)+ 3 个 `loading.tsx` 骨架(进模块白屏→骨架)+ 登出去掉多余 `router.refresh`。
+  - **#5 登录持久**:分析为坏包遗留(激活态存 DB、登录 cookie 7d 持久存 WebView2 EBWebView profile,均在稳定位置)→ working 包重装后应自然持久,**未改代码,待真机验证**。
+
+**问题/待决策**
+- ❓ #5 真机验证:激活+登录后关再开是否直进项目总览(若仍要重激活,看是否 %APPDATA% 数据目录是全新的)。
+- ❓ 直连 provider:老机/已装机 DB 里的 6-7 个旧直连不会被 seed 自动删(seed 不删列表外行),如要清需 UI 手删。
+
+**下次接着做**
+- 📌 真机走一遍 7 项验收(尤其 #5 持久);mac 机开工 `db:sync`
+- 📌 桌面 backlog:退出钩子加固 / 自动更新 / 代码签名(分发才需)
+
+---
+
 ## 2026-06-14(周日,win-laptop · 第四场:Win 安装包重打 + 卡 splash 双根因修复 + 全盘验收)
 
 **完成**

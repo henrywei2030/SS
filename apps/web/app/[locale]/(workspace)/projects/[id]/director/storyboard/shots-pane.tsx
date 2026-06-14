@@ -18,6 +18,7 @@ import { normalizePrompt } from '@ss/shared';
 import { trpc } from '@/lib/trpc/client';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { useConfirm } from '@/components/ui/confirm-dialog';
 import { cn } from '@/lib/utils';
 
 import { ShotEditDialog } from './edit-dialog';
@@ -112,6 +113,7 @@ function ColResizer({
 
 export function ShotsPane({ episodeId }: Props): React.ReactElement {
   const utils = trpc.useUtils();
+  const { confirm, confirmDialog } = useConfirm();
   const { data, isLoading } = trpc.storyboard.listShots.useQuery({
     episodeId,
     grouped: true,
@@ -310,23 +312,29 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
     doMergeShots(ids);
   };
 
-  const deleteSelected = async (): Promise<void> => {
+  const deleteSelected = (): void => {
     if (selected.size === 0) return;
-    if (!confirm(`确定删除选中的 ${selected.size} 个分镜?`)) return;
-    // 改 Promise.allSettled,避免串行 N 次 mutation + invalidate 风暴
-    // 用 mutateAsync 等所有 settle 后再统一 invalidate
-    const ids = Array.from(selected);
-    const results = await Promise.allSettled(
-      ids.map((id) => deleteShot.mutateAsync({ shotId: id })),
-    );
-    const failed = results.filter((r) => r.status === 'rejected').length;
-    if (failed > 0) {
-      toast.error(`删除完成,${failed} 个失败`);
-    } else {
-      toast.success(`已删除 ${ids.length} 个分镜`);
-    }
-    setSelected(new Set());
-    invalidate();
+    confirm({
+      title: `确定删除选中的 ${selected.size} 个分镜?`,
+      danger: true,
+      confirmLabel: '删除',
+      onConfirm: async () => {
+        // 改 Promise.allSettled,避免串行 N 次 mutation + invalidate 风暴
+        // 用 mutateAsync 等所有 settle 后再统一 invalidate
+        const ids = Array.from(selected);
+        const results = await Promise.allSettled(
+          ids.map((id) => deleteShot.mutateAsync({ shotId: id })),
+        );
+        const failed = results.filter((r) => r.status === 'rejected').length;
+        if (failed > 0) {
+          toast.error(`删除完成,${failed} 个失败`);
+        } else {
+          toast.success(`已删除 ${ids.length} 个分镜`);
+        }
+        setSelected(new Set());
+        invalidate();
+      },
+    });
   };
 
   if (isLoading) {
@@ -477,9 +485,14 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
                   canMergeUp={canMergeUpForShot(row.data.id)}
                   canMergeDown={canMergeDownForShot(row.data.id)}
                   onDelete={() => {
-                    if (confirm(`确定删除分镜 ${row.data.number}?`)) {
-                      deleteShot.mutate({ shotId: row.data.id });
-                    }
+                    confirm({
+                      title: `确定删除分镜 ${row.data.number}?`,
+                      danger: true,
+                      confirmLabel: '删除',
+                      onConfirm: () => {
+                        deleteShot.mutate({ shotId: row.data.id });
+                      },
+                    });
                   }}
                   onSaved={invalidate}
                   disabled={mutating}
@@ -501,6 +514,7 @@ export function ShotsPane({ episodeId }: Props): React.ReactElement {
           }}
         />
       )}
+      {confirmDialog}
     </div>
   );
 }

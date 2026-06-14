@@ -31,6 +31,7 @@ import { LanguageSwitcher } from '@/components/lang-switcher';
 import { NotificationBell } from '@/components/notification-bell';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LogoMark } from '@/components/brand/logo';
+import { trpc } from '@/lib/trpc/client';
 import { cn } from '@/lib/utils';
 
 export function TopNav({
@@ -70,10 +71,56 @@ export function TopNav({
   }, [urlProjectId]);
   const projectId = urlProjectId ?? rememberedId;
 
+  // #7(2026-06-14 用户):在具体项目内时,顶栏左侧「Projects」自动显示项目名。
+  //   用 URL param 判定「是否在项目里」(不用 rememberedId,避免离开项目后还残留显示上次项目名)。
+  const inProject = Boolean(params.id);
+  const projectNameQuery = trpc.project.get.useQuery(
+    { id: params.id ?? '' },
+    { enabled: inProject, staleTime: 60_000 },
+  );
+  const projectName = projectNameQuery.data?.name ?? currentProject?.name;
+
+  // #6(2026-06-14 用户):原顶栏「管理」HoverNav 的 13 项收进用户下拉,按 4 组展示
+  const adminGroups: { group: string; items: { href: string; label: string }[] }[] = [
+    {
+      group: 'Overview',
+      items: [
+        { href: `/${locale}/admin`, label: '后台首页' },
+        { href: `/${locale}/admin/api-usage`, label: 'API 用量' },
+      ],
+    },
+    {
+      group: 'AI & Content',
+      items: [
+        { href: `/${locale}/admin/providers`, label: 'AI Provider' },
+        { href: `/${locale}/admin/bindings`, label: '模型绑定' },
+        { href: `/${locale}/admin/prompts`, label: '提示词模板' },
+        { href: `/${locale}/admin/styles`, label: '风格库' },
+        { href: `/${locale}/admin/presets`, label: '预设模板' },
+      ],
+    },
+    {
+      group: 'Team',
+      items: [
+        { href: `/${locale}/admin/users`, label: '成员管理' },
+        { href: `/${locale}/admin/audit`, label: '操作日志' },
+        { href: `/${locale}/admin/reports`, label: '工作报告' },
+      ],
+    },
+    {
+      group: 'System',
+      items: [
+        { href: `/${locale}/admin/db-explorer`, label: 'DB Explorer' },
+        { href: `/${locale}/admin/settings`, label: '系统设置' },
+        { href: `/${locale}/admin/health`, label: '健康检查' },
+      ],
+    },
+  ];
+
   async function onLogout(): Promise<void> {
     await fetch('/api/auth/logout', { method: 'POST' });
-    router.push(`/${locale}/login`);
-    router.refresh();
+    // #3 perf:登出只需 replace 到 login;去掉多余的 router.refresh(它会再触发一轮 RSC+鉴权)
+    router.replace(`/${locale}/login`);
   }
 
   const initial = user.displayName.charAt(0).toUpperCase();
@@ -95,7 +142,7 @@ export function TopNav({
 
         <span className="mx-1 h-4 w-px bg-[hsl(var(--color-border))]" />
 
-        {currentProject ? (
+        {inProject ? (
           <>
             <Link
               href={`/${locale}/projects`}
@@ -105,8 +152,8 @@ export function TopNav({
             </Link>
             <span className="text-[12px] text-[hsl(var(--color-muted-foreground))]">/</span>
             {/* 七二 UI-P0:长项目名截断,防挤压右侧导航(docs/08 §1-1) */}
-            <span className="max-w-[12rem] truncate text-[13px] font-medium" title={currentProject.name}>
-              {currentProject.name}
+            <span className="max-w-[12rem] truncate text-[13px] font-medium" title={projectName}>
+              {projectName ?? '…'}
             </span>
           </>
         ) : (
@@ -169,48 +216,7 @@ export function TopNav({
           mainHref={projectId ? `/${locale}/projects/${projectId}/aigc` : undefined}
         />
         <HoverNav label="素材库" icon={Library} mainHref={`/${locale}/library`} />
-        <HoverNav
-          label="数据"
-          icon={BarChart3}
-          mainHref={projectId ? `/${locale}/projects/${projectId}/insights` : `/${locale}/insights`}
-          items={
-            projectId
-              ? [
-                  { href: `/${locale}/projects/${projectId}/insights`, label: '项目数据' },
-                  { href: `/${locale}/insights`, label: '平台洞察' },
-                ]
-              : undefined
-          }
-        />
-        <HoverNav
-          label="团队"
-          icon={Users}
-          mainHref={projectId ? `/${locale}/projects/${projectId}/team` : undefined}
-        />
-        {user.isAdmin && (
-          <HoverNav
-            label="管理"
-            icon={Shield}
-            mainHref={`/${locale}/admin`}
-            items={[
-              { href: `/${locale}/admin`, label: '后台首页', group: 'Overview' },
-              { href: `/${locale}/admin/api-usage`, label: 'API 用量', group: 'Overview' },
-              { href: `/${locale}/admin/providers`, label: 'AI Provider', group: 'AI & Content' },
-              { href: `/${locale}/admin/bindings`, label: '模型绑定', group: 'AI & Content' },
-              { href: `/${locale}/admin/prompts`, label: '提示词模板', group: 'AI & Content' },
-              { href: `/${locale}/admin/styles`, label: '风格库', group: 'AI & Content' },
-              { href: `/${locale}/admin/presets`, label: '预设模板', group: 'AI & Content' },
-              { href: `/${locale}/admin/users`, label: '成员管理', group: 'Team' },
-              { href: `/${locale}/admin/audit`, label: '操作日志', group: 'Team' },
-              { href: `/${locale}/admin/reports`, label: '工作报告', group: 'Team' },
-              { href: `/${locale}/admin/db-explorer`, label: 'DB Explorer', group: 'System' },
-              { href: `/${locale}/admin/settings`, label: '系统设置', group: 'System' },
-              { href: `/${locale}/admin/health`, label: '健康检查', group: 'System' },
-            ]}
-          />
-        )}
-
-        {/* 旧的项目内 NAV_ITEMS 已被上方 HoverNav 取代(模块按钮平铺直显) */}
+        {/* #6(2026-06-14 用户):数据 / 团队 / 管理 三项已从顶栏移入右侧用户(管理员)下拉,见下方 DropdownMenu */}
 
         <div className="flex-1" />
 
@@ -239,22 +245,58 @@ export function TopNav({
               <ChevronDown className="size-3 text-[hsl(var(--color-muted-foreground))]" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuContent align="end" className="max-h-[85vh] w-60 overflow-y-auto">
             <DropdownMenuLabel className="text-[11px]">{user.displayName}</DropdownMenuLabel>
             <DropdownMenuSeparator />
+            {/* 账户 */}
             <DropdownMenuItem asChild>
               <Link href={`/${locale}/me`}>
                 <User className="size-3.5" />
                 {t('actions.settings')}
               </Link>
             </DropdownMenuItem>
-            {user.isAdmin && (
+            {/* #6:工作区 — 数据 / 团队 */}
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
+              工作区
+            </DropdownMenuLabel>
+            <DropdownMenuItem asChild>
+              <Link
+                href={projectId ? `/${locale}/projects/${projectId}/insights` : `/${locale}/insights`}
+              >
+                <BarChart3 className="size-3.5" />
+                数据
+              </Link>
+            </DropdownMenuItem>
+            {projectId && (
               <DropdownMenuItem asChild>
-                <Link href={`/${locale}/admin`}>
-                  <Shield className="size-3.5" />
-                  {t('modules.admin.title')}
+                <Link href={`/${locale}/projects/${projectId}/team`}>
+                  <Users className="size-3.5" />
+                  团队
                 </Link>
               </DropdownMenuItem>
+            )}
+            {/* #6:管理后台(仅管理员)— 原顶栏「管理」13 项,按 4 组展示 */}
+            {user.isAdmin && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground))]">
+                  <Shield className="size-3" />
+                  管理
+                </DropdownMenuLabel>
+                {adminGroups.map((g) => (
+                  <React.Fragment key={g.group}>
+                    <div className="px-2 pt-1 text-[9px] uppercase tracking-wider text-[hsl(var(--color-muted-foreground)/0.6)]">
+                      {g.group}
+                    </div>
+                    {g.items.map((it) => (
+                      <DropdownMenuItem key={it.href} asChild>
+                        <Link href={it.href}>{it.label}</Link>
+                      </DropdownMenuItem>
+                    ))}
+                  </React.Fragment>
+                ))}
+              </>
             )}
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={onLogout}>

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { useConfirm } from '@/components/ui/confirm-dialog';
 
 import type { RelayProvider } from './providers-shared';
 import { ToggleSwitch } from './providers-toggle-switch';
@@ -45,12 +46,14 @@ export function RelayCard({
     },
   });
   const deleteRelay = trpc.admin.relay.delete.useMutation({ onSuccess: onChange });
+  const { confirm, confirmDialog } = useConfirm();
 
   const toggleActive = (): void => {
     updateRelay.mutate({ id: relay.id, isActive: !relay.isActive });
   };
 
   return (
+    <>
     <Card className={cn('p-4', !relay.isActive && 'opacity-60')}>
       <div className="mb-2 flex items-start justify-between gap-2">
         <div className="min-w-0">
@@ -78,14 +81,16 @@ export function RelayCard({
             variant="ghost"
             onClick={() => {
               const n = relay.attachedProviderCount;
-              if (
-                confirm(
+              confirm({
+                title: `删除中转站 "${relay.displayName}"?`,
+                description:
                   n > 0
-                    ? `删除中转站 "${relay.displayName}"?\n会一并删掉它关联的 ${n} 个模型(指向它们的绑定将变「未注册」)。`
-                    : `删除中转站 "${relay.displayName}"?(没有关联模型)`,
-                )
-              )
-                deleteRelay.mutate({ id: relay.id, confirmDelete: true });
+                    ? `会一并删掉它关联的 ${n} 个模型(指向它们的绑定将变「未注册」)。`
+                    : '(没有关联模型)',
+                danger: true,
+                confirmLabel: '删除',
+                onConfirm: () => deleteRelay.mutate({ id: relay.id, confirmDelete: true }),
+              });
             }}
             disabled={deleteRelay.isPending}
             className="size-7 p-0 text-red-600"
@@ -170,10 +175,15 @@ export function RelayCard({
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => {
-                if (confirm('清除 API Key?所有关联模型将无法用'))
-                  clearApiKey.mutate({ id: relay.id });
-              }}
+              onClick={() =>
+                confirm({
+                  title: '清除 API Key?',
+                  description: '所有关联模型将无法用',
+                  danger: true,
+                  confirmLabel: '清除',
+                  onConfirm: () => clearApiKey.mutate({ id: relay.id }),
+                })
+              }
               className="h-6 px-2 text-red-600"
               disabled={clearApiKey.isPending}
             >
@@ -209,5 +219,7 @@ export function RelayCard({
         <p className="mt-2 text-xs text-red-600">{deleteRelay.error.message}</p>
       )}
     </Card>
+      {confirmDialog}
+    </>
   );
 }

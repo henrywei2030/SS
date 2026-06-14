@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { useConfirm } from '@/components/ui/confirm-dialog';
+import { showTrpcError } from '@/lib/trpc/error-toast';
 
 import type { Provider } from './providers-shared';
 import { ToggleSwitch, formatModelPrice } from './providers-toggle-switch';
@@ -38,24 +40,28 @@ export function ModelRow({
   });
   // Phase 1.5.2:删除按钮 — 从展示界面移除,放回下拉候选(下次可重新加)
   // 2026-06-13(用户:所有配置可直接删):后端已去掉「含 key」「active」守卫,直接删即清 key + 缓存
+  const { confirm, confirmDialog } = useConfirm();
   const deleteProvider = trpc.admin.provider.delete.useMutation({
     onSuccess: onChange,
-    onError: (err) => alert(err.message),
+    onError: (err) => showTrpcError(err, '删除失败'),
   });
   const handleDelete = (): void => {
-    if (
-      !confirm(
-        `从列表移除 "${provider.displayName}"?\n(可下次从下拉重新添加 · 不会影响中转站凭证)`,
-      )
-    )
-      return;
-    deleteProvider.mutate({ providerId: provider.providerId, confirmDelete: true });
+    // 桌面端(WebView2)会吞 native confirm → 用应用内 ConfirmDialog
+    confirm({
+      title: `从列表移除 "${provider.displayName}"?`,
+      description: '可下次从下拉重新添加 · 不会影响中转站凭证',
+      danger: true,
+      confirmLabel: '移除',
+      onConfirm: () =>
+        deleteProvider.mutate({ providerId: provider.providerId, confirmDelete: true }),
+    });
   };
 
   const priceLabel = formatModelPrice(provider);
   const canEnable = provider.apiKeyConfigured;
 
   return (
+    <>
     <div className="flex flex-col gap-2 border-b border-[hsl(var(--color-border)/0.4)] px-4 py-3 last:border-b-0 hover:bg-[hsl(var(--color-secondary)/0.2)] sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
@@ -184,5 +190,7 @@ export function ModelRow({
         </Button>
       </div>
     </div>
+      {confirmDialog}
+    </>
   );
 }

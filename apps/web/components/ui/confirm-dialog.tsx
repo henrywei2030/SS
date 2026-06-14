@@ -86,6 +86,31 @@ export function ConfirmDialog({
   );
 }
 
+/**
+ * useConfirm —— 把 native window.confirm 一键换成应用内 ConfirmDialog。
+ * 关键:桌面端(Tauri WebView2)会【静默吞掉】native window.confirm/alert/prompt → 点删除没反应。
+ * 用法:const { confirm, confirmDialog } = useConfirm();
+ *   删除按钮 onClick → confirm({ title:'确定删除 X?', danger:true, confirmLabel:'删除', onConfirm: () => mutate() });
+ *   组件里渲染 {confirmDialog}。
+ */
+export function useConfirm(): {
+  confirm: (opts: Omit<ConfirmDialogProps, 'onClose'>) => void;
+  confirmDialog: React.ReactElement | null;
+} {
+  const [opts, setOpts] = React.useState<Omit<ConfirmDialogProps, 'onClose'> | null>(null);
+  const confirmDialog = opts ? (
+    <ConfirmDialog
+      {...opts}
+      onClose={() => setOpts(null)}
+      onConfirm={() => {
+        setOpts(null);
+        opts.onConfirm();
+      }}
+    />
+  ) : null;
+  return { confirm: (o) => setOpts(o), confirmDialog };
+}
+
 interface PromptDialogProps {
   title: string;
   description?: string;

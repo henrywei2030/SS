@@ -105,7 +105,7 @@ export function CreateProjectDialog({
               autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="重生1983"
+              placeholder="请为你的项目命名"
             />
           </div>
           <div className="grid grid-cols-2 gap-4">

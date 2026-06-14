@@ -1,6 +1,11 @@
 'use client';
 
-import { QueryClient, QueryClientProvider, MutationCache } from '@tanstack/react-query';
+import {
+  QueryClient,
+  QueryClientProvider,
+  MutationCache,
+  keepPreviousData,
+} from '@tanstack/react-query';
 import { httpBatchLink, loggerLink } from '@trpc/client';
 import * as React from 'react';
 import superjson from 'superjson';
@@ -19,8 +24,11 @@ export function TrpcProvider({ children }: { children: React.ReactNode }): React
       new QueryClient({
         defaultOptions: {
           queries: {
-            staleTime: 30 * 1000,
+            // #3 perf(2026-06-14):桌面单机数据变更少 → staleTime 提到 60s 减少重取冷查
+            staleTime: 60 * 1000,
             refetchOnWindowFocus: false,
+            // #3 perf:query key 变化(搜索/筛选/切 tab)时保留旧数据不闪空,过渡更顺滑
+            placeholderData: keepPreviousData,
           },
         },
         // 第 20 轮 audit P1:全局 fallback toast(若 component 内 mutation 没自己 onError,这里兜底显示 requestId)

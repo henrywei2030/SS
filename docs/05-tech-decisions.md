@@ -1291,6 +1291,24 @@ ADR-35 定方向,本 ADR 记 Phase 2 落地的关键实现决策与踩坑(详见
 
 ---
 
+## ADR-38 · Win 桌面卡 splash 终极根因(strip_unc/stdio)+ 转 NSIS 单用户安装 + WebView2 吞 native 弹窗(2026-06-14)
+
+**状态**:✅ 已采纳。承 ADR-37。背景:ADR-37 修了 chmod/CRT 后,真机安装**仍卡 splash**;真机实测 + `sidecar.out.log` 兜底层层逼出更深的根因。把"卡 splash"彻底解决,并修正了一类系统性桌面坑。
+
+**决策**:
+1. **`main.rs` 去掉脚本/参数路径的 `\\?\` 前缀(strip_unc)** —— ★最深根因。Tauri 的 `current_exe()`/`resource_dir()` 在 Windows 常返回带 `\\?\` 扩展长度前缀的 verbatim 路径;`Command::new(node).arg(resource_dir().join(...))` 把它当主脚本传给 node → **node 解析不了 `\\?\` → `EISDIR lstat 'C:'` → sidecar 启动即崩(还没执行任何 JS)→ 无数据目录/无日志 → 永久卡 splash**。它挡在 chmod/stdio 之前;一切手动测试都用干净显式路径 → 完美绕开 → 一直没复现。**采纳**:`strip_unc(p)` 去掉 `\\?\` 前缀,应用到 `node` 和 `res`(res 派生的 env 路径一并干净)。
+2. **`main.rs` 给 sidecar 显式有效 stdio** —— GUI(`windows_subsystem="windows"`)无控制台,`Command::spawn` 默认继承的是【无效 stdio 句柄】→ node libuv 初始化 stdio 即崩。**采纳**:`stdin=Stdio::null()`、`stdout/stderr→<logs>/sidecar.out.log`、`CREATE_NO_WINDOW`。既治崩,又把 node 自身启动/崩溃输出落盘(本次正是靠它捕获到 strip_unc 的 EISDIR)。
+3. **转 NSIS 单用户安装(`installMode:"currentUser"`),弃 per-machine MSI/Program Files** —— 内嵌 PostgreSQL 启动时 `chmod` 自己的二进制(ADR-37 patch 已吞 EPERM),但 **"会自我修改的 app × 只读的 Program Files" 是结构性冲突**(chmod 只是冰山一角,Next 缓存等其他原地写都是潜在雷),且连本地都难干净模拟 Program Files 只读(icacls 反复误伤)。**采纳**:装到**可写**的 `%LOCALAPPDATA%\StarsAlign Studio`、**无需管理员/UAC**,从根上消除整类只读错误。代价:每用户各装一份(单人创作工具完全合适)。**替代**:per-machine + 逐个打补丁(打地鼠)/ 便携 ZIP(无快捷方式)。
+4. **桌面破坏性操作禁用 native `window.confirm/alert/prompt`** —— Tauri WebView2 **静默吞掉**原生对话框(confirm 立即返 false、alert no-op)→ 凡用它把关的删除在桌面端"点了没反应"(web 正常,故 web 行桌面不行)。**采纳**:`apps/web/components/ui/confirm-dialog.tsx` 加 `useConfirm()` hook,全站破坏性操作统一走应用内 `ConfirmDialog`,通知走 sonner toast。本次 sweep 7 文件(provider/视频/资产/审核/分镜/API用量)。**这是桌面化的系统性规则:新增破坏性操作一律不许用 native 弹窗。**
+
+**验收(本机,2026-06-14)**:静默装真包到 LocalAppData → 安装版 node+脚本走完整链 `initdb→PG→迁移44→seed→核对→web Ready`(`boot-progress.json` 进度 95%)→ 真机 GUI exe 跑通 `GET / →307 login →307 activate →200`(28KB 主界面);7 项 app 修复 typecheck 16/16、冒烟「0 默认 Provider」。
+
+**代价/风险**:单用户安装非全机共享;NSIS 包 ~335MB(含 WebView2 离线);#5 登录持久未改代码(分析为坏包遗留,待真机验证)。
+
+**关联**:承 ADR-37(MSI 路线已被本 ADR 的 NSIS 单用户取代);记忆 [[win-laptop-desktop-build]]。
+
+---
+
 ## 待补充的决策(占位)
 
 📋 ADR-32 · 桌面端 vs 移动端的代码共享策略(Phase 2 拆分时)

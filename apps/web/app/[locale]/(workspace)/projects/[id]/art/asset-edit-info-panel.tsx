@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { trpc } from '@/lib/trpc/client';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { useConfirm } from '@/components/ui/confirm-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 // 五六收工:剧本拆解档案字段(与导演 script-breakdown-pane 共享同一份 Asset)
@@ -63,6 +64,7 @@ export function InfoPanel({
     };
   });
   const [diffNote, setDiffNote] = React.useState('');
+  const { confirm, confirmDialog } = useConfirm();
 
   const updateMut = trpc.asset.update.useMutation({
     onSuccess: () => {
@@ -163,6 +165,7 @@ export function InfoPanel({
     type === 'CHARACTER' ? '人物' : type === 'SCENE' ? '场景' : type === 'PROP' ? '道具' : '风格';
 
   return (
+    <>
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex items-center justify-between border-b border-[hsl(var(--color-border))] px-4 py-3">
         <div className="flex items-center gap-2">
@@ -195,9 +198,14 @@ export function InfoPanel({
             </button>
           )}
           <button
-            onClick={() => {
-              if (confirm(`删除资产 "${asset.name}"?`)) deleteMut.mutate({ assetId: asset.id });
-            }}
+            onClick={() =>
+              confirm({
+                title: `删除资产 "${asset.name}"?`,
+                danger: true,
+                confirmLabel: '删除',
+                onConfirm: () => deleteMut.mutate({ assetId: asset.id }),
+              })
+            }
             className="rounded p-1 text-[hsl(var(--color-destructive))] hover:bg-[hsl(var(--color-destructive)/0.1)]"
             title="删除"
           >
@@ -461,5 +469,7 @@ export function InfoPanel({
         </Button>
       </div>
     </div>
+    {confirmDialog}
+    </>
   );
 }

@@ -7,6 +7,7 @@ import { trpc } from '@/lib/trpc/client';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { useConfirm } from '@/components/ui/confirm-dialog';
 
 interface Props {
   projectId: string;
@@ -14,6 +15,7 @@ interface Props {
 }
 
 export function AuditView({ projectId, locale }: Props): React.ReactElement {
+  const { confirm, confirmDialog } = useConfirm();
   const { data, isLoading } = trpc.asset.auditProject.useQuery({ projectId });
   const utils = trpc.useUtils();
   const unbindMut = trpc.asset.unbindUsage.useMutation({
@@ -161,9 +163,14 @@ export function AuditView({ projectId, locale }: Props): React.ReactElement {
                       size="sm"
                       variant="ghost"
                       className="text-[10px] text-[hsl(var(--color-destructive))]"
-                      onClick={() => {
-                        if (confirm(`删除资产 "${a.name}"?`)) deleteMut.mutate({ assetId: a.id });
-                      }}
+                      onClick={() =>
+                        confirm({
+                          title: `删除资产 "${a.name}"?`,
+                          danger: true,
+                          confirmLabel: '软删',
+                          onConfirm: () => deleteMut.mutate({ assetId: a.id }),
+                        })
+                      }
                     >
                       软删
                     </Button>
@@ -209,6 +216,7 @@ export function AuditView({ projectId, locale }: Props): React.ReactElement {
           </Card>
         </>
       )}
+      {confirmDialog}
     </div>
   );
 }

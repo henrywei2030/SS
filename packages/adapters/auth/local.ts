@@ -16,6 +16,14 @@ import type {
   SignupInput,
 } from './types.js';
 
+// #3 perf(2026-06-14):verifyToken 在每个 tRPC 请求(createContext)+ 每次 RSC requireSession 都会
+//   prisma.user.findUnique 查一次 user 表。桌面端(内嵌 PG + l1-only 无 Redis)每次导航这 2 次冷查
+//   是主要交互延迟来源。加进程内短 TTL 缓存:同一 token 在 TTL 内复用已验 session,跳过 DB 查。
+//   代价:封禁/改权限最多延迟 TTL 生效(单机/小团队可接受;需即时则调小 TTL)。token 失效后浏览器
+//   不再发送该 cookie,故不构成额外安全面(JWT 本就 stateless 到期前有效)。
+const SESSION_CACHE_TTL_MS = 30_000;
+const sessionCache = new Map<string, { session: SessionUser; exp: number }>();
+
 export interface LocalAuthConfig {
   jwtSecret: string;
   /** Token 有效期（秒） */
@@ -97,6 +105,9 @@ export class LocalAuthAdapter implements AuthAdapter {
   }
 
   async verifyToken(token: string): Promise<SessionUser> {
+    const now = Date.now();
+    const cached = sessionCache.get(token);
+    if (cached && cached.exp > now) return cached.session;
     try {
       const { payload } = await jwtVerify(token, this.secretKey);
       const sub = payload.sub;
@@ -104,7 +115,10 @@ export class LocalAuthAdapter implements AuthAdapter {
       const user = await prisma.user.findUnique({ where: { id: sub } });
       if (!user || user.deletedAt) throw new ForbiddenError('user not found');
       if (user.status !== 'ACTIVE') throw new ForbiddenError(`account ${user.status.toLowerCase()}`);
-      return this.toSession(user);
+      const session = this.toSession(user);
+      if (sessionCache.size > 500) sessionCache.clear(); // 防多用户场景无界增长
+      sessionCache.set(token, { session, exp: now + SESSION_CACHE_TTL_MS });
+      return session;
     } catch (e) {
       if (e instanceof ForbiddenError) throw e;
       throw new ForbiddenError('invalid token');

@@ -7,7 +7,7 @@
 import 'dotenv/config';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../src/index.js';
-import { StyleKind, PromptCategory, ProviderKind, Prisma } from '../src/generated/prisma/client.js';
+import { StyleKind, PromptCategory, Prisma } from '../src/generated/prisma/client.js';
 import { SEED_PROMPT_KNOWLEDGE } from './seed-prompt-knowledge.js';
 
 async function main() {
@@ -73,87 +73,12 @@ async function main() {
 
   // ---------- 2. Provider 配置（默认价格表） ----------
   console.log('  → 创建默认 Provider 配置');
-  const providers = [
-    {
-      providerId: 'seedance-2.0',
-      displayName: 'Seedance 2.0（视频 · 标准）',
-      kind: ProviderKind.VIDEO,
-      apiUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-      apiKeyRef: 'SEEDANCE_API_KEY',
-      unitPriceCny: '1.0',
-      unitName: 'second',
-      maxConcurrent: 5,
-      rateLimitRpm: 30,
-      // 2026-05-27:业务上限 15s(用户反馈)— Provider 实际不支持时由 adapter 二次 clamp
-      defaultParams: { maxDuration: 15, defaultDuration: 5 },
-    },
-    {
-      providerId: 'seedance-2.0-fast',
-      displayName: 'Seedance 2.0 Fast（视频 · 快速）',
-      kind: ProviderKind.VIDEO,
-      apiUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-      apiKeyRef: 'SEEDANCE_API_KEY',
-      unitPriceCny: '0.67',
-      unitName: 'second',
-      maxConcurrent: 8,
-      rateLimitRpm: 60,
-      defaultParams: { maxDuration: 15, defaultDuration: 5 },
-    },
-    {
-      providerId: 'doubao-1-5-pro-256k',
-      displayName: '豆包 1.5 Pro（资产拆解 LLM）',
-      kind: ProviderKind.TEXT,
-      apiUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-      apiKeyRef: 'DOUBAO_API_KEY',
-      unitPriceCny: '0.005',
-      unitName: 'ktoken',
-      maxConcurrent: 10,
-      rateLimitRpm: 200,
-    },
-    {
-      providerId: 'nano-banana-pro',
-      displayName: 'Nano Banana Pro（图片生成）',
-      kind: ProviderKind.IMAGE,
-      apiUrl: 'https://api.example.com/nano-banana',
-      apiKeyRef: 'NANO_BANANA_API_KEY',
-      unitPriceCny: '0.53',
-      unitName: 'image',
-      maxConcurrent: 10,
-      rateLimitRpm: 100,
-    },
-    {
-      providerId: 'gpt-image-2',
-      displayName: 'GPT Image 2（图片生成 · 全景/海报）',
-      kind: ProviderKind.IMAGE,
-      apiUrl: 'https://api.openai.com/v1',
-      apiKeyRef: 'OPENAI_API_KEY',
-      unitPriceCny: '0.04',
-      unitName: 'image',
-      maxConcurrent: 5,
-      rateLimitRpm: 50,
-    },
-    {
-      providerId: 'claude-sonnet-4-5',
-      displayName: 'Claude Sonnet 4.5（剧本分析）',
-      kind: ProviderKind.TEXT,
-      apiUrl: 'https://api.anthropic.com/v1',
-      apiKeyRef: 'ANTHROPIC_API_KEY',
-      unitPriceCny: '0.022',
-      unitName: 'ktoken',
-      maxConcurrent: 10,
-      rateLimitRpm: 100,
-    },
-    {
-      providerId: 'volcengine-compliance',
-      displayName: '火山引擎合规（真人脸 ID）',
-      kind: ProviderKind.COMPLIANCE,
-      apiUrl: 'https://visual.volcengineapi.com',
-      apiKeyRef: 'VOLCENGINE_COMPLIANCE_API_KEY',
-      unitPriceCny: '0.10',
-      unitName: 'request',
-      maxConcurrent: 3,
-      rateLimitRpm: 30,
-    },
+  // 2026-06-14(用户:provider 界面默认全删直连)— 不再内置任何「直连(独立 API Key)」provider。
+  //   新机/桌面首装起点 = 零直连(与中转站 2026-06-13 起同一「界面初始零数据」策略);
+  //   用户登录后在 /admin/providers 自行添加。原 7 个直连预设(seedance-2.0 / seedance-2.0-fast /
+  //   doubao-1-5-pro-256k / nano-banana-pro / gpt-image-2 / claude-sonnet-4-5 / volcengine-compliance
+  //   的价格表)见 git 历史(本次提交前一版 seed.ts)。
+  const providers: Array<{ providerId: string; [key: string]: unknown }> = [
     // ==========================================================================
     // Phase 1.5.1(2026-05-25)— 中转站模型不再 hardcode seed
     //

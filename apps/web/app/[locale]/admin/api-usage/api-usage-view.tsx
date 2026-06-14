@@ -1,5 +1,6 @@
 'use client';
 import * as React from 'react';
+import { toast } from 'sonner';
 
 import { trpc } from '@/lib/trpc/client';
 
@@ -108,11 +109,11 @@ export function ApiUsageView(): React.ReactElement {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       if (result.truncated) {
-        alert(`已导出 ${result.rowCount} 行(已达上限,需更多请按用户/项目筛选或缩短时间范围)`);
+        toast.success(`已导出 ${result.rowCount} 行(已达上限,需更多请按用户/项目筛选或缩短时间范围)`);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      alert(`导出失败:${msg}`);
+      toast.error(`导出失败:${msg}`);
     } finally {
       setExporting(false);
     }
@@ -361,13 +362,13 @@ function VideoAttemptsSection(): React.ReactElement {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       if (result.truncated) {
-        alert(
+        toast.success(
           `已导出 ${result.rowCount} 行(达上限 ${result.rowCount},需更多请缩短时间范围或细化状态筛选)`,
         );
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      alert(`导出失败:${msg}`);
+      toast.error(`导出失败:${msg}`);
     } finally {
       setExporting(false);
     }
