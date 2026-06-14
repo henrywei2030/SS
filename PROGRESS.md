@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-06-14(周日,win-laptop · 第二场:依赖大升级全落地 TS6/next16/zod4/next-intl4/undici8 + Win 本地打包 + eslint 迁移 + 全盘审查)
+
+**完成**
+- ✅ **Windows 本地桌面打包**(用户:打包 win 端):win-laptop 首次本地出 Tauri 安装包 — 装 Rust 1.96(msvc)+ 开启开发者模式(解 Next standalone/pnpm 的 symlink `EPERM`)(MSVC BuildTools 2026 / Win SDK / WebView2 已在位)→ 三步链(`SS_DESKTOP_BUILD` web build → `desktop-pack` → `tauri build`)出 **NSIS 140MB + MSI 241MB**(~11min,未签名)。设备能力记进记忆 [[win-laptop-desktop-build]]。
+- ✅ **中低风险依赖 9 major + vite7**:lucide0→1 / recharts2→3 / tailwind-merge2→3 / jose5→6 / bcryptjs2→3 / mime-types2→3 / @formatjs/intl2→4 / intl-messageformat10→11 / vitest2→4(vitest4 把 vite 改 peer → 补 vite7 到 5 测试包)。加密运行时实测:bcrypt `$2a$` 旧 hash 兼容 + 新 `$2b$` + jose HS256 签验闭环。
+- ✅ **高风险框架 5 个逐个升 + 真验证**(每个:research workflow → 二次确认 → 装 → typecheck/test/build → 运行时/真打 → 独立 commit):**TS6**(api/shared 补 rootDir(TS5011)+ css.d.ts(noUncheckedSideEffectImports);研究 agent 说 types 默认变 [] 是臆测、实测没发生 → 证据驱动)· **next-intl4**(起 :3001 dev 实测 locale 路由)· **zod4**(真打 tRPC `auth.login` 见 zod4 错误格式;3 处 errorMap→error + trpc.ts Array.isArray)· **next16**(dev/build 加 `--webpack` 绕 Turbopack 默认 ABORT;全栈运行时通)· **undici8**(根 engines→>=22.19 + 3 Agent allowH2:false + 新建 http-defaults.ts 全局兜底;**真打 moyu-claude-sonnet-4-6 ok 5.7s** 返「你好」,HTTP/1.1 通、无 H2/llhttp 问题)。
+- ✅ **收尾升级**:@types/node22→25 + vite7→8(typecheck 16/16 + test 12/12 绿);eslint10 试升但 eslint-config-next16 携带的 eslint-plugin-react 用 eslint9 API(`getFilename`)→ lint 崩 → 回退 eslint9。**仓库已到升级天花板**(剩余 outdated 全是钉死项:bullmq override/styled-jsx/embedded-pg/esbuild)。
+- ✅ **Next16 eslint 迁移**:`next lint` 被 Next16 移除 → 搭 eslint flat config(eslint9 + eslint-config-next16 原生数组)+ 降级 react-hooks v7 新规则(no-unescaped-entities 关 / set-state-in-effect 降 warn,41 处历史 anti-pattern backlog)→ `pnpm lint` 转绿(0 error / 57 warn)。删 @types/bcryptjs deprecated stub(bcryptjs3 自带类型)。
+- ✅ **全盘代码审查**(5 维度并行 workflow + 每条 finding 对抗性复核,302 工具调用):本会话改动 **0 确认漏洞/bug**;独立自查 undici 双 setGlobalDispatcher(等价)+ trpc Array.isArray(等价)两处确认。
+
+**问题/待决策**
+- ❓ **next16 桌面 standalone 闭环未验**(用户让取消桌面出包):合桌面包前需补 `SS_DESKTOP_BUILD` build → pack → tauri → 实跑登录。**现已发的安装包是升级前代码**。
+- ❓ **undici8 engines>=22.19**:本机 node24 + CI node22 满足;**mac-mini / mac-studio 需确认 node ≥22.19**(否则 `pnpm install` EBADENGINE)。
+- ❓ **Next16 clean build 偶发竞态**(并行 worker static-generation page-data race,重试即过,非确定性)→ CI/桌面建议加重试兜底。
+- ❓ 57 条 `react-hooks/set-state-in-effect` lint warning backlog(非 bug,新规则 flag 历史 effect 模式)。
+
+**下次接着做**
+- 📌 桌面 standalone 闭环验证 + 重打含本批升级的安装包
+- 📌 **(本会话末用户指令,待执行)全盘深度审计**:依赖/框架复查 + 代码漏洞扫 ×3 遍 + 每模块逻辑关系 + 全传导链路通畅性
+
+---
+
 ## 2026-06-14(周日,win-laptop · 依赖稳升审计落地 + 前后端性能优化 + Turbopack 验证 + 深度优化 jobId 去重)
 
 **完成**

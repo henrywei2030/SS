@@ -1,7 +1,7 @@
 # 项目任务清单 · StarsAlign Studio / 星垣工坊
 
-> 最后更新:2026-06-14(**win-laptop**:依赖稳升审计落地 + 前后端性能优化(签名 URL 缓存 / GroupDetail memo)+ Turbopack 验证(BLOCKED)+ 深度优化 jobId 去重 · 详见 [PROGRESS](PROGRESS.md))
-> 上一版:2026-06-13(win-laptop:优化器 token 真 bug + Provider 删除放开 + 去moyu化 + happyhorse 链路)
+> 最后更新:2026-06-14(**win-laptop** 第二场:依赖大升级全落地 TS6/next16/zod4/next-intl4/undici8 + Win 本地打包 + eslint 迁移 + 全盘审查 · 详见 [PROGRESS](PROGRESS.md))
+> 上一版:2026-06-14(win-laptop:依赖稳升审计落地 + 性能优化(签名缓存/memo)+ Turbopack(BLOCKED)+ jobId 去重)
 > 仓库:https://github.com/henrywei2030/SS
 > **🚀 一键启动**:`pnpm start`(详见 [README.md](README.md#快速启动) / [CLAUDE.md](CLAUDE.md#设备登记))
 > **📖 主线蓝图**:[docs/06-feature-plan-2026H2.md](docs/06-feature-plan-2026H2.md)(M0–M6 可直接 coding;2026-06-10 mac-mini 逐项核对与代码一致)
@@ -11,6 +11,7 @@
 
 ## 🚧 进行中
 
+- [x] **🚀 依赖大升级全落地 + Win 本地打包 + eslint 迁移 + 全盘审查(2026-06-14 win-laptop 第二场)· 用户指令**:① **Win 本地打包** 装 Rust1.96+开发者模式(解 symlink EPERM)→ 三步链出 NSIS 140M/MSI 241M ② **中低批 9 major + vite7**(lucide/recharts/tailwind-merge/jose/bcryptjs/mime-types/@formatjs/intl-messageformat/vitest;加密运行时验旧 hash 兼容)③ **高风险 5 个逐个升+真验证**(research→二次确认→装→验→独立 commit):TS6(rootDir+css.d.ts)· next-intl4 · zod4(errorMap→error+真打 tRPC)· next16(--webpack 绕 Turbopack)· undici8(engines22.19+allowH2:false+**真打 moyu ok**)④ **收尾** @types/node25+vite8(eslint10 不兼容已回退9)→ **升级天花板** ⑤ **Next16 eslint 迁移**(flat config,`pnpm lint` 转绿 0err/57warn)+ 删 @types/bcryptjs stub ⑥ **全盘审查 0 漏洞**(5 维度 workflow+对抗复核)。9 commit · typecheck16/16 · test12/12。**留**:桌面 standalone 闭环未验(用户取消;现安装包是升级前代码)· mac-mini/mac-studio 确认 node≥22.19 · 57 set-state-in-effect lint warning backlog · Next16 clean-build 偶发竞态(重试即过)
 - [x] **🚀 依赖稳升审计 + 前后端性能优化 + Turbopack 验证(2026-06-14 win-laptop)· 用户指令**:① **P0 依赖卫生** 钉死 web RC/alpha→稳定版(react/trpc/tailwind/@types-react 真包)+ `pnpm up -r` 批量 within-major;② **bullmq/ioredis 双版本雷根治** — override 钉单版本 ioredis5.11.1+bullmq5.78.0(实测 16/16 绿,「关键雷」解除);③ **P1** 签名 URL 进程内缓存([minio.ts](packages/adapters/storage/minio.ts),返回稳定 URL 省浏览器重下)+ GroupDetail `React.memo`(治列表刷新重渲风暴);④ **P2 Turbopack 验证=BLOCKED**(@ss/core `.js` 扩展名导入 turbopack 无 extensionAlias → 固化 next.config 注释、撤 dev:turbo、保 webpack);⑤ **稳升全量审计**(ultracode 15 簇 workflow,矩阵见下「📦 依赖升级审计」区)。typecheck 16/16。**留**:🟢 稳升批落地 · onnxruntime/ffmpeg 原生重编译需起服验 TTS/ffmpeg · 签名缓存需重启 dev server 生效
 - [x] **🔧 优化器 token 真 bug + Provider 删除放开 + 去moyu化 + happyhorse 链路(2026-06-13 win-laptop)· 用户报/指令**:① **深度优化恒挂真 bug** — guards.ts token 正则贪婪吞 `@图片N` 后中文成假 token → 对齐编译器 `@(图片|音频)\d+`(**系统级**,几乎所有 token 密集提示词受影响);② **Provider 删除全部放开** — 去 3 守卫 + 删除自动清 key/缓存 + 中转站级联删;③ **初始零数据 + moyu 中性化** — seed 去默认中转站 + 文案/占位符/前缀逻辑中性化(架构本就支持换站);④ **happyhorse 深诊** — base64 格式(裸 base64)+ ffmpeg 缩图,卡 moyu 单图 60KB 限。DB 清理 docx.parser→mammoth。typecheck/测试全过。**留**:happyhorse 需公网存储真出片 · 剩余注释中性化 · 深度优化真打验证
   - **06-14 续**:深度优化「点了无反应/无通知」根因 = **jobId 去重**(同组固定 jobId,06-13 已 completed 的 job 在 BullMQ 留 24h → 重点同组被静默 no-op)。修 [job-queue.ts](packages/queue/src/job-queue.ts) 入队前 remove 旧 job(允许重跑、仍防并发双跑)。新依赖(TS 5.9)下 4 包 typecheck + 24 测试复验过。**端到端实测待开 Docker**;本会话**不提交**,由另一会话(依赖升级)统一提交。
