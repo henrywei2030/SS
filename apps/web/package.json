@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev -p 3000",
-    "build": "next build",
+    "dev": "next dev -p 3000 --webpack",
+    "build": "next build --webpack",
     "start": "next start -p 3000",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
@@ -35,7 +35,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.18.0",
-    "next": "^15.5.19",
+    "next": "^16.2.9",
     "next-intl": "^4.13.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
