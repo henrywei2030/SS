@@ -26,6 +26,7 @@ import {
   getImageProvider,
   getVideoProvider,
 } from '@ss/adapters/provider';
+import { maskSecret } from '@ss/adapters';
 import { prisma } from '@ss/db';
 import {
   sanitizeErrorMsg,
@@ -225,7 +226,7 @@ const providerRouter = router({
       }
       await setProviderApiKey(input.providerId, input.apiKey, ctx.user.id);
       await logOperation(ctx, 'provider.setApiKey', 'provider', input.providerId, null, {
-        keyMasked: '••••' + input.apiKey.slice(-4),
+        keyMasked: maskSecret(input.apiKey),
       });
       return { success: true };
     }),

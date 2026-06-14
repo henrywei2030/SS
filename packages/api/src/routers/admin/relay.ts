@@ -25,6 +25,7 @@ import {
   clearRelayProviderApiKey,
   deleteRelayProvider,
 } from '@ss/adapters/provider';
+import { maskSecret } from '@ss/adapters';
 import {
   listCatalogSummaries,
   getRelayModels,
@@ -132,7 +133,7 @@ const relayRouter = router({
     .mutation(async ({ ctx, input }) => {
       await setRelayProviderApiKey(input.id, input.apiKey, ctx.user.id);
       await logOperation(ctx, 'relay.provider.setApiKey', 'relayProvider', input.id, null, {
-        keyMasked: '••••' + input.apiKey.slice(-4),
+        keyMasked: maskSecret(input.apiKey),
       });
       return { success: true };
     }),

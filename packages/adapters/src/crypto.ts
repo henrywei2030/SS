@@ -27,11 +27,19 @@ function getMasterKey(): Buffer {
   if (raw.length === 64 && /^[0-9a-fA-F]+$/.test(raw)) {
     _key = Buffer.from(raw, 'hex');
   } else {
-    // 第 13 轮 audit:非 64 字符 hex 时 SHA-256 派生,但显式 warn,
-    // 防止部署者误填弱 key(如 'change-me' / 'secret123')静默通过
+    // 全盘审计 high:非 64 字符 hex 时走单轮 SHA-256 无盐派生(弱,易被离线爆破)。
+    // 生产**拒绝**弱派生 — APP_MASTER_KEY 加密 DB 里所有 Provider Key,必须强密钥;
+    // setup:env / 桌面 bootstrap 均生成 64-hex,正常部署不会落到这条分支。
+    // dev 保留 SHA-256 兜底(不破已用非 hex key 的本地库),但显式 warn。
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        '[crypto] 生产环境 APP_MASTER_KEY 必须是 64 字符 hex(用 `openssl rand -hex 32` 生成);' +
+          '当前非 hex,拒绝用弱 SHA-256 派生。请重配密钥后重启。',
+      );
+    }
     console.warn(
-      '[crypto] ⚠️ APP_MASTER_KEY 不是 64 字符 hex,已用 SHA-256 派生 32B 密钥。' +
-        '生产强烈建议改成 `openssl rand -hex 32` 生成的 hex,以保证密钥熵足够。',
+      '[crypto] ⚠️ APP_MASTER_KEY 不是 64 字符 hex,dev 兜底用 SHA-256 派生 32B 密钥(单轮无盐,弱)。' +
+        '生产必须改成 `openssl rand -hex 32` 生成的 hex(否则启动即拒)。',
     );
     _key = createHash('sha256').update(raw, 'utf8').digest();
   }

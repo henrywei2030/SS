@@ -252,7 +252,8 @@ export async function getRelayAssetProvider(): Promise<RelayAssetProvider | null
     try {
       apiKey = decryptSecret(cfg.apiKeyEnc);
     } catch (e) {
-      console.error(`[relay-asset] decrypt failed for ${cfg.providerId}:`, e);
+      // 只记 message 不记整个 error 对象(避免 stack/对象细节进日志);decrypt 错误本不含明文
+      console.error(`[relay-asset] decrypt failed for ${cfg.providerId}:`, e instanceof Error ? e.message : e);
     }
   }
   if (!apiKey && cfg.apiKeyRef) {
